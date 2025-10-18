@@ -1,0 +1,21 @@
+|                                   | 2020 | 2021 | 2022 | 2023 | 2024 | 2025 |
+|-----------------------------------+------+------+------+------+------+------|
+| *Florin*                            |      |      |      |      |      |      |
+| # of JY that entered the JYSEP    |    3 |    2 |   32 |    3 |   33 |    1 |
+| # of JY that completed ≥ 1 text   |    0 |    0 |   17 |    0 |    7 |    1 |
+| # of JY that completed ≥ 5 texts  |    0 |    0 |    0 |    0 |    0 |    0 |
+| # of JY that completed ≥ 10 texts |    0 |    0 |    0 |    0 |    0 |    0 |
+| Completed Book 1                  |    2 |    0 |    1 |    2 |    2 |    0 |
+| Completed Book 2                  |    0 |    0 |    0 |    0 |    2 |    0 |
+| Completed Book 3                  |    0 |    0 |    0 |    0 |    0 |    0 |
+| Assisting with JYG                |    0 |    0 |    1 |    0 |    0 |    1 |
+|-----------------------------------+------+------+------+------+------+------|
+| *Summit*                            |      |      |      |      |      |      |
+| # of JY that entered the JYSEP    |    0 |    2 |    0 |    9 |    1 |   14 |
+| # of JY that completed ≥ 1 text   |    0 |    2 |    0 |    0 |    0 |    0 |
+| # of JY that completed ≥ 5 texts  |    0 |    0 |    0 |    0 |    0 |    0 |
+| # of JY that completed ≥ 10 texts |    0 |    0 |    0 |    0 |    0 |    0 |
+| Completed Book 1                  |    0 |    0 |    0 |    0 |    0 |    0 |
+| Completed Book 2                  |    0 |    0 |    0 |    0 |    0 |    0 |
+| Completed Book 3                  |    0 |    0 |    0 |    0 |    0 |    0 |
+| Assisting with JYG                |    0 |    0 |    0 |    0 |    0 |    0 |
