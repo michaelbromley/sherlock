@@ -1,0 +1,483 @@
+#+AUTHOR: John Wiegley
+#+DATE: 2025-10-19
+#+PROPERTY: header-args:sql :engine mssql :cmdline (org-mssql-get-cmdline) :results value table
+#+PROPERTY: sql-host mssql.vulcan.lan
+#+PROPERTY: sql-user sa
+#+PROPERTY: sql-port 1433
+#+PROPERTY: sql-database SRP
+#+STARTUP: overview
+#+TITLE: Microsoft SQL Server Queries - Literate Database Operations
+
+* Introduction
+
+This is a literate programming document for executing SQL queries against
+Microsoft SQL Server from Emacs, following the principles outlined in Howard
+Abrahams' [[https://howardism.org/Technical/Emacs/literate-devops.html][Literate DevOps]] methodology.
+
+The document serves as both executable code and documentation, allowing you
+to:
+
+- Run SQL queries directly from Org-mode using =C-c C-c=
+- Document your database operations in context
+- Keep credentials secure using auth-source
+- Version control your database queries alongside their documentation
+
+** Philosophy
+
+Traditional SQL files are just queries. This literate approach provides:
+
+- *Narrative context*: Explain WHY you're running queries, not just WHAT
+- *Executable documentation*: Your docs are always up-to-date because they ARE
+  the code
+- *Security*: Passwords are never stored in files, always fetched from
+  auth-source
+- *Reproducibility*: File properties make it easy to switch between environments
+
+* Prerequisites
+
+Before using this document, ensure you have:
+
+1. *sqlcmd* installed on macOS:
+   #+begin_example
+   brew install sqlcmd
+   #+end_example
+
+2. *Credentials configured* in your auth-source (e.g., =~/.authinfo.gpg=):
+   #+begin_example
+   machine localhost port 1433 login sa password YOUR_PASSWORD
+   #+end_example
+
+3. *Org-babel SQL support* enabled in Emacs:
+   #+begin_src emacs-lisp :exports code :eval never
+   (org-babel-do-load-languages
+    'org-babel-load-languages
+    '((sql . t)
+      (emacs-lisp . t)))
+   #+end_src
+
+* Configuration
+
+** File Properties
+
+This file uses Org-mode properties to configure the database connection. You
+can override these per-heading if needed.
+
+Current configuration:
+
+- Host: =localhost= (defined in =#+PROPERTY: sql-host=)
+- User: =sa= (defined in =#+PROPERTY: sql-user=)
+- Port: =1433= (defined in =#+PROPERTY: sql-port=)
+- Database: =master= (defined in =#+PROPERTY: sql-database=)
+- Password: Retrieved securely via =(lookup-password HOST USER PORT)=
+
+To connect to a different server, modify the properties at the top of this
+file.
+
+* Sample Queries
+
+Now that we have our helper functions loaded, let's execute some SQL queries.
+
+** Basic Connection Test
+
+First, verify that we can connect to the database:
+
+#+begin_src sql
+SELECT
+    @@VERSION AS ServerVersion,
+    @@SERVERNAME AS ServerName,
+    DB_NAME() AS CurrentDatabase,
+    CURRENT_USER AS CurrentUser,
+    GETDATE() AS CurrentDateTime;
+#+end_src
+
+** Database Information
+
+*** List All Databases
+
+Show all databases on this server:
+
+#+begin_src sql
+SELECT
+    name AS DatabaseName,
+    database_id AS ID,
+    create_date AS Created
+FROM sys.databases
+ORDER BY name;
+#+end_src
+
+*** COMMENT Current Database Tables
+
+List all user tables in the current database:
+
+#+begin_src sql
+SELECT
+    t.name AS TableName,
+    s.name AS SchemaName,
+    t.create_date AS Created,
+    p.rows AS RowCount
+FROM sys.tables t
+INNER JOIN sys.schemas s ON t.schema_id = s.schema_id
+LEFT JOIN sys.partitions p ON t.object_id = p.object_id AND p.index_id IN (0,1)
+ORDER BY s.name, t.name;
+#+end_src
+
+** System Queries
+
+*** Active Connections
+
+Show current connections to the database:
+
+#+begin_src sql
+SELECT
+    session_id,
+    login_name,
+    host_name,
+    program_name,
+    status,
+    last_request_start_time
+FROM sys.dm_exec_sessions
+WHERE database_id = DB_ID()
+ORDER BY last_request_start_time DESC;
+#+end_src
+
+*** Database Size Information
+
+Detailed space usage:
+
+#+begin_src sql
+SELECT
+    DB_NAME() AS DatabaseName,
+    type_desc AS FileType,
+    name AS LogicalName,
+    physical_name AS PhysicalName,
+    CAST(size * 8.0 / 1024 AS DECIMAL(10,2)) AS SizeMB,
+    CAST(max_size * 8.0 / 1024 AS DECIMAL(10,2)) AS MaxSizeMB
+FROM sys.database_files
+ORDER BY type_desc;
+#+end_src
+
+* Book 1 Consecutive Activity Periods by Cluster.sql
+
+#+begin_src sql
+-- ==================================================================
+-- Book 1 Consecutive Activity Periods by Cluster
+-- ==================================================================
+-- Purpose: Identify time ranges where clusters maintained consecutive
+--          quarters of Book 1 study circle activity (no gaps)
+-- Output: Start/end year/cycle, total activities, and streak length
+-- Ordered by: Longest consecutive periods first
+-- ==================================================================
+
+-- ==================================================================
+-- RECOMMENDED INDEXES FOR OPTIMAL PERFORMANCE
+-- ==================================================================
+-- Run these index creation statements before executing this query
+-- to achieve optimal performance, especially with large datasets.
+--
+-- Note: Indexes are dropped and recreated if they already exist,
+--       ensuring the definitions match the requirements.
+-- ==================================================================
+
+-- 1. Activities table - filtered index for date range and location fields
+DROP INDEX IF EXISTS IX_Activities_StartDate_Locality_Subdivision ON Activities;
+CREATE NONCLUSTERED INDEX IX_Activities_StartDate_Locality_Subdivision
+ON Activities (StartDate, LocalityId, SubdivisionId)
+INCLUDE (Id)
+WHERE StartDate >= '2020-01-01';
+
+-- 2. ActivityStudyItems junction table - covering index
+DROP INDEX IF EXISTS IX_ActivityStudyItems_ActivityId_StudyItemId ON ActivityStudyItems;
+CREATE NONCLUSTERED INDEX IX_ActivityStudyItems_ActivityId_StudyItemId
+ON ActivityStudyItems (ActivityId, StudyItemId);
+
+-- 3. StudyItems table - filtered index for books
+DROP INDEX IF EXISTS IX_StudyItems_Type_Sequence ON StudyItems;
+CREATE NONCLUSTERED INDEX IX_StudyItems_Type_Sequence
+ON StudyItems (ActivityStudyItemType, Sequence)
+INCLUDE (Id)
+WHERE ActivityStudyItemType = 'Book';
+
+-- 4. Subdivisions table - locality lookup
+DROP INDEX IF EXISTS IX_Subdivisions_Id_LocalityId ON Subdivisions;
+CREATE NONCLUSTERED INDEX IX_Subdivisions_Id_LocalityId
+ON Subdivisions (Id, LocalityId);
+
+-- 5. Localities table - cluster lookup
+DROP INDEX IF EXISTS IX_Localities_Id_ClusterId ON Localities;
+CREATE NONCLUSTERED INDEX IX_Localities_Id_ClusterId
+ON Localities (Id, ClusterId);
+
+-- 6. Clusters table - covering index for final join
+DROP INDEX IF EXISTS IX_Clusters_Id_Name ON Clusters;
+CREATE NONCLUSTERED INDEX IX_Clusters_Id_Name
+ON Clusters (Id, Name);
+
+-- After creating indexes, update statistics for optimal query plans:
+-- UPDATE STATISTICS Activities;
+-- UPDATE STATISTICS ActivityStudyItems;
+-- UPDATE STATISTICS StudyItems;
+-- UPDATE STATISTICS Localities;
+-- UPDATE STATISTICS Subdivisions;
+-- UPDATE STATISTICS Clusters;
+-- ==================================================================
+
+WITH ClusterAssignments AS (
+    -- ==================================================================
+    -- Step 1: Resolve cluster assignment for each Book 1 activity
+    -- Handles both direct (via LocalityId) and indirect (via SubdivisionId) paths
+    -- ==================================================================
+    SELECT
+        a.Id AS ActivityId,
+        a.StartDate,
+        COALESCE(loc_direct.ClusterId, loc_via_sub.ClusterId) AS ClusterId
+    FROM Activities a
+        INNER JOIN ActivityStudyItems asi
+            ON a.Id = asi.ActivityId
+        INNER JOIN StudyItems si
+            ON asi.StudyItemId = si.Id
+            AND si.ActivityStudyItemType = 'Book'  -- Filter early
+            AND si.Sequence = 1                     -- Book 1 only
+        -- Direct cluster resolution path
+        LEFT JOIN Localities loc_direct
+            ON a.LocalityId = loc_direct.Id
+        -- Indirect cluster resolution path (via subdivision)
+        LEFT JOIN Subdivisions sub
+            ON a.SubdivisionId = sub.Id
+        LEFT JOIN Localities loc_via_sub
+            ON sub.LocalityId = loc_via_sub.Id
+    WHERE
+        a.StartDate >= '2020-01-01'
+        -- Ensure activity is associated with a cluster (direct or indirect)
+        AND (loc_direct.ClusterId IS NOT NULL OR loc_via_sub.ClusterId IS NOT NULL)
+),
+QuarterlyAggregation AS (
+    -- ==================================================================
+    -- Step 2: Pre-calculate year and quarter to avoid repeated function calls
+    -- ==================================================================
+    SELECT
+        ClusterId,
+        ActivityId,
+        YEAR(StartDate) AS ActivityYear,
+        DATEPART(QUARTER, StartDate) AS ActivityQuarter
+    FROM ClusterAssignments
+),
+ClusterQuarterlyActivity AS (
+    -- ==================================================================
+    -- Step 3: Aggregate to cluster/year/quarter level with counts
+    -- ==================================================================
+    SELECT
+        c.Id AS ClusterId,
+        c.Name AS ClusterName,
+        qa.ActivityYear,
+        qa.ActivityQuarter,
+        COUNT(DISTINCT qa.ActivityId) AS Book1Count
+    FROM QuarterlyAggregation qa
+        INNER JOIN Clusters c
+            ON qa.ClusterId = c.Id
+    GROUP BY
+        c.Id,
+        c.Name,
+        qa.ActivityYear,
+        qa.ActivityQuarter
+),
+IslandDetection AS (
+    -- ==================================================================
+    -- Step 4: Apply gaps-and-islands algorithm to find consecutive periods
+    --
+    -- Key technique: Convert Year/Quarter to sequential period numbers,
+    -- then detect gaps by comparing period numbers with row numbers.
+    --
+    -- PeriodNumber: Sequential number starting from 2020 Q1 = 1
+    --   Formula: ((Year - 2020) * 4) + Quarter
+    --   Example: 2020 Q1 = 1, 2020 Q2 = 2, 2021 Q1 = 5
+    --
+    -- IslandGroup: Identifies consecutive sequences
+    --   For consecutive quarters, (PeriodNumber - RowNumber) stays constant
+    --   When there's a gap, this value changes, creating a new "island"
+    -- ==================================================================
+    SELECT
+        ClusterId,
+        ClusterName,
+        ActivityYear,
+        ActivityQuarter,
+        Book1Count,
+        -- Convert Year/Quarter to sequential period number
+        ((ActivityYear - 2020) * 4 + ActivityQuarter) AS PeriodNumber,
+        -- Island identifier: stays constant for consecutive quarters
+        ((ActivityYear - 2020) * 4 + ActivityQuarter) -
+            ROW_NUMBER() OVER (
+                PARTITION BY ClusterId
+                ORDER BY ActivityYear, ActivityQuarter
+            ) AS IslandGroup
+    FROM ClusterQuarterlyActivity
+)
+-- ==================================================================
+-- Step 5: Group by islands to identify consecutive periods
+-- Convert period numbers back to Year/Quarter for output
+-- ==================================================================
+SELECT
+    ClusterName,
+    -- Start of consecutive period
+    2020 + ((MIN(PeriodNumber) - 1) / 4) AS StartYear,
+    ((MIN(PeriodNumber) - 1) % 4) + 1 AS StartCycle,
+    -- End of consecutive period
+    2020 + ((MAX(PeriodNumber) - 1) / 4) AS EndYear,
+    ((MAX(PeriodNumber) - 1) % 4) + 1 AS EndCycle,
+    -- Total Book 1 activities started during this consecutive period
+    SUM(Book1Count) AS TotalBook1sStarted,
+    -- Number of consecutive quarters (cycles) in this period
+    COUNT(*) AS ConsecutiveCycles
+FROM IslandDetection
+GROUP BY
+    ClusterId,
+    ClusterName,
+    IslandGroup
+HAVING
+    COUNT(*) >= 2            -- Only include periods with at least 2 consecutive cycles
+ORDER BY
+    ConsecutiveCycles DESC,  -- Longest streaks first
+    ClusterName,             -- Then alphabetically
+    StartYear,               -- Then chronologically
+    StartCycle;
+
+-- ==================================================================
+-- EXAMPLE OUTPUT:
+-- ==================================================================
+-- ClusterName              | StartYear | StartCycle | EndYear | EndCycle | TotalBook1sStarted | ConsecutiveCycles
+-- -------------------------+-----------+------------+---------+----------+--------------------+-------------------
+-- Greenfield Urban Cluster |   2020    |     1      |  2023   |    2     |        127         |        14
+-- Metropolitan East        |   2020    |     3      |  2023   |    1     |         89         |        11
+-- Riverside Community      |   2021    |     2      |  2023   |    4     |         64         |        11
+--
+-- INTERPRETATION:
+-- - Greenfield maintained 14 consecutive quarters (Q1 2020 through Q2 2023)
+--   with 127 total Book 1 study circles started
+-- - Gaps in activity create separate rows for the same cluster
+-- - Only periods with 2+ consecutive cycles are included (single quarters excluded)
+-- - Results ordered by longest consecutive periods first
+
+-- ==================================================================
+-- HOW THE GAPS-AND-ISLANDS ALGORITHM WORKS:
+-- ==================================================================
+-- Example for a cluster with quarters: 2020 Q1, Q2, Q4, 2021 Q1
+--
+-- Quarter  | PeriodNumber | RowNumber | IslandGroup (Diff)
+-- ---------+--------------+-----------+-------------------
+-- 2020 Q1  |      1       |     1     |        0
+-- 2020 Q2  |      2       |     2     |        0      <- Same island (consecutive)
+-- 2020 Q4  |      4       |     3     |        1      <- New island (gap detected)
+-- 2021 Q1  |      5       |     4     |        1      <- Same island (consecutive)
+--
+-- Result: TWO consecutive periods (both meet the 2+ cycle requirement):
+--   1. 2020 Q1 - 2020 Q2 (2 quarters, IslandGroup=0)
+--   2. 2020 Q4 - 2021 Q1 (2 quarters, IslandGroup=1)
+--
+-- Note: If 2020 Q4 was the only quarter in that island, it would be
+--       filtered out by the HAVING clause (ConsecutiveCycles >= 2)
+#+end_src
+
+#+RESULTS:
+| ClusterName                                 | StartYear | StartCycle | EndYear | EndCycle | TotalBook1sStarted | ConsecutiveCycles |
+|---------------------------------------------+-----------+------------+---------+----------+--------------------+-------------------|
+| CA:SW01 Los Angeles                         |      2020 |          1 |    2025 |        3 |                101 |                23 |
+| CA:SE18 San Diego                           |      2022 |          2 |    2025 |        4 |                 62 |                15 |
+| CA:NC04 Santa Clara County West             |      2023 |          1 |    2025 |        3 |                 45 |                11 |
+| CA:NC08 East Bay                            |      2022 |          1 |    2024 |        3 |                 17 |                11 |
+| CA:SE16 Orange County Central               |      2023 |          2 |    2025 |        2 |                 19 |                 9 |
+| CA:SE05 Orange County South                 |      2020 |          2 |    2022 |        1 |                 20 |                 8 |
+| CA:SE18 San Diego                           |      2020 |          1 |    2021 |        4 |                 38 |                 8 |
+| CA:NI10 Sacramento                          |      2024 |          1 |    2025 |        2 |                 11 |                 6 |
+| CA:NI12 Yolo County                         |      2024 |          2 |    2025 |        3 |                  9 |                 6 |
+| CA:NC03 Alameda County South (Fremont)      |      2020 |          3 |    2021 |        3 |                  8 |                 5 |
+| CA:NC04 Santa Clara County West             |      2020 |          1 |    2021 |        1 |                 20 |                 5 |
+| CA:NC04 Santa Clara County West             |      2021 |          3 |    2022 |        3 |                 18 |                 5 |
+| CA:NC07 Marin County                        |      2020 |          1 |    2021 |        1 |                  8 |                 5 |
+| CA:NI04 Fresno                              |      2023 |          1 |    2024 |        1 |                  8 |                 5 |
+| CA:NI10 Sacramento                          |      2021 |          3 |    2022 |        3 |                 13 |                 5 |
+| CA:NI11 Placer County                       |      2020 |          3 |    2021 |        3 |                  9 |                 5 |
+| CA:SE05 Orange County South                 |      2022 |          3 |    2023 |        3 |                  8 |                 5 |
+| CA:SE13 Escondido                           |      2020 |          1 |    2021 |        1 |                 12 |                 5 |
+| CA:SE21 Orange County North                 |      2020 |          2 |    2021 |        2 |                  8 |                 5 |
+| CA:SW06 San Gabriel Valley                  |      2022 |          1 |    2023 |        1 |                 13 |                 5 |
+| CA:SW17 Thousand Oaks                       |      2020 |          1 |    2021 |        1 |                 12 |                 5 |
+| CA:NC02 Alameda County Central (Pleasanton) |      2024 |          1 |    2024 |        4 |                  4 |                 4 |
+| CA:NC05 San Jose                            |      2024 |          2 |    2025 |        1 |                  9 |                 4 |
+| CA:NC16 Contra Costa County East (Concord)  |      2020 |          1 |    2020 |        4 |                 10 |                 4 |
+| CA:NC16 Contra Costa County East (Concord)  |      2021 |          2 |    2022 |        1 |                 10 |                 4 |
+| CA:SE21 Orange County North                 |      2022 |          3 |    2023 |        2 |                  5 |                 4 |
+| CA:SW06 San Gabriel Valley                  |      2023 |          3 |    2024 |        2 |                  6 |                 4 |
+| CA:SW29 Santa Clarita                       |      2020 |          2 |    2021 |        1 |                  6 |                 4 |
+| CA:NC10 Campos de Alianza                   |      2025 |          1 |    2025 |        3 |                  3 |                 3 |
+| CA:NC16 Contra Costa County East (Concord)  |      2023 |          3 |    2024 |        1 |                  5 |                 3 |
+| CA:NC18 Solano County                       |      2021 |          1 |    2021 |        3 |                  6 |                 3 |
+| CA:NC19 San Francisco                       |      2020 |          2 |    2020 |        4 |                  3 |                 3 |
+| CA:NI04 Fresno                              |      2020 |          3 |    2021 |        1 |                  8 |                 3 |
+| CA:NI10 Sacramento                          |      2023 |          1 |    2023 |        3 |                  6 |                 3 |
+| CA:NI12 Yolo County                         |      2023 |          2 |    2023 |        4 |                  3 |                 3 |
+| CA:SE05 Orange County South                 |      2024 |          1 |    2024 |        3 |                  5 |                 3 |
+| CA:SE05 Orange County South                 |      2025 |          1 |    2025 |        3 |                  7 |                 3 |
+| CA:SE15 San Diego North Coast               |      2020 |          3 |    2021 |        1 |                  5 |                 3 |
+| CA:SE15 San Diego North Coast               |      2024 |          3 |    2025 |        1 |                  4 |                 3 |
+| CA:SE16 Orange County Central               |      2022 |          2 |    2022 |        4 |                  4 |                 3 |
+| CA:SW03 Bakersfield                         |      2024 |          2 |    2024 |        4 |                  3 |                 3 |
+| CA:SW04 San Bernardino                      |      2021 |          3 |    2022 |        1 |                  4 |                 3 |
+| CA:SW06 San Gabriel Valley                  |      2020 |          1 |    2020 |        3 |                  7 |                 3 |
+| CA:SW06 San Gabriel Valley                  |      2021 |          1 |    2021 |        3 |                  4 |                 3 |
+| CA:SW27 San Luis Obispo County              |      2021 |          1 |    2021 |        3 |                  3 |                 3 |
+| CA:SW32 Long Beach                          |      2024 |          3 |    2025 |        1 |                  7 |                 3 |
+| CA:NC03 Alameda County South (Fremont)      |      2023 |          2 |    2023 |        3 |                  3 |                 2 |
+| CA:NC05 San Jose                            |      2023 |          3 |    2023 |        4 |                  4 |                 2 |
+| CA:NC08 East Bay                            |      2020 |          3 |    2020 |        4 |                  4 |                 2 |
+| CA:NC10 Campos de Alianza                   |      2024 |          2 |    2024 |        3 |                  3 |                 2 |
+| CA:NC14 Sonoma County                       |      2020 |          2 |    2020 |        3 |                  3 |                 2 |
+| CA:NC14 Sonoma County                       |      2025 |          1 |    2025 |        2 |                  4 |                 2 |
+| CA:NC15 Santa Cruz County                   |      2022 |          3 |    2022 |        4 |                  2 |                 2 |
+| CA:NC18 Solano County                       |      2025 |          2 |    2025 |        3 |                  2 |                 2 |
+| CA:NC19 San Francisco                       |      2023 |          1 |    2023 |        2 |                  3 |                 2 |
+| CA:NC19 San Francisco                       |      2024 |          4 |    2025 |        1 |                  2 |                 2 |
+| CA:NI04 Fresno                              |      2025 |          2 |    2025 |        3 |                  2 |                 2 |
+| CA:NI10 Sacramento                          |      2020 |          4 |    2021 |        1 |                  7 |                 2 |
+| CA:NI12 Yolo County                         |      2020 |          1 |    2020 |        2 |                  3 |                 2 |
+| CA:NI12 Yolo County                         |      2021 |          3 |    2021 |        4 |                  3 |                 2 |
+| CA:NI12 Yolo County                         |      2022 |          3 |    2022 |        4 |                  4 |                 2 |
+| CA:NI13 Grass Valley                        |      2020 |          2 |    2020 |        3 |                  2 |                 2 |
+| CA:SE06 Riverside                           |      2020 |          4 |    2021 |        1 |                  5 |                 2 |
+| CA:SE14 East San Diego County               |      2020 |          2 |    2020 |        3 |                  7 |                 2 |
+| CA:SE15 San Diego North Coast               |      2022 |          1 |    2022 |        2 |                  3 |                 2 |
+| CA:SE15 San Diego North Coast               |      2022 |          4 |    2023 |        1 |                  3 |                 2 |
+| CA:SE15 San Diego North Coast               |      2023 |          4 |    2024 |        1 |                  5 |                 2 |
+| CA:SE16 Orange County Central               |      2020 |          4 |    2021 |        1 |                  6 |                 2 |
+| CA:SW02 Upland                              |      2020 |          2 |    2020 |        3 |                  2 |                 2 |
+| CA:SW02 Upland                              |      2023 |          3 |    2023 |        4 |                  2 |                 2 |
+| CA:SW05 Victorville                         |      2021 |          2 |    2021 |        3 |                  2 |                 2 |
+| CA:SW10 Claremont                           |      2020 |          2 |    2020 |        3 |                  3 |                 2 |
+| CA:SW10 Claremont                           |      2023 |          1 |    2023 |        2 |                  3 |                 2 |
+| CA:SW17 Thousand Oaks                       |      2021 |          3 |    2021 |        4 |                  2 |                 2 |
+| CA:SW28 Ventura                             |      2020 |          4 |    2021 |        1 |                  2 |                 2 |
+| CA:SW28 Ventura                             |      2021 |          3 |    2021 |        4 |                  2 |                 2 |
+| CA:SW32 Long Beach                          |      2021 |          3 |    2021 |        4 |                  5 |                 2 |
+| CA:SW32 Long Beach                          |      2022 |          4 |    2023 |        1 |                  3 |                 2 |
+
+* Appendix
+
+** Quick Reference
+
+*** Execute a Query Block
+- Place cursor in code block
+- Press =C-c C-c=
+
+*** Clear All Results
+- =C-c C-v k= (org-babel-remove-result)
+- =C-u C-c C-v k= (org-babel-remove-result, for all results)
+
+*** View Connection Info
+- Evaluate: =(org-mssql-show-connection-info)=
+
+*** Test Connection
+- Evaluate: =(org-mssql-test-connection)=
+
+** Useful Resources
+
+- [[https://learn.microsoft.com/en-us/sql/tools/sqlcmd/sqlcmd-utility?view=sql-server-ver17&tabs=go%2Cwindows-support&pivots=cs1-bash][sqlcmd Documentation]]
+- [[https://orgmode.org/manual/Working-with-Source-Code.html][Org-mode Babel Documentation]]
+- [[https://howardism.org/Technical/Emacs/literate-devops.html][Literate DevOps with Emacs]]

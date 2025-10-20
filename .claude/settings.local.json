@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__memory-keeper__context_session_start"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}
