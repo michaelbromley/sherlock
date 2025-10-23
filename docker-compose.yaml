@@ -1,0 +1,19 @@
+services:
+  mssql:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    container_name: mssql
+    platform: linux/amd64
+    restart: unless-stopped
+    environment:
+      ACCEPT_EULA: "Y"
+      SA_PASSWORD: "Cx@4ABnrYK!AmcdttuNJw7KLo73CCqD8"
+    expose:
+      - "1433"
+    ports:
+      - "1433:1433"
+    volumes:
+      - /Users/johnw/doc/srp-db/mssql:/var/opt/mssql
+
+
+volumes:
+  sqlserverdata:

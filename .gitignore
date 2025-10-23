@@ -1,4 +1,6 @@
-/__pycache__
-*.xz
 *.exe
 *.rgn
+*.xz
+/.DS_Store
+/__pycache__/
+/mssql/

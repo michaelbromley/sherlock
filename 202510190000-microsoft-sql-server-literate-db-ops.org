@@ -1,12 +1,17 @@
-#+AUTHOR: John Wiegley
-#+DATE: 2025-10-19
-#+PROPERTY: header-args:sql :engine mssql :cmdline (org-mssql-get-cmdline) :results value table
-#+PROPERTY: sql-host mssql.vulcan.lan
-#+PROPERTY: sql-user sa
-#+PROPERTY: sql-port 1433
-#+PROPERTY: sql-database SRP
-#+STARTUP: overview
-#+TITLE: Microsoft SQL Server Queries - Literate Database Operations
+:PROPERTIES:
+:ID:       8990B6F3-406C-4F95-AD4F-7A45E1E3EA24
+:CREATED:  [2025-10-23 Thu 12:12]
+:LOCATION: 38.569520,-121.388436
+:END:
+#+author: John Wiegley
+#+date: [2025-10-19 Sun]
+#+property: header-args:sql :engine mssql :cmdline (org-mssql-get-cmdline) :results value table
+#+property: sql-database SRP
+#+property: sql-host localhost
+#+property: sql-port 1433
+#+property: sql-user sa
+#+startup: show5levels
+#+title: Microsoft SQL Server Literate DB Ops
 
 * Introduction
 
@@ -73,6 +78,15 @@ Current configuration:
 To connect to a different server, modify the properties at the top of this
 file.
 
+* Connect another database
+
+#+begin_src sql
+CREATE DATABASE SRP
+ON (FILENAME = '/var/opt/mssql/data/SRP.mdf'),
+   (FILENAME = '/var/opt/mssql/data/SRP_log.ldf')
+FOR ATTACH;
+#+end_src
+
 * Sample Queries
 
 Now that we have our helper functions loaded, let's execute some SQL queries.
@@ -90,6 +104,8 @@ SELECT
     GETDATE() AS CurrentDateTime;
 #+end_src
 
+#+RESULTS:
+
 ** Database Information
 
 *** List All Databases
@@ -104,6 +120,15 @@ SELECT
 FROM sys.databases
 ORDER BY name;
 #+end_src
+
+#+RESULTS:
+| DatabaseName | ID | Created                 |
+|--------------+----+-------------------------|
+| master       |  1 | 2003-04-08 09:13:36.390 |
+| model        |  3 | 2003-04-08 09:13:36.390 |
+| msdb         |  4 | 2025-08-11 14:05:56.193 |
+| SRP          |  5 | 2025-10-23 19:35:36.567 |
+| tempdb       |  2 | 2025-10-23 19:03:44.723 |
 
 *** COMMENT Current Database Tables
 
@@ -120,6 +145,10 @@ INNER JOIN sys.schemas s ON t.schema_id = s.schema_id
 LEFT JOIN sys.partitions p ON t.object_id = p.object_id AND p.index_id IN (0,1)
 ORDER BY s.name, t.name;
 #+end_src
+
+#+RESULTS:
+| Msg 156, Level 15, State 1, Server a884962ac8c2, Line 9 |
+| Incorrect syntax near the keyword 'RowCount'.           |
 
 ** System Queries
 
@@ -156,7 +185,14 @@ FROM sys.database_files
 ORDER BY type_desc;
 #+end_src
 
-* Book 1 Consecutive Activity Periods by Cluster.sql
+#+RESULTS:
+| DatabaseName | FileType | LogicalName | PhysicalName                    | SizeMB |  MaxSizeMB |
+|--------------+----------+-------------+---------------------------------+--------+------------|
+| SRP          | LOG      | SRP_log     | /var/opt/mssql/data/SRP_log.ldf |  16.19 | 2097152.00 |
+| SRP          | ROWS     | SRP         | /var/opt/mssql/data/SRP.mdf     |  82.00 |      -0.01 |
+
+* Queries
+** Book 1 Consecutive Activity Periods by Cluster.sql
 
 #+begin_src sql
 -- ==================================================================
@@ -377,86 +413,6 @@ ORDER BY
 #+end_src
 
 #+RESULTS:
-| ClusterName                                 | StartYear | StartCycle | EndYear | EndCycle | TotalBook1sStarted | ConsecutiveCycles |
-|---------------------------------------------+-----------+------------+---------+----------+--------------------+-------------------|
-| CA:SW01 Los Angeles                         |      2020 |          1 |    2025 |        3 |                101 |                23 |
-| CA:SE18 San Diego                           |      2022 |          2 |    2025 |        4 |                 62 |                15 |
-| CA:NC04 Santa Clara County West             |      2023 |          1 |    2025 |        3 |                 45 |                11 |
-| CA:NC08 East Bay                            |      2022 |          1 |    2024 |        3 |                 17 |                11 |
-| CA:SE16 Orange County Central               |      2023 |          2 |    2025 |        2 |                 19 |                 9 |
-| CA:SE05 Orange County South                 |      2020 |          2 |    2022 |        1 |                 20 |                 8 |
-| CA:SE18 San Diego                           |      2020 |          1 |    2021 |        4 |                 38 |                 8 |
-| CA:NI10 Sacramento                          |      2024 |          1 |    2025 |        2 |                 11 |                 6 |
-| CA:NI12 Yolo County                         |      2024 |          2 |    2025 |        3 |                  9 |                 6 |
-| CA:NC03 Alameda County South (Fremont)      |      2020 |          3 |    2021 |        3 |                  8 |                 5 |
-| CA:NC04 Santa Clara County West             |      2020 |          1 |    2021 |        1 |                 20 |                 5 |
-| CA:NC04 Santa Clara County West             |      2021 |          3 |    2022 |        3 |                 18 |                 5 |
-| CA:NC07 Marin County                        |      2020 |          1 |    2021 |        1 |                  8 |                 5 |
-| CA:NI04 Fresno                              |      2023 |          1 |    2024 |        1 |                  8 |                 5 |
-| CA:NI10 Sacramento                          |      2021 |          3 |    2022 |        3 |                 13 |                 5 |
-| CA:NI11 Placer County                       |      2020 |          3 |    2021 |        3 |                  9 |                 5 |
-| CA:SE05 Orange County South                 |      2022 |          3 |    2023 |        3 |                  8 |                 5 |
-| CA:SE13 Escondido                           |      2020 |          1 |    2021 |        1 |                 12 |                 5 |
-| CA:SE21 Orange County North                 |      2020 |          2 |    2021 |        2 |                  8 |                 5 |
-| CA:SW06 San Gabriel Valley                  |      2022 |          1 |    2023 |        1 |                 13 |                 5 |
-| CA:SW17 Thousand Oaks                       |      2020 |          1 |    2021 |        1 |                 12 |                 5 |
-| CA:NC02 Alameda County Central (Pleasanton) |      2024 |          1 |    2024 |        4 |                  4 |                 4 |
-| CA:NC05 San Jose                            |      2024 |          2 |    2025 |        1 |                  9 |                 4 |
-| CA:NC16 Contra Costa County East (Concord)  |      2020 |          1 |    2020 |        4 |                 10 |                 4 |
-| CA:NC16 Contra Costa County East (Concord)  |      2021 |          2 |    2022 |        1 |                 10 |                 4 |
-| CA:SE21 Orange County North                 |      2022 |          3 |    2023 |        2 |                  5 |                 4 |
-| CA:SW06 San Gabriel Valley                  |      2023 |          3 |    2024 |        2 |                  6 |                 4 |
-| CA:SW29 Santa Clarita                       |      2020 |          2 |    2021 |        1 |                  6 |                 4 |
-| CA:NC10 Campos de Alianza                   |      2025 |          1 |    2025 |        3 |                  3 |                 3 |
-| CA:NC16 Contra Costa County East (Concord)  |      2023 |          3 |    2024 |        1 |                  5 |                 3 |
-| CA:NC18 Solano County                       |      2021 |          1 |    2021 |        3 |                  6 |                 3 |
-| CA:NC19 San Francisco                       |      2020 |          2 |    2020 |        4 |                  3 |                 3 |
-| CA:NI04 Fresno                              |      2020 |          3 |    2021 |        1 |                  8 |                 3 |
-| CA:NI10 Sacramento                          |      2023 |          1 |    2023 |        3 |                  6 |                 3 |
-| CA:NI12 Yolo County                         |      2023 |          2 |    2023 |        4 |                  3 |                 3 |
-| CA:SE05 Orange County South                 |      2024 |          1 |    2024 |        3 |                  5 |                 3 |
-| CA:SE05 Orange County South                 |      2025 |          1 |    2025 |        3 |                  7 |                 3 |
-| CA:SE15 San Diego North Coast               |      2020 |          3 |    2021 |        1 |                  5 |                 3 |
-| CA:SE15 San Diego North Coast               |      2024 |          3 |    2025 |        1 |                  4 |                 3 |
-| CA:SE16 Orange County Central               |      2022 |          2 |    2022 |        4 |                  4 |                 3 |
-| CA:SW03 Bakersfield                         |      2024 |          2 |    2024 |        4 |                  3 |                 3 |
-| CA:SW04 San Bernardino                      |      2021 |          3 |    2022 |        1 |                  4 |                 3 |
-| CA:SW06 San Gabriel Valley                  |      2020 |          1 |    2020 |        3 |                  7 |                 3 |
-| CA:SW06 San Gabriel Valley                  |      2021 |          1 |    2021 |        3 |                  4 |                 3 |
-| CA:SW27 San Luis Obispo County              |      2021 |          1 |    2021 |        3 |                  3 |                 3 |
-| CA:SW32 Long Beach                          |      2024 |          3 |    2025 |        1 |                  7 |                 3 |
-| CA:NC03 Alameda County South (Fremont)      |      2023 |          2 |    2023 |        3 |                  3 |                 2 |
-| CA:NC05 San Jose                            |      2023 |          3 |    2023 |        4 |                  4 |                 2 |
-| CA:NC08 East Bay                            |      2020 |          3 |    2020 |        4 |                  4 |                 2 |
-| CA:NC10 Campos de Alianza                   |      2024 |          2 |    2024 |        3 |                  3 |                 2 |
-| CA:NC14 Sonoma County                       |      2020 |          2 |    2020 |        3 |                  3 |                 2 |
-| CA:NC14 Sonoma County                       |      2025 |          1 |    2025 |        2 |                  4 |                 2 |
-| CA:NC15 Santa Cruz County                   |      2022 |          3 |    2022 |        4 |                  2 |                 2 |
-| CA:NC18 Solano County                       |      2025 |          2 |    2025 |        3 |                  2 |                 2 |
-| CA:NC19 San Francisco                       |      2023 |          1 |    2023 |        2 |                  3 |                 2 |
-| CA:NC19 San Francisco                       |      2024 |          4 |    2025 |        1 |                  2 |                 2 |
-| CA:NI04 Fresno                              |      2025 |          2 |    2025 |        3 |                  2 |                 2 |
-| CA:NI10 Sacramento                          |      2020 |          4 |    2021 |        1 |                  7 |                 2 |
-| CA:NI12 Yolo County                         |      2020 |          1 |    2020 |        2 |                  3 |                 2 |
-| CA:NI12 Yolo County                         |      2021 |          3 |    2021 |        4 |                  3 |                 2 |
-| CA:NI12 Yolo County                         |      2022 |          3 |    2022 |        4 |                  4 |                 2 |
-| CA:NI13 Grass Valley                        |      2020 |          2 |    2020 |        3 |                  2 |                 2 |
-| CA:SE06 Riverside                           |      2020 |          4 |    2021 |        1 |                  5 |                 2 |
-| CA:SE14 East San Diego County               |      2020 |          2 |    2020 |        3 |                  7 |                 2 |
-| CA:SE15 San Diego North Coast               |      2022 |          1 |    2022 |        2 |                  3 |                 2 |
-| CA:SE15 San Diego North Coast               |      2022 |          4 |    2023 |        1 |                  3 |                 2 |
-| CA:SE15 San Diego North Coast               |      2023 |          4 |    2024 |        1 |                  5 |                 2 |
-| CA:SE16 Orange County Central               |      2020 |          4 |    2021 |        1 |                  6 |                 2 |
-| CA:SW02 Upland                              |      2020 |          2 |    2020 |        3 |                  2 |                 2 |
-| CA:SW02 Upland                              |      2023 |          3 |    2023 |        4 |                  2 |                 2 |
-| CA:SW05 Victorville                         |      2021 |          2 |    2021 |        3 |                  2 |                 2 |
-| CA:SW10 Claremont                           |      2020 |          2 |    2020 |        3 |                  3 |                 2 |
-| CA:SW10 Claremont                           |      2023 |          1 |    2023 |        2 |                  3 |                 2 |
-| CA:SW17 Thousand Oaks                       |      2021 |          3 |    2021 |        4 |                  2 |                 2 |
-| CA:SW28 Ventura                             |      2020 |          4 |    2021 |        1 |                  2 |                 2 |
-| CA:SW28 Ventura                             |      2021 |          3 |    2021 |        4 |                  2 |                 2 |
-| CA:SW32 Long Beach                          |      2021 |          3 |    2021 |        4 |                  5 |                 2 |
-| CA:SW32 Long Beach                          |      2022 |          4 |    2023 |        1 |                  3 |                 2 |
 
 * Appendix
 
