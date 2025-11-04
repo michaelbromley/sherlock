@@ -1,0 +1,23 @@
+{
+  "name": "db-tool",
+  "version": "1.0.0",
+  "description": "Tooling to allow AI-assisted DB interactions",
+  "main": "index.js",
+  "scripts": {
+    "test": "tsx src/db-query.spec.ts",
+    "setup:demo": "bash scripts/download-chinook.sh",
+    "verify:docker": "bash scripts/verify-docker.sh"
+  },
+  "author": "Michael Bromley",
+  "license": "MIT",
+  "dependencies": {
+    "@types/node": "^24.10.0",
+    "better-sqlite3": "^12.4.1",
+    "dotenv": "^17.2.3",
+    "mysql2": "^3.15.3",
+    "pg": "^8.16.3",
+    "tsx": "^4.20.6",
+    "typeorm": "^0.3.27",
+    "typescript": "^5.9.3"
+  }
+}

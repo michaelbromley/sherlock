@@ -1,0 +1,8 @@
+node_modules
+.idea
+
+# Seed data (but keep README)
+seeds/**/*.sql
+
+# Data
+data
