@@ -3,6 +3,41 @@
 import 'dotenv/config';
 import { DataSource } from 'typeorm';
 import { loadConfig } from './load-config';
+import * as fs from 'fs';
+import * as path from 'path';
+
+/**
+ * Logs a query and its result to a connection-specific log file
+ */
+function logQuery(connectionName: string, query: string, result: any): void {
+    const logsDir = path.join(__dirname, '../output/logs');
+
+    // Create logs directory if it doesn't exist
+    if (!fs.existsSync(logsDir)) {
+        fs.mkdirSync(logsDir, { recursive: true });
+    }
+
+    const logFile = path.join(logsDir, `${connectionName}.md`);
+    const timestamp = new Date().toISOString();
+
+    // Format as markdown
+    const logEntry = `${timestamp}
+
+\`\`\`sql
+${query}
+\`\`\`
+
+\`\`\`json
+${JSON.stringify(result, null, 2)}
+\`\`\`
+
+---
+
+`;
+
+    // Append to log file
+    fs.appendFileSync(logFile, logEntry, 'utf-8');
+}
 
 async function main() {
     // Parse command line arguments
@@ -10,8 +45,9 @@ async function main() {
     let connectionName = 'default';
     let command: string | undefined;
     let commandArgs: string[] = [];
+    let noLog = false;
 
-    // Parse --connection or -c flag
+    // Parse --connection or -c flag, and --no-log flag
     for (let i = 0; i < args.length; i++) {
         const arg = args[i];
         if (arg === '--connection' || arg === '-c') {
@@ -26,6 +62,8 @@ async function main() {
             connectionName = arg.split('=')[1];
         } else if (arg.startsWith('-c=')) {
             connectionName = arg.split('=')[1];
+        } else if (arg === '--no-log') {
+            noLog = true;
         } else if (!command) {
             command = arg;
         } else {
@@ -62,23 +100,20 @@ async function main() {
                 process.exit(1);
             }
 
-            // Enforce read-only: only allow SELECT queries
-            const trimmedQuery = query.trim().toUpperCase();
-            if (
-                !trimmedQuery.startsWith('SELECT') &&
-                !trimmedQuery.startsWith('SHOW') &&
-                !trimmedQuery.startsWith('DESCRIBE') &&
-                !trimmedQuery.startsWith('EXPLAIN')
-            ) {
-                console.error(
-                    JSON.stringify({
-                        error: 'Only SELECT, SHOW, DESCRIBE, and EXPLAIN queries are allowed (read-only mode)',
-                    }),
-                );
+            // Enforce read-only with comprehensive validation
+            const validationError = validateReadOnlyQuery(query);
+            if (validationError) {
+                console.error(JSON.stringify({ error: validationError }));
                 process.exit(1);
             }
 
             const result = await executeQuery(dataSource, query);
+
+            // Log the query and result (unless --no-log is specified)
+            if (!noLog) {
+                logQuery(connectionName, query, result);
+            }
+
             console.log(JSON.stringify(result, null, 2));
         } else if (command === 'describe') {
             // Describe a specific table
@@ -172,13 +207,98 @@ async function introspectSchema(dataSource: DataSource): Promise<any> {
     return schema;
 }
 
+/**
+ * Validates that a query is read-only and safe to execute.
+ * Checks for dangerous keywords anywhere in the query, not just at the start.
+ */
+function validateReadOnlyQuery(query: string): string | null {
+    const normalizedQuery = query.trim().toUpperCase();
+
+    // Check if query starts with allowed commands
+    const allowedStarts = ['SELECT', 'SHOW', 'DESCRIBE', 'EXPLAIN', 'WITH'];
+    const startsWithAllowed = allowedStarts.some(cmd => normalizedQuery.startsWith(cmd));
+
+    if (!startsWithAllowed) {
+        return 'Only SELECT, SHOW, DESCRIBE, EXPLAIN, and WITH queries are allowed (read-only mode)';
+    }
+
+    // Check for multiple statements (prevent SQL injection via chained queries)
+    const semicolonCount = (query.match(/;/g) || []).length;
+    if (semicolonCount > 1 || (semicolonCount === 1 && !query.trim().endsWith(';'))) {
+        return 'Multiple statements are not allowed (read-only mode)';
+    }
+
+    // Dangerous keywords that should never appear in read-only queries
+    const dangerousKeywords = [
+        'INSERT', 'UPDATE', 'DELETE', 'DROP', 'CREATE', 'ALTER', 'TRUNCATE',
+        'GRANT', 'REVOKE', 'EXEC', 'EXECUTE', 'CALL',
+        'MERGE', 'REPLACE', 'RENAME', 'COMMENT',
+        'LOCK', 'UNLOCK', 'SET', 'BEGIN', 'COMMIT', 'ROLLBACK',
+        'SAVEPOINT', 'PREPARE', 'DEALLOCATE',
+        // Dangerous functions
+        'INTO OUTFILE', 'INTO DUMPFILE', 'LOAD DATA', 'LOAD XML',
+        // PostgreSQL specific
+        'COPY', 'VACUUM', 'ANALYZE', 'REINDEX', 'CLUSTER',
+    ];
+
+    for (const keyword of dangerousKeywords) {
+        // Use word boundaries to avoid false positives (e.g., "INSERTED" column name)
+        const regex = new RegExp(`\\b${keyword}\\b`, 'i');
+        if (regex.test(query)) {
+            return `Dangerous keyword detected: ${keyword}. Only read-only queries are allowed.`;
+        }
+    }
+
+    // Check for comments that might hide malicious code
+    if (query.includes('/*') || query.includes('--') || query.includes('#')) {
+        // Allow comments but verify they don't contain dangerous keywords
+        const withoutComments = query
+            .replace(/\/\*[\s\S]*?\*\//g, ' ') // Remove /* */ comments
+            .replace(/--[^\n]*/g, ' ')         // Remove -- comments
+            .replace(/#[^\n]*/g, ' ');         // Remove # comments
+
+        // Re-validate without comments
+        for (const keyword of dangerousKeywords) {
+            const regex = new RegExp(`\\b${keyword}\\b`, 'i');
+            if (regex.test(withoutComments)) {
+                return `Dangerous keyword detected: ${keyword}. Only read-only queries are allowed.`;
+            }
+        }
+    }
+
+    return null; // Query is safe
+}
+
 async function executeQuery(dataSource: DataSource, query: string): Promise<any> {
     try {
-        const result = await dataSource.query(query);
-        return {
-            rowCount: Array.isArray(result) ? result.length : 0,
-            rows: result,
-        };
+        // Execute query in a read-only transaction (best effort)
+        // Note: This works for PostgreSQL, may not be enforced in all databases
+        const queryRunner = dataSource.createQueryRunner();
+
+        try {
+            await queryRunner.connect();
+
+            // Set transaction to read-only (PostgreSQL, MySQL 8.0+)
+            try {
+                await queryRunner.query('SET TRANSACTION READ ONLY');
+            } catch (e) {
+                // Some databases don't support this, continue anyway
+                // Our validation above provides the main protection
+            }
+
+            await queryRunner.startTransaction('READ UNCOMMITTED');
+
+            const result = await queryRunner.query(query);
+
+            await queryRunner.commitTransaction();
+
+            return {
+                rowCount: Array.isArray(result) ? result.length : 0,
+                rows: result,
+            };
+        } finally {
+            await queryRunner.release();
+        }
     } catch (error: any) {
         return {
             error: error.message,

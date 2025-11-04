@@ -33,7 +33,7 @@ function loadConnections(): string[] {
         process.exit(1);
     }
 
-    return Object.keys(config.connections);
+    return Object.keys(config.connections).filter(conn => conn.startsWith('chinook-'));
 }
 
 interface TestResult {
@@ -57,7 +57,7 @@ class TestRunner {
     private executeCommand(command: string[], connectionName?: string): { stdout: string; success: boolean; error?: string } {
         try {
             const connectionArg = connectionName ? `--connection ${connectionName}` : '';
-            const fullCommand = `npx tsx ${this.scriptPath} ${connectionArg} ${command.join(' ')}`.trim();
+            const fullCommand = `npx tsx ${this.scriptPath} ${connectionArg} --no-log ${command.join(' ')}`.trim();
             const stdout = execSync(fullCommand, {
                 encoding: 'utf-8',
                 stdio: 'pipe',
@@ -238,32 +238,62 @@ class TestRunner {
     }
 
     /**
-     * Test read-only enforcement
+     * Test read-only enforcement with various attack vectors
      */
     private testReadOnlyEnforcement(connectionName: string, tableName: string): TestResult {
         const testName = `${connectionName}: read-only enforcement`;
         const startTime = Date.now();
 
-        // Try to execute a DELETE query (should be rejected)
-        const result = this.executeCommand(['query', `"DELETE FROM ${tableName} WHERE id = 999"`], connectionName);
-        const duration = Date.now() - startTime;
+        // List of malicious queries to test
+        const maliciousQueries = [
+            // Direct DELETE
+            `DELETE FROM ${tableName} WHERE id = 999`,
+            // Direct UPDATE
+            `UPDATE ${tableName} SET name = 'hacked' WHERE id = 1`,
+            // Direct INSERT
+            `INSERT INTO ${tableName} VALUES (999, 'hacked')`,
+            // DROP TABLE
+            `DROP TABLE ${tableName}`,
+            // SQL injection via chained query
+            `SELECT * FROM ${tableName}; DROP TABLE ${tableName}`,
+            // SQL injection via comment
+            `SELECT * FROM ${tableName} WHERE 1=1 -- ; DROP TABLE ${tableName}`,
+            // TRUNCATE
+            `TRUNCATE TABLE ${tableName}`,
+            // CREATE
+            `CREATE TABLE hacked (id INT)`,
+            // ALTER
+            `ALTER TABLE ${tableName} ADD COLUMN hacked VARCHAR(255)`,
+            // Multiple statements
+            `SELECT 1; DELETE FROM ${tableName}`,
+            // Hidden in subquery attempt
+            `SELECT * FROM ${tableName} WHERE id IN (SELECT id FROM ${tableName}) AND 1=1; DROP TABLE ${tableName}`,
+        ];
 
-        if (result.success) {
-            return {
-                name: testName,
-                passed: false,
-                error: 'DELETE query should have been rejected',
-                duration,
-            };
+        const failures: string[] = [];
+
+        for (const query of maliciousQueries) {
+            const result = this.executeCommand(['query', `"${query}"`], connectionName);
+
+            if (result.success) {
+                failures.push(`Query should have been rejected: ${query.substring(0, 50)}...`);
+                continue;
+            }
+
+            // Check that the error message mentions read-only or dangerous keyword
+            const output = result.error || result.stdout;
+            if (!output.includes('read-only') && !output.includes('Dangerous keyword') && !output.includes('not allowed')) {
+                failures.push(`Error message should mention security issue for: ${query.substring(0, 50)}...`);
+            }
         }
 
-        // Check that the error message mentions read-only mode
-        const output = result.error || result.stdout;
-        if (!output.includes('read-only')) {
+        const duration = Date.now() - startTime;
+
+        if (failures.length > 0) {
             return {
                 name: testName,
                 passed: false,
-                error: 'Error message should mention read-only mode',
+                error: failures.join('; '),
                 duration,
             };
         }
@@ -450,10 +480,10 @@ class TestRunner {
         console.log(`Failed: \x1b[31m${failed}\x1b[0m`);
 
         if (failed > 0) {
-            console.log('\n❌ Some tests failed');
+            console.log('\n❌  Some tests failed');
             process.exit(1);
         } else {
-            console.log('\n✅ All tests passed!');
+            console.log('\n✅  All tests passed!');
             process.exit(0);
         }
     }

@@ -5,8 +5,7 @@
   "main": "index.js",
   "scripts": {
     "test": "tsx src/db-query.spec.ts",
-    "setup:demo": "bash scripts/download-chinook.sh",
-    "verify:docker": "bash scripts/verify-docker.sh"
+    "setup:demo": "bash scripts/download-chinook.sh"
   },
   "author": "Michael Bromley",
   "license": "MIT",
