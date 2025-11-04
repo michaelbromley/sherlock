@@ -111,7 +111,7 @@ When the user asks a database question:
    tsx src/query-db.ts query "SELECT `id`, `username`, `email`, `created_at` FROM `users` ORDER BY `created_at` DESC LIMIT 10"
    ```
 4. Present the results in a formatted table
-5. Ask if a report is wanted, if so save to md file
+5. Ask if a report is wanted, if so, save to md file and make sure to include the raw SQL queries that were used.
 
 ### Example 2: Analyzing data distribution
 

@@ -5,6 +5,7 @@ import { DataSource } from 'typeorm';
 import { loadConfig } from './load-config';
 import * as fs from 'fs';
 import * as path from 'path';
+import { Command } from 'commander';
 
 /**
  * Logs a query and its result to a connection-specific log file
@@ -20,6 +21,19 @@ function logQuery(connectionName: string, query: string, result: any): void {
     const logFile = path.join(logsDir, `${connectionName}.md`);
     const timestamp = new Date().toISOString();
 
+    // Truncate large result sets for logging
+    let logResult = result;
+    if (result && Array.isArray(result.rows) && result.rows.length > 10) {
+        const omittedCount = result.rows.length - 10;
+        logResult = {
+            ...result,
+            rows: [
+                ...result.rows.slice(0, 10),
+                `... ${omittedCount.toLocaleString()} ${omittedCount === 1 ? 'result' : 'results'} omitted ...`
+            ]
+        };
+    }
+
     // Format as markdown
     const logEntry = `${timestamp}
 
@@ -28,7 +42,7 @@ ${query}
 \`\`\`
 
 \`\`\`json
-${JSON.stringify(result, null, 2)}
+${JSON.stringify(logResult, null, 2)}
 \`\`\`
 
 ---
@@ -39,43 +53,13 @@ ${JSON.stringify(result, null, 2)}
     fs.appendFileSync(logFile, logEntry, 'utf-8');
 }
 
-async function main() {
-    // Parse command line arguments
-    const args = process.argv.slice(2);
-    let connectionName = 'default';
-    let command: string | undefined;
-    let commandArgs: string[] = [];
-    let noLog = false;
-
-    // Parse --connection or -c flag, and --no-log flag
-    for (let i = 0; i < args.length; i++) {
-        const arg = args[i];
-        if (arg === '--connection' || arg === '-c') {
-            if (i + 1 < args.length) {
-                connectionName = args[i + 1];
-                i++; // Skip the next argument
-            } else {
-                console.error(JSON.stringify({ error: '--connection flag requires a value' }));
-                process.exit(1);
-            }
-        } else if (arg.startsWith('--connection=')) {
-            connectionName = arg.split('=')[1];
-        } else if (arg.startsWith('-c=')) {
-            connectionName = arg.split('=')[1];
-        } else if (arg === '--no-log') {
-            noLog = true;
-        } else if (!command) {
-            command = arg;
-        } else {
-            commandArgs.push(arg);
-        }
-    }
-
-    if (!command) {
-        console.error(JSON.stringify({ error: 'No command provided. Use: introspect, query, or tables' }));
-        process.exit(1);
-    }
-
+/**
+ * Execute a command with a database connection
+ */
+async function withDataSource<T>(
+    connectionName: string,
+    handler: (dataSource: DataSource) => Promise<T>,
+): Promise<T> {
     const dataSource = new DataSource({
         ...loadConfig(connectionName),
         logging: false,
@@ -83,52 +67,7 @@ async function main() {
 
     try {
         await dataSource.initialize();
-
-        if (command === 'introspect') {
-            // Get all tables with their columns
-            const result = await introspectSchema(dataSource);
-            console.log(JSON.stringify(result, null, 2));
-        } else if (command === 'tables') {
-            // Get list of all tables
-            const tables = await getTables(dataSource);
-            console.log(JSON.stringify({ tables }, null, 2));
-        } else if (command === 'query') {
-            // Execute a SQL query
-            const query = commandArgs[0];
-            if (!query) {
-                console.error(JSON.stringify({ error: 'No query provided' }));
-                process.exit(1);
-            }
-
-            // Enforce read-only with comprehensive validation
-            const validationError = validateReadOnlyQuery(query);
-            if (validationError) {
-                console.error(JSON.stringify({ error: validationError }));
-                process.exit(1);
-            }
-
-            const result = await executeQuery(dataSource, query);
-
-            // Log the query and result (unless --no-log is specified)
-            if (!noLog) {
-                logQuery(connectionName, query, result);
-            }
-
-            console.log(JSON.stringify(result, null, 2));
-        } else if (command === 'describe') {
-            // Describe a specific table
-            const tableName = commandArgs[0];
-            if (!tableName) {
-                console.error(JSON.stringify({ error: 'No table name provided' }));
-                process.exit(1);
-            }
-
-            const result = await describeTable(dataSource, tableName);
-            console.log(JSON.stringify(result, null, 2));
-        } else {
-            console.error(JSON.stringify({ error: `Unknown command: ${command}` }));
-            process.exit(1);
-        }
+        return await handler(dataSource);
     } catch (error: any) {
         console.error(
             JSON.stringify({
@@ -140,6 +79,87 @@ async function main() {
     } finally {
         await dataSource.destroy();
     }
+}
+
+/**
+ * Set up CLI with Commander
+ */
+function setupCLI() {
+    const program = new Command();
+
+    program
+        .name('query-db')
+        .description('Database introspection and query tool with read-only access')
+        .version('1.0.0');
+
+    // Global options
+    program
+        .option('-c, --connection <name>', 'database connection name from config.ts', 'default')
+        .option('--no-log', 'disable query logging to output/logs directory');
+
+    // Tables command
+    program
+        .command('tables')
+        .description('List all tables in the database')
+        .action(async () => {
+            const opts = program.opts();
+            await withDataSource(opts.connection, async (dataSource) => {
+                const tables = await getTables(dataSource);
+                console.log(JSON.stringify({ tables }, null, 2));
+            });
+        });
+
+    // Introspect command
+    program
+        .command('introspect')
+        .description('Get schema information for all tables')
+        .action(async () => {
+            const opts = program.opts();
+            await withDataSource(opts.connection, async (dataSource) => {
+                const result = await introspectSchema(dataSource);
+                console.log(JSON.stringify(result, null, 2));
+            });
+        });
+
+    // Describe command
+    program
+        .command('describe <table>')
+        .description('Describe a specific table schema')
+        .action(async (tableName: string) => {
+            const opts = program.opts();
+            await withDataSource(opts.connection, async (dataSource) => {
+                const result = await describeTable(dataSource, tableName);
+                console.log(JSON.stringify(result, null, 2));
+            });
+        });
+
+    // Query command
+    program
+        .command('query <sql>')
+        .description('Execute a read-only SQL query')
+        .action(async (sql: string) => {
+            const opts = program.opts();
+
+            // Enforce read-only with comprehensive validation
+            const validationError = validateReadOnlyQuery(sql);
+            if (validationError) {
+                console.error(JSON.stringify({ error: validationError }));
+                process.exit(1);
+            }
+
+            await withDataSource(opts.connection, async (dataSource) => {
+                const result = await executeQuery(dataSource, sql);
+
+                // Log the query and result (unless --no-log is specified)
+                if (opts.log !== false) {
+                    logQuery(opts.connection, sql, result);
+                }
+
+                console.log(JSON.stringify(result, null, 2));
+            });
+        });
+
+    return program;
 }
 
 async function getTables(dataSource: DataSource): Promise<string[]> {
@@ -306,4 +326,6 @@ async function executeQuery(dataSource: DataSource, query: string): Promise<any>
     }
 }
 
-main();
+// Set up and parse CLI
+const program = setupCLI();
+program.parse(process.argv);

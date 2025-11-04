@@ -42,8 +42,8 @@ export const connections: Record<string, DataSourceOptions> = {
 
 Run Claude Code and use the `database-explorer` skill:
 
-```bash
-Please create a report of sales from the past month
+```
+Create a report of sales from the past month
 ```
 
 ## Testing with Demo Database
