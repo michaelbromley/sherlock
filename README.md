@@ -149,10 +149,11 @@ By default, all executed queries and their results are automatically logged to c
 - **MySQL / MariaDB**: Full support with proper table and column introspection
 - **PostgreSQL**: Full support including schema-aware queries
 - **SQLite**: Full support via better-sqlite3
+- **Microsoft SQL Server**: Full support with proper table and column introspection
 
 ## Demo Databases (Docker)
 
-This project includes a Docker Compose setup with MySQL and PostgreSQL databases pre-populated with the [Chinook sample database](https://github.com/lerocha/chinook-database).
+This project includes a Docker Compose setup with MySQL, PostgreSQL, and SQL Server databases pre-populated with the [Chinook sample database](https://github.com/lerocha/chinook-database).
 
 This makes it perfect for testing queries like:
 - "Show me the top 10 best-selling tracks"
@@ -170,16 +171,22 @@ npm run setup:demo
 # 2. Start the Docker containers
 docker-compose up -d
 
-# 3. Verify databases are running
+# 3. Initialize the SQL Server database (required for SQL Server only)
+npm run init:mssql
+
+# 4. Verify databases are running
 docker-compose ps
 
-# 4. Test the connection
+# 5. Test the connections
 tsx src/query-db.ts tables
 tsx src/query-db.ts --connection chinook-postgres tables
+tsx src/query-db.ts --connection chinook-mssql tables
 
 # Or run the verification script
 npm run verify:docker
 ```
+
+**Note**: SQL Server runs on port 14330 (instead of the default 1433) to avoid conflicts. The SQL Server container uses platform emulation on Apple Silicon Macs, which may result in slower startup times.
 
 ## Claude Code Skill
 

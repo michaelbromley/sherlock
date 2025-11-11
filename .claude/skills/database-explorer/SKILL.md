@@ -49,7 +49,7 @@ All commands support an optional `--connection` (or `-c`) flag to specify which 
 - **Read-only mode**: Only SELECT, SHOW, DESCRIBE, and EXPLAIN queries are allowed. Any attempt to execute INSERT, UPDATE, DELETE, or DDL statements will be rejected.
 - **Database configuration**: Database connections are defined in the root `config.ts` file. Each connection has a name and TypeORM DataSourceOptions:
   - A connection named 'default' will be used when `--connection` is not specified
-  - Supported database types: MySQL/MariaDB, PostgreSQL, SQLite
+  - Supported database types: MySQL/MariaDB, PostgreSQL, SQLite, Microsoft SQL Server
 - **JSON output**: All results are returned as JSON, making them easy to parse and present to the user.
 - **Multiple connections**: Use the `--connection` flag to switch between different database connections defined in your config.
 
@@ -59,29 +59,34 @@ When the user asks a database question:
 
 1. **First time or unclear schema**: Start by introspecting the schema or listing tables to understand the database structure:
    ```bash
-   tsx src/query-db.ts tables
+   npx tsx src/query-db.ts tables
    ```
 
 2. **Understand table structure**: If you need details about a specific table:
    ```bash
-   tsx src/query-db.ts describe users
+   npx tsx src/query-db.ts describe users
    ```
 
 3. **Convert natural language to SQL**: Based on the user's question and the schema, write an appropriate SQL query. Make sure
    to correctly format the string according to the DB type, which is given in the config.ts file for the active connection:
     - postgres/sqlite
-   ```
+   ```sql
    SELECT "id", "name", "email" FROM "users" WHERE "createdAt" > '2024-01-01' LIMIT 20;
    ```
    - mysql/mariadb
-   ```
+   ```sql
    SELECT `id`, `name`, `email` FROM `users` WHERE `createdAt` > '2024-01-01' LIMIT 20;
    ```
+   - mssql (Microsoft SQL Server)
+   ```sql
+   SELECT TOP 20 [id], [name], [email] FROM [users] WHERE [createdAt] > '2024-01-01';
+   ```
+   Note: SQL Server uses TOP instead of LIMIT for limiting results.
    
 
 4. **Execute the query**:
    ```bash
-   tsx src/query-db.ts query "SELECT id, name, email FROM users WHERE created_at > '2024-01-01' LIMIT 20"
+   npx tsx src/query-db.ts query "SELECT id, name, email FROM users WHERE created_at > '2024-01-01' LIMIT 20"
    ```
 
 5. **Present results**: Format and present the JSON results in a user-friendly way, highlighting key insights. Ask the user if they want to save the report. If yes, save it in `output/reports/<connection_name>/<descriptive_filename>.md`.
@@ -108,7 +113,7 @@ When the user asks a database question:
 2. Identify the `users` table with relevant columns
 3. Execute:
    ```bash
-   tsx src/query-db.ts query "SELECT `id`, `username`, `email`, `created_at` FROM `users` ORDER BY `created_at` DESC LIMIT 10"
+   npx tsx src/query-db.ts query "SELECT `id`, `username`, `email`, `created_at` FROM `users` ORDER BY `created_at` DESC LIMIT 10"
    ```
 4. Present the results in a formatted table
 5. Ask if a report is wanted, if so, save to md file and make sure to include the raw SQL queries that were used.
@@ -121,7 +126,7 @@ When the user asks a database question:
 1. Check schema to understand table relationships
 2. Execute:
    ```bash
-   tsx src/query-db.ts query "SELECT `category`, COUNT(*) as `item_count` FROM `items` GROUP BY `category` ORDER BY `item_count` DESC"
+   npx tsx src/query-db.ts query "SELECT `category`, COUNT(*) as `item_count` FROM `items` GROUP BY `category` ORDER BY `item_count` DESC"
    ```
 3. Present results with insights
 
@@ -132,10 +137,10 @@ When the user asks a database question:
 **Assistant**:
 1. Query development database:
    ```bash
-   tsx src/query-db.ts --connection development query "SELECT COUNT(*) as `user_count` FROM `users`"
+   npx tsx src/query-db.ts --connection development query "SELECT COUNT(*) as `user_count` FROM `users`"
    ```
 2. Query production database:
    ```bash
-   tsx src/query-db.ts --connection production query "SELECT COUNT(*) as `user_count` FROM `users`"
+   npx tsx src/query-db.ts --connection production query "SELECT COUNT(*) as `user_count` FROM `users`"
    ```
 3. Present comparison with analysis

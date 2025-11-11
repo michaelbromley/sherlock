@@ -172,13 +172,16 @@ async function getTables(dataSource: DataSource): Promise<string[]> {
     } else if (dbType === 'better-sqlite3' || dbType === 'sqljs') {
         query =
             "SELECT name as table_name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name";
+    } else if (dbType === 'mssql') {
+        query =
+            "SELECT table_name FROM information_schema.tables WHERE table_type = 'BASE TABLE' AND table_catalog = DB_NAME() ORDER BY table_name";
     } else {
         query = 'SHOW TABLES';
     }
 
     const result = await dataSource.query(query);
 
-    if (dbType === 'postgres' || dbType === 'better-sqlite3' || dbType === 'sqljs') {
+    if (dbType === 'postgres' || dbType === 'better-sqlite3' || dbType === 'sqljs' || dbType === 'mssql') {
         return result.map((row: any) => row.table_name || row.name);
     } else {
         // MySQL/MariaDB
@@ -201,6 +204,18 @@ async function describeTable(dataSource: DataSource, tableName: string): Promise
                 character_maximum_length
             FROM information_schema.columns
             WHERE table_name = '${tableName}'
+            ORDER BY ordinal_position
+        `;
+    } else if (dbType === 'mssql') {
+        query = `
+            SELECT
+                column_name,
+                data_type,
+                is_nullable,
+                column_default,
+                character_maximum_length
+            FROM information_schema.columns
+            WHERE table_name = '${tableName}' AND table_catalog = DB_NAME()
             ORDER BY ordinal_position
         `;
     } else if (dbType === 'better-sqlite3' || dbType === 'sqljs') {
