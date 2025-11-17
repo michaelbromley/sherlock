@@ -4,7 +4,9 @@
       "mcp__memory-keeper__context_session_start",
       "mcp__sequential-thinking__sequentialthinking",
       "Bash(python3 -c \"import pandas; print(''pandas available'')\")",
-      "mcp__memory-keeper__context_save"
+      "mcp__memory-keeper__context_save",
+      "Skill(database-explorer)",
+      "Bash(npx tsx:*)"
     ],
     "deny": [],
     "ask": []

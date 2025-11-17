@@ -40,7 +40,7 @@ WITH Book5Completions AS (
         si.Sequence = 5
         -- Completed items only
         AND asii.IsCompleted = 1
-        -- Date range: 2021 onwards
+        -- Date range: 2021 to present
         AND asii.EndDate >= '2021-01-01'
         AND asii.EndDate IS NOT NULL
         AND asi.StartDate IS NOT NULL
@@ -105,7 +105,7 @@ WITH Book6Completions AS (
         si.Sequence = 6
         -- Completed items only
         AND asii.IsCompleted = 1
-        -- Date range: 2021 onwards
+        -- Date range: 2021 to present
         AND asii.EndDate >= '2021-01-01'
         AND asii.EndDate IS NOT NULL
         AND asi.StartDate IS NOT NULL
@@ -170,7 +170,7 @@ WITH Book7Completions AS (
         si.Sequence = 7
         -- Completed items only
         AND asii.IsCompleted = 1
-        -- Date range: 2021 onwards
+        -- Date range: 2021 to present
         AND asii.EndDate >= '2021-01-01'
         AND asii.EndDate IS NOT NULL
         AND asi.StartDate IS NOT NULL
