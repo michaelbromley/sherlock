@@ -5,22 +5,63 @@ The `ElectoralUnits` table represents Bahai administrative jurisdictions used fo
 
 ## Table Structure
 
-| Column Name | Data Type | Nullable | Description |
-|------------|-----------|----------|-------------|
-| **Id** | bigint | NO | Primary key, unique identifier for each electoral unit |
-| **Name** | nvarchar(255) | NO | Name of the electoral unit |
-| **LatinName** | nvarchar(255) | YES | Romanized/Latin script version of the name |
-| **Comments** | nvarchar(max) | YES | Free-text notes and additional information |
-| **CreatedTimestamp** | datetime | NO | When the record was created |
-| **CreatedBy** | uniqueidentifier | NO | User ID who created the record |
-| **LastUpdatedTimestamp** | datetime | NO | When the record was last modified |
-| **LastUpdatedBy** | uniqueidentifier | NO | User ID who last modified the record |
-| **ImportedTimestamp** | datetime | YES | When data was imported from external system |
-| **ImportedFrom** | uniqueidentifier | YES | Source system identifier for imported data |
-| **ImportedFileType** | varchar(50) | YES | File format of imported data |
-| **GUID** | uniqueidentifier | NO | Globally unique identifier for synchronization |
-| **LegacyId** | nvarchar(255) | YES | Original ID from legacy system |
-| **InstituteId** | nvarchar(50) | YES | External institute system identifier |
+The following sections describe in detail the meaning, purpose and uses for each of the fields in this table. Each subsection heading within this section maps to a field, and each subsection body describes that field in more detail.
+
+### Id
+
+Primary key, unique identifier for each electoral unit
+
+### Name
+
+Name of the electoral unit
+
+### LatinName
+
+Romanized/Latin script version of the name
+
+### Comments
+
+Free-text notes and additional information
+
+### CreatedTimestamp
+
+When the record was created
+
+### CreatedBy
+
+User ID who created the record
+
+### LastUpdatedTimestamp
+
+When the record was last modified
+
+### LastUpdatedBy
+
+User ID who last modified the record
+
+### ImportedTimestamp
+
+When data was imported from external system
+
+### ImportedFrom
+
+Source system identifier for imported data
+
+### ImportedFileType
+
+File format of imported data
+
+### GUID
+
+Globally unique identifier for synchronization
+
+### LegacyId
+
+Original ID from legacy system
+
+### InstituteId
+
+External institute system identifier
 
 ## Key Relationships
 

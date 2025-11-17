@@ -5,20 +5,55 @@ The `StudyItems` table defines the curriculum elements used in Bahai educational
 
 ## Table Structure
 
-| Column Name | Data Type | Nullable | Description |
-|------------|-----------|----------|-------------|
-| **Id** | bigint | NO | Primary key, unique identifier for each study item |
-| **Order** | int | NO | Sequence number for ordering items within parent or activity type |
-| **IsReleased** | bit | NO | Flag indicating if study item is available for use |
-| **ActivityType** | tinyint | YES | Type of activity: 0=Children's Classes, 1=Junior Youth, 2=Study Circles, NULL=Multiple |
-| **ParentStudyItemId** | bigint | YES | Foreign key to parent StudyItem (for hierarchical structure) |
-| **CreatedTimestamp** | datetime | NO | When the record was created |
-| **CreatedBy** | uniqueidentifier | NO | User ID who created the record |
-| **LastUpdatedTimestamp** | datetime | NO | When the record was last modified |
-| **LastUpdatedBy** | uniqueidentifier | NO | User ID who last modified the record |
-| **ImportedTimestamp** | datetime | YES | When data was imported from external system |
-| **ImportedFrom** | uniqueidentifier | YES | Source system identifier for imported data |
-| **ImportedFileType** | varchar(50) | YES | File format of imported data |
+The following sections describe in detail the meaning, purpose and uses for each of the fields in this table. Each subsection heading within this section maps to a field, and each subsection body describes that field in more detail.
+
+### Id
+
+Primary key, unique identifier for each study item
+
+### Order
+
+Sequence number for ordering items within parent or activity type
+
+### IsReleased
+
+Flag indicating if study item is available for use
+
+### ActivityType
+
+Type of activity: 0=Children's Classes, 1=Junior Youth, 2=Study Circles, NULL=Multiple
+
+### ParentStudyItemId
+
+Foreign key to parent StudyItem (for hierarchical structure)
+
+### CreatedTimestamp
+
+When the record was created
+
+### CreatedBy
+
+User ID who created the record
+
+### LastUpdatedTimestamp
+
+When the record was last modified
+
+### LastUpdatedBy
+
+User ID who last modified the record
+
+### ImportedTimestamp
+
+When data was imported from external system
+
+### ImportedFrom
+
+Source system identifier for imported data
+
+### ImportedFileType
+
+File format of imported data
 
 ## Key Relationships
 

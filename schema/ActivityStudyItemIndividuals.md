@@ -5,26 +5,79 @@ The `ActivityStudyItemIndividuals` table is a critical junction table that creat
 
 ## Table Structure
 
-| Column Name | Data Type | Nullable | Description |
-|------------|-----------|----------|-------------|
-| **Id** | bigint | NO | Primary key, unique identifier for each enrollment record |
-| **IndividualType** | tinyint | NO | Category/type of the individual participant |
-| **IndividualRole** | tinyint | NO | Role the individual plays in the activity (see Role Definitions below) |
-| **IsCurrent** | bit | NO | Boolean indicating if the individual is currently active in this activity |
-| **IsCompleted** | bit | NO | Boolean indicating if the individual has completed the study item |
-| **DisplayEndDate** | varchar(20) | YES | Human-readable completion/end date for display |
-| **EndDate** | datetime | YES | Actual completion/end date for the individual's participation |
-| **IndividualId** | bigint | NO | Foreign key to Individuals table |
-| **ActivityId** | bigint | YES | Foreign key to Activities table |
-| **StudyItemId** | bigint | YES | Foreign key to StudyItems table (specific curriculum element) |
-| **CreatedTimestamp** | datetime | NO | When the record was created |
-| **CreatedBy** | uniqueidentifier | NO | User ID who created the record |
-| **LastUpdatedTimestamp** | datetime | NO | When the record was last modified |
-| **LastUpdatedBy** | uniqueidentifier | NO | User ID who last modified the record |
-| **ImportedTimestamp** | datetime | YES | When data was imported from external system |
-| **ImportedFrom** | uniqueidentifier | YES | Source system identifier for imported data |
-| **ImportedFileType** | varchar(50) | YES | File format of imported data |
-| **ActivityStudyItemId** | bigint | YES | Foreign key to ActivityStudyItems table |
+The following sections describe in detail the meaning, purpose and uses for each of the fields in this table. Each subsection heading within this section maps to a field, and each subsection body describes that field in more detail.
+
+### Id
+
+Primary key, unique identifier for each enrollment record
+
+### IndividualType
+
+Category/type of the individual participant
+
+### IndividualRole
+
+Role the individual plays in the activity (see Role Definitions below)
+
+### IsCurrent
+
+Boolean indicating if the individual is currently active in this activity
+
+### IsCompleted
+
+Boolean indicating if the individual has completed the study item
+
+### DisplayEndDate
+
+Human-readable completion/end date for display
+
+### EndDate
+
+Actual completion/end date for the individual's participation
+
+### IndividualId
+
+Foreign key to Individuals table
+
+### ActivityId
+
+Foreign key to Activities table
+
+### StudyItemId
+
+Foreign key to StudyItems table (specific curriculum element)
+
+### CreatedTimestamp
+
+When the record was created
+
+### CreatedBy
+
+User ID who created the record
+
+### LastUpdatedTimestamp
+
+When the record was last modified
+
+### LastUpdatedBy
+
+User ID who last modified the record
+
+### ImportedTimestamp
+
+When data was imported from external system
+
+### ImportedFrom
+
+Source system identifier for imported data
+
+### ImportedFileType
+
+File format of imported data
+
+### ActivityStudyItemId
+
+Foreign key to ActivityStudyItems table
 
 ## Key Relationships
 

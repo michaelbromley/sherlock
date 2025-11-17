@@ -5,20 +5,55 @@ The `ListFilterColumns` table defines filter criteria for custom lists. It speci
 
 ## Table Structure
 
-| Column Name | Data Type | Nullable | Description |
-|------------|-----------|----------|-------------|
-| **Id** | bigint | NO | Primary key, unique identifier |
-| **FilterOperator** | varchar(50) | NO | Comparison operator (Equals, Contains, GreaterThan, etc.) |
-| **FilterValue** | nvarchar(max) | YES | Value to filter by |
-| **LogicalOperator** | varchar(10) | YES | AND/OR for combining with other filters |
-| **ParentFilterColumnId** | bigint | YES | For nested filter groups (self-referential) |
-| **Order** | int | NO | Order of filter application |
-| **ListId** | bigint | NO | Foreign key to Lists table |
-| **ListColumnId** | bigint | NO | Foreign key to ListColumns table |
-| **CreatedTimestamp** | datetime | NO | When the record was created |
-| **CreatedBy** | uniqueidentifier | NO | User ID who created the record |
-| **LastUpdatedTimestamp** | datetime | NO | When the record was last modified |
-| **LastUpdatedBy** | uniqueidentifier | NO | User ID who last modified the record |
+The following sections describe in detail the meaning, purpose and uses for each of the fields in this table. Each subsection heading within this section maps to a field, and each subsection body describes that field in more detail.
+
+### Id
+
+Primary key, unique identifier
+
+### FilterOperator
+
+Comparison operator (Equals, Contains, GreaterThan, etc.)
+
+### FilterValue
+
+Value to filter by
+
+### LogicalOperator
+
+AND/OR for combining with other filters
+
+### ParentFilterColumnId
+
+For nested filter groups (self-referential)
+
+### Order
+
+Order of filter application
+
+### ListId
+
+Foreign key to Lists table
+
+### ListColumnId
+
+Foreign key to ListColumns table
+
+### CreatedTimestamp
+
+When the record was created
+
+### CreatedBy
+
+User ID who created the record
+
+### LastUpdatedTimestamp
+
+When the record was last modified
+
+### LastUpdatedBy
+
+User ID who last modified the record
 
 ## Key Relationships
 

@@ -5,23 +5,67 @@ The `LoadDataFiles` table tracks data import operations in the SRP database. It 
 
 ## Table Structure
 
-| Column Name | Data Type | Nullable | Description |
-|------------|-----------|----------|-------------|
-| **Id** | bigint | NO | Primary key, unique identifier for each import operation |
-| **FileName** | nvarchar(255) | NO | Original name of the imported file |
-| **FileType** | varchar(50) | NO | Type/format of file (CSV, Excel, XML, etc.) |
-| **FileSize** | bigint | YES | Size of file in bytes |
-| **ImportStartTimestamp** | datetime | NO | When import operation began |
-| **ImportEndTimestamp** | datetime | YES | When import operation completed |
-| **ImportStatus** | varchar(50) | NO | Status: Success, Failed, Partial, InProgress |
-| **RecordsProcessed** | int | YES | Total number of records attempted |
-| **RecordsSucceeded** | int | YES | Number of records successfully imported |
-| **RecordsFailed** | int | YES | Number of records that failed to import |
-| **ErrorMessage** | nvarchar(max) | YES | Error details if import failed |
-| **ImportedBy** | uniqueidentifier | NO | User ID who initiated the import |
-| **Comments** | nvarchar(max) | YES | Additional notes about the import |
-| **GUID** | uniqueidentifier | NO | Globally unique identifier for this import operation |
-| **CreatedTimestamp** | datetime | NO | When the log record was created |
+The following sections describe in detail the meaning, purpose and uses for each of the fields in this table. Each subsection heading within this section maps to a field, and each subsection body describes that field in more detail.
+
+### Id
+
+Primary key, unique identifier for each import operation
+
+### FileName
+
+Original name of the imported file
+
+### FileType
+
+Type/format of file (CSV, Excel, XML, etc.)
+
+### FileSize
+
+Size of file in bytes
+
+### ImportStartTimestamp
+
+When import operation began
+
+### ImportEndTimestamp
+
+When import operation completed
+
+### ImportStatus
+
+Status: Success, Failed, Partial, InProgress
+
+### RecordsProcessed
+
+Total number of records attempted
+
+### RecordsSucceeded
+
+Number of records successfully imported
+
+### RecordsFailed
+
+Number of records that failed to import
+
+### ErrorMessage
+
+Error details if import failed
+
+### ImportedBy
+
+User ID who initiated the import
+
+### Comments
+
+Additional notes about the import
+
+### GUID
+
+Globally unique identifier for this import operation
+
+### CreatedTimestamp
+
+When the log record was created
 
 ## Purpose and Function
 

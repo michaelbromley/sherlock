@@ -5,22 +5,63 @@ The `LocalizedStudyItems` table provides multi-language support for study items 
 
 ## Table Structure
 
-| Column Name | Data Type | Nullable | Description |
-|------------|-----------|----------|-------------|
-| **Id** | bigint | NO | Primary key, unique identifier for each localized entry |
-| **Language** | varchar(10) | NO | Language code (e.g., 'en-US', 'fr-FR', 'es-ES') |
-| **Name** | nvarchar(255) | NO | Full name of the study item in this language |
-| **ShortName** | nvarchar(255) | YES | Abbreviated name for space-constrained displays |
-| **CondensedName** | nvarchar(255) | YES | Very short name for compact views |
-| **Title** | nvarchar(255) | YES | Formal title of the study item |
-| **StudyItemId** | bigint | NO | Foreign key to StudyItems table |
-| **CreatedTimestamp** | datetime | NO | When the record was created |
-| **CreatedBy** | uniqueidentifier | NO | User ID who created the record |
-| **LastUpdatedTimestamp** | datetime | NO | When the record was last modified |
-| **LastUpdatedBy** | uniqueidentifier | NO | User ID who last modified the record |
-| **ImportedTimestamp** | datetime | YES | When data was imported from external system |
-| **ImportedFrom** | uniqueidentifier | YES | Source system identifier for imported data |
-| **ImportedFileType** | varchar(50) | YES | File format of imported data |
+The following sections describe in detail the meaning, purpose and uses for each of the fields in this table. Each subsection heading within this section maps to a field, and each subsection body describes that field in more detail.
+
+### Id
+
+Primary key, unique identifier for each localized entry
+
+### Language
+
+Language code (e.g., 'en-US', 'fr-FR', 'es-ES')
+
+### Name
+
+Full name of the study item in this language
+
+### ShortName
+
+Abbreviated name for space-constrained displays
+
+### CondensedName
+
+Very short name for compact views
+
+### Title
+
+Formal title of the study item
+
+### StudyItemId
+
+Foreign key to StudyItems table
+
+### CreatedTimestamp
+
+When the record was created
+
+### CreatedBy
+
+User ID who created the record
+
+### LastUpdatedTimestamp
+
+When the record was last modified
+
+### LastUpdatedBy
+
+User ID who last modified the record
+
+### ImportedTimestamp
+
+When data was imported from external system
+
+### ImportedFrom
+
+Source system identifier for imported data
+
+### ImportedFileType
+
+File format of imported data
 
 ## Key Relationships
 

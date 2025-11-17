@@ -5,32 +5,103 @@ The `Activities` table is a central entity in the SRP database that tracks all e
 
 ## Table Structure
 
-| Column Name | Data Type | Nullable | Description |
-|------------|-----------|----------|-------------|
-| **Id** | bigint | NO | Primary key, unique identifier for each activity |
-| **ActivityType** | tinyint | NO | Type of activity: 0=Children's Classes, 1=Junior Youth Groups, 2=Study Circles |
-| **DisplayStartDate** | varchar(20) | NO | Human-readable start date for display purposes (e.g., "October 2024") |
-| **StartDate** | datetime | NO | Actual start date for system processing and calculations |
-| **DisplayEndDate** | varchar(20) | YES | Human-readable end date for display purposes |
-| **EndDate** | datetime | YES | Actual end date; NULL indicates ongoing activity |
-| **Comments** | nvarchar(max) | YES | Free-text comments or notes about the activity |
-| **IsCompleted** | bit | NO | Boolean flag indicating if the activity has been completed |
-| **HasServiceProjects** | bit | YES | Indicates if the activity includes service projects component |
-| **Participants** | int | YES | Total number of participants (can be overridden) |
-| **BahaiParticipants** | int | YES | Number of participants who are Bahá'í believers |
-| **LocalityId** | bigint | NO | Foreign key to Localities table, identifies where the activity takes place |
-| **SubdivisionId** | bigint | YES | Foreign key to Subdivisions table for more precise location (neighborhood level) |
-| **IsOverrideParticipantCounts** | bit | NO | Flag indicating manual override of calculated participant counts |
-| **CreatedTimestamp** | datetime | NO | When the record was created |
-| **CreatedBy** | uniqueidentifier | NO | User ID who created the record |
-| **LastUpdatedTimestamp** | datetime | NO | When the record was last modified |
-| **LastUpdatedBy** | uniqueidentifier | NO | User ID who last modified the record |
-| **ImportedTimestamp** | datetime | YES | When data was imported from external system |
-| **ImportedFrom** | uniqueidentifier | YES | Source system identifier for imported data |
-| **ImportedFileType** | varchar(50) | YES | File format of imported data (e.g., "CSV", "Excel") |
-| **GUID** | uniqueidentifier | NO | Globally unique identifier for synchronization across systems |
-| **LegacyId** | nvarchar(255) | YES | Original ID from legacy system for migration tracking |
-| **InstituteId** | nvarchar(50) | YES | External institute system identifier |
+The following sections describe in detail the meaning, purpose and uses for each of the fields in this table. Each subsection heading within this section maps to a field, and each subsection body describes that field in more detail.
+
+### Id
+
+Primary key, unique identifier for each activity
+
+### ActivityType
+
+Type of activity: 0=Children's Classes, 1=Junior Youth Groups, 2=Study Circles
+
+### DisplayStartDate
+
+Human-readable start date for display purposes (e.g., "October 2024")
+
+### StartDate
+
+Actual start date for system processing and calculations
+
+### DisplayEndDate
+
+Human-readable end date for display purposes
+
+### EndDate
+
+Actual end date; NULL indicates ongoing activity
+
+### Comments
+
+Free-text comments or notes about the activity
+
+### IsCompleted
+
+Boolean flag indicating if the activity has been completed
+
+### HasServiceProjects
+
+Indicates if the activity includes service projects component
+
+### Participants
+
+Total number of participants (can be overridden)
+
+### BahaiParticipants
+
+Number of participants who are Bahá'í believers
+
+### LocalityId
+
+Foreign key to Localities table, identifies where the activity takes place
+
+### SubdivisionId
+
+Foreign key to Subdivisions table for more precise location (neighborhood level)
+
+### IsOverrideParticipantCounts
+
+Flag indicating manual override of calculated participant counts
+
+### CreatedTimestamp
+
+When the record was created
+
+### CreatedBy
+
+User ID who created the record
+
+### LastUpdatedTimestamp
+
+When the record was last modified
+
+### LastUpdatedBy
+
+User ID who last modified the record
+
+### ImportedTimestamp
+
+When data was imported from external system
+
+### ImportedFrom
+
+Source system identifier for imported data
+
+### ImportedFileType
+
+File format of imported data (e.g., "CSV", "Excel")
+
+### GUID
+
+Globally unique identifier for synchronization across systems
+
+### LegacyId
+
+Original ID from legacy system for migration tracking
+
+### InstituteId
+
+External institute system identifier
 
 ## Key Relationships
 

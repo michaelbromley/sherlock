@@ -5,17 +5,43 @@ The `ListSortColumns` table specifies the sort order for custom lists. It define
 
 ## Table Structure
 
-| Column Name | Data Type | Nullable | Description |
-|------------|-----------|----------|-------------|
-| **Id** | bigint | NO | Primary key, unique identifier |
-| **SortDirection** | varchar(10) | NO | Sort direction: ASC (ascending) or DESC (descending) |
-| **Order** | int | NO | Priority order when sorting by multiple columns |
-| **ListId** | bigint | NO | Foreign key to Lists table |
-| **ListColumnId** | bigint | NO | Foreign key to ListColumns table |
-| **CreatedTimestamp** | datetime | NO | When the record was created |
-| **CreatedBy** | uniqueidentifier | NO | User ID who created the record |
-| **LastUpdatedTimestamp** | datetime | NO | When the record was last modified |
-| **LastUpdatedBy** | uniqueidentifier | NO | User ID who last modified the record |
+The following sections describe in detail the meaning, purpose and uses for each of the fields in this table. Each subsection heading within this section maps to a field, and each subsection body describes that field in more detail.
+
+### Id
+
+Primary key, unique identifier
+
+### SortDirection
+
+Sort direction: ASC (ascending) or DESC (descending)
+
+### Order
+
+Priority order when sorting by multiple columns
+
+### ListId
+
+Foreign key to Lists table
+
+### ListColumnId
+
+Foreign key to ListColumns table
+
+### CreatedTimestamp
+
+When the record was created
+
+### CreatedBy
+
+User ID who created the record
+
+### LastUpdatedTimestamp
+
+When the record was last modified
+
+### LastUpdatedBy
+
+User ID who last modified the record
 
 ## Key Relationships
 

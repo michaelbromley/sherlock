@@ -5,16 +5,39 @@ The `Lists` table is part of the SRP database's dynamic list management system. 
 
 ## Table Structure
 
-| Column Name | Data Type | Nullable | Description |
-|------------|-----------|----------|-------------|
-| **Id** | bigint | NO | Primary key, unique identifier for each list |
-| **Name** | nvarchar(255) | NO | Name of the list |
-| **Description** | nvarchar(max) | YES | Detailed description of the list's purpose |
-| **Order** | int | NO | Display order for lists in UI |
-| **CreatedTimestamp** | datetime | NO | When the list was created |
-| **CreatedBy** | uniqueidentifier | NO | User ID who created the list |
-| **LastUpdatedTimestamp** | datetime | NO | When the list was last modified |
-| **LastUpdatedBy** | uniqueidentifier | NO | User ID who last modified the list |
+The following sections describe in detail the meaning, purpose and uses for each of the fields in this table. Each subsection heading within this section maps to a field, and each subsection body describes that field in more detail.
+
+### Id
+
+Primary key, unique identifier for each list
+
+### Name
+
+Name of the list
+
+### Description
+
+Detailed description of the list's purpose
+
+### Order
+
+Display order for lists in UI
+
+### CreatedTimestamp
+
+When the list was created
+
+### CreatedBy
+
+User ID who created the list
+
+### LastUpdatedTimestamp
+
+When the list was last modified
+
+### LastUpdatedBy
+
+User ID who last modified the list
 
 ## Key Relationships
 

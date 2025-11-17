@@ -5,21 +5,59 @@ The `ListColumns` table defines all available database columns and fields that c
 
 ## Table Structure
 
-| Column Name | Data Type | Nullable | Description |
-|------------|-----------|----------|-------------|
-| **Id** | bigint | NO | Primary key, unique identifier for each column definition |
-| **ColumnName** | nvarchar(255) | NO | Technical name of the database column |
-| **DisplayName** | nvarchar(255) | NO | User-friendly name for display |
-| **DataType** | varchar(50) | NO | Data type (string, number, date, boolean, etc.) |
-| **TableName** | nvarchar(255) | NO | Source database table |
-| **Order** | int | NO | Display order in column selection UI |
-| **IsFilterable** | bit | NO | Can this column be used in filters |
-| **IsSortable** | bit | NO | Can this column be used for sorting |
-| **Description** | nvarchar(max) | YES | Detailed description of the column |
-| **CreatedTimestamp** | datetime | NO | When the column definition was created |
-| **CreatedBy** | uniqueidentifier | NO | User ID who created the definition |
-| **LastUpdatedTimestamp** | datetime | NO | When the definition was last modified |
-| **LastUpdatedBy** | uniqueidentifier | NO | User ID who last modified the definition |
+The following sections describe in detail the meaning, purpose and uses for each of the fields in this table. Each subsection heading within this section maps to a field, and each subsection body describes that field in more detail.
+
+### Id
+
+Primary key, unique identifier for each column definition
+
+### ColumnName
+
+Technical name of the database column
+
+### DisplayName
+
+User-friendly name for display
+
+### DataType
+
+Data type (string, number, date, boolean, etc.)
+
+### TableName
+
+Source database table
+
+### Order
+
+Display order in column selection UI
+
+### IsFilterable
+
+Can this column be used in filters
+
+### IsSortable
+
+Can this column be used for sorting
+
+### Description
+
+Detailed description of the column
+
+### CreatedTimestamp
+
+When the column definition was created
+
+### CreatedBy
+
+User ID who created the definition
+
+### LastUpdatedTimestamp
+
+When the definition was last modified
+
+### LastUpdatedBy
+
+User ID who last modified the definition
 
 ## Key Relationships
 

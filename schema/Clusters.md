@@ -5,32 +5,103 @@ The `Clusters` table represents the primary operational unit in the Bahai admini
 
 ## Table Structure
 
-| Column Name | Data Type | Nullable | Description |
-|------------|-----------|----------|-------------|
-| **Id** | bigint | NO | Primary key, unique identifier for each cluster |
-| **Name** | nvarchar(255) | NO | Name of the cluster in local language/script |
-| **LatinName** | nvarchar(255) | YES | Romanized/Latin script version of the name for international use |
-| **StageOfDevelopment** | varchar(50) | YES | Development stage: Milestone1, Milestone2, Milestone3, etc. |
-| **GeographicSize** | int | YES | Numeric value for the cluster's geographic area |
-| **GeographicSizeUnit** | nvarchar(10) | YES | Unit of measurement (e.g., "km²", "mi²") |
-| **TotalPopulation** | int | YES | Estimated total population living in the cluster area |
-| **ChildrenClassCoordinators** | int | YES | Number of individuals coordinating children's classes |
-| **JuniorYouthGroupCoordinators** | int | YES | Number of individuals coordinating junior youth groups |
-| **StudyCircleCoordinators** | int | YES | Number of individuals coordinating study circles |
-| **Comments** | nvarchar(max) | YES | Free-text notes and additional information about the cluster |
-| **RegionId** | bigint | NO | Foreign key to Regions table |
-| **SubregionId** | bigint | YES | Foreign key to Subregions table (optional intermediate level) |
-| **GroupOfClusterId** | bigint | YES | Foreign key to GroupOfClusters table (optional grouping) |
-| **CreatedTimestamp** | datetime | NO | When the record was created |
-| **CreatedBy** | uniqueidentifier | NO | User ID who created the record |
-| **LastUpdatedTimestamp** | datetime | NO | When the record was last modified |
-| **LastUpdatedBy** | uniqueidentifier | NO | User ID who last modified the record |
-| **ImportedTimestamp** | datetime | YES | When data was imported from external system |
-| **ImportedFrom** | uniqueidentifier | YES | Source system identifier for imported data |
-| **ImportedFileType** | varchar(50) | YES | File format of imported data |
-| **GUID** | uniqueidentifier | NO | Globally unique identifier for synchronization |
-| **LegacyId** | nvarchar(255) | YES | Original ID from legacy system |
-| **InstituteId** | nvarchar(50) | YES | External institute system identifier |
+The following sections describe in detail the meaning, purpose and uses for each of the fields in this table. Each subsection heading within this section maps to a field, and each subsection body describes that field in more detail.
+
+### Id
+
+Primary key, unique identifier for each cluster
+
+### Name
+
+Name of the cluster in local language/script
+
+### LatinName
+
+Romanized/Latin script version of the name for international use
+
+### StageOfDevelopment
+
+Development stage: Milestone1, Milestone2, Milestone3, etc.
+
+### GeographicSize
+
+Numeric value for the cluster's geographic area
+
+### GeographicSizeUnit
+
+Unit of measurement (e.g., "km²", "mi²")
+
+### TotalPopulation
+
+Estimated total population living in the cluster area
+
+### ChildrenClassCoordinators
+
+Number of individuals coordinating children's classes
+
+### JuniorYouthGroupCoordinators
+
+Number of individuals coordinating junior youth groups
+
+### StudyCircleCoordinators
+
+Number of individuals coordinating study circles
+
+### Comments
+
+Free-text notes and additional information about the cluster
+
+### RegionId
+
+Foreign key to Regions table
+
+### SubregionId
+
+Foreign key to Subregions table (optional intermediate level)
+
+### GroupOfClusterId
+
+Foreign key to GroupOfClusters table (optional grouping)
+
+### CreatedTimestamp
+
+When the record was created
+
+### CreatedBy
+
+User ID who created the record
+
+### LastUpdatedTimestamp
+
+When the record was last modified
+
+### LastUpdatedBy
+
+User ID who last modified the record
+
+### ImportedTimestamp
+
+When data was imported from external system
+
+### ImportedFrom
+
+Source system identifier for imported data
+
+### ImportedFileType
+
+File format of imported data
+
+### GUID
+
+Globally unique identifier for synchronization
+
+### LegacyId
+
+Original ID from legacy system
+
+### InstituteId
+
+External institute system identifier
 
 ## Key Relationships
 

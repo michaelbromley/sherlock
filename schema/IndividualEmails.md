@@ -5,16 +5,39 @@ The `IndividualEmails` table stores email addresses for individuals tracked in t
 
 ## Table Structure
 
-| Column Name | Data Type | Nullable | Description |
-|------------|-----------|----------|-------------|
-| **Id** | bigint | NO | Primary key, unique identifier for each email record |
-| **Email** | varchar(255) | NO | Email address in standard format (user@domain.com) |
-| **IsPrimary** | bit | NO | Flag indicating if this is the primary email for the individual |
-| **IndividualId** | bigint | NO | Foreign key to Individuals table |
-| **CreatedTimestamp** | datetime | NO | When the email record was created |
-| **CreatedBy** | uniqueidentifier | NO | User ID who created the record |
-| **LastUpdatedTimestamp** | datetime | NO | When the record was last modified |
-| **LastUpdatedBy** | uniqueidentifier | NO | User ID who last modified the record |
+The following sections describe in detail the meaning, purpose and uses for each of the fields in this table. Each subsection heading within this section maps to a field, and each subsection body describes that field in more detail.
+
+### Id
+
+Primary key, unique identifier for each email record
+
+### Email
+
+Email address in standard format (user@domain.com)
+
+### IsPrimary
+
+Flag indicating if this is the primary email for the individual
+
+### IndividualId
+
+Foreign key to Individuals table
+
+### CreatedTimestamp
+
+When the email record was created
+
+### CreatedBy
+
+User ID who created the record
+
+### LastUpdatedTimestamp
+
+When the record was last modified
+
+### LastUpdatedBy
+
+User ID who last modified the record
 
 ## Key Relationships
 

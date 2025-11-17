@@ -5,18 +5,47 @@ The `DBScriptHistories` table tracks all database schema changes, migrations, an
 
 ## Table Structure
 
-| Column Name | Data Type | Nullable | Description |
-|------------|-----------|----------|-------------|
-| **Id** | bigint | NO | Primary key, unique identifier for each script execution |
-| **Version** | varchar(50) | NO | Version number or identifier of the database script |
-| **ScriptName** | varchar(255) | NO | Name/filename of the executed script |
-| **ExecutedTimestamp** | datetime | NO | When the script was executed |
-| **ExecutedBy** | uniqueidentifier | YES | User ID who executed the script |
-| **ScriptHash** | varchar(64) | YES | Hash of the script content for integrity verification |
-| **ExecutionTime** | int | YES | Time taken to execute the script (in milliseconds) |
-| **Success** | bit | NO | Whether the script executed successfully |
-| **ErrorMessage** | nvarchar(max) | YES | Error details if the script failed |
-| **RollbackScript** | nvarchar(max) | YES | SQL to rollback this change if needed |
+The following sections describe in detail the meaning, purpose and uses for each of the fields in this table. Each subsection heading within this section maps to a field, and each subsection body describes that field in more detail.
+
+### Id
+
+Primary key, unique identifier for each script execution
+
+### Version
+
+Version number or identifier of the database script
+
+### ScriptName
+
+Name/filename of the executed script
+
+### ExecutedTimestamp
+
+When the script was executed
+
+### ExecutedBy
+
+User ID who executed the script
+
+### ScriptHash
+
+Hash of the script content for integrity verification
+
+### ExecutionTime
+
+Time taken to execute the script (in milliseconds)
+
+### Success
+
+Whether the script executed successfully
+
+### ErrorMessage
+
+Error details if the script failed
+
+### RollbackScript
+
+SQL to rollback this change if needed
 
 ## Purpose and Usage
 

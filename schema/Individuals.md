@@ -5,34 +5,111 @@ The `Individuals` table is the central entity for tracking all people involved i
 
 ## Table Structure
 
-| Column Name | Data Type | Nullable | Description |
-|------------|-----------|----------|-------------|
-| **Id** | bigint | NO | Primary key, unique identifier for each individual |
-| **FirstName** | nvarchar(255) | NO | Given name(s) of the individual |
-| **FamilyName** | nvarchar(255) | NO | Surname or family name |
-| **Gender** | varchar(1) | YES | Gender: 'M' (Male), 'F' (Female) |
-| **BirthYear** | int | YES | Year of birth (YYYY format) |
-| **IsBirthYearEstimated** | bit | NO | Flag indicating if birth year is estimated vs. exact |
-| **IsBahai** | bit | NO | Indicates if person is a registered Bahai believer |
-| **BahaiRegistrationDate** | datetime | YES | Date when person enrolled as a Bahai |
-| **DisplayBahaiRegistrationDate** | varchar(20) | YES | Human-readable registration date |
-| **IsArchived** | bit | NO | Flag indicating if record is archived (inactive) |
-| **ArchivedTimestamp** | datetime | YES | When the record was archived |
-| **ArchivedBy** | uniqueidentifier | YES | User ID who archived the record |
-| **Comments** | nvarchar(max) | YES | Free-text notes about the individual |
-| **LocalityId** | bigint | NO | Foreign key to Localities table (residence) |
-| **SubdivisionId** | bigint | YES | Foreign key to Subdivisions table (neighborhood) |
-| **CreatedTimestamp** | datetime | NO | When the record was created |
-| **CreatedBy** | uniqueidentifier | NO | User ID who created the record |
-| **LastUpdatedTimestamp** | datetime | NO | When the record was last modified |
-| **LastUpdatedBy** | uniqueidentifier | NO | User ID who last modified the record |
-| **ImportedTimestamp** | datetime | YES | When data was imported from external system |
-| **ImportedFrom** | uniqueidentifier | YES | Source system identifier for imported data |
-| **ImportedFileType** | varchar(50) | YES | File format of imported data |
-| **GUID** | uniqueidentifier | NO | Globally unique identifier for synchronization |
-| **LegacyId** | nvarchar(255) | YES | Original ID from legacy system |
-| **InstituteId** | nvarchar(50) | YES | External institute system identifier |
-| **WasLegacyRecord** | bit | YES | Flag indicating record was migrated from legacy system |
+The following sections describe in detail the meaning, purpose and uses for each of the fields in this table. Each subsection heading within this section maps to a field, and each subsection body describes that field in more detail.
+
+### Id
+
+Primary key, unique identifier for each individual
+
+### FirstName
+
+Given name(s) of the individual
+
+### FamilyName
+
+Surname or family name
+
+### Gender
+
+Gender: 'M' (Male), 'F' (Female)
+
+### BirthYear
+
+Year of birth (YYYY format)
+
+### IsBirthYearEstimated
+
+Flag indicating if birth year is estimated vs. exact
+
+### IsBahai
+
+Indicates if person is a registered Bahai believer
+
+### BahaiRegistrationDate
+
+Date when person enrolled as a Bahai
+
+### DisplayBahaiRegistrationDate
+
+Human-readable registration date
+
+### IsArchived
+
+Flag indicating if record is archived (inactive)
+
+### ArchivedTimestamp
+
+When the record was archived
+
+### ArchivedBy
+
+User ID who archived the record
+
+### Comments
+
+Free-text notes about the individual
+
+### LocalityId
+
+Foreign key to Localities table (residence)
+
+### SubdivisionId
+
+Foreign key to Subdivisions table (neighborhood)
+
+### CreatedTimestamp
+
+When the record was created
+
+### CreatedBy
+
+User ID who created the record
+
+### LastUpdatedTimestamp
+
+When the record was last modified
+
+### LastUpdatedBy
+
+User ID who last modified the record
+
+### ImportedTimestamp
+
+When data was imported from external system
+
+### ImportedFrom
+
+Source system identifier for imported data
+
+### ImportedFileType
+
+File format of imported data
+
+### GUID
+
+Globally unique identifier for synchronization
+
+### LegacyId
+
+Original ID from legacy system
+
+### InstituteId
+
+External institute system identifier
+
+### WasLegacyRecord
+
+Flag indicating record was migrated from legacy system
 
 ## Key Relationships
 

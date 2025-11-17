@@ -5,14 +5,31 @@ The `ApplicationConfigurations` table stores system-wide configuration settings 
 
 ## Table Structure
 
-| Column Name | Data Type | Nullable | Description |
-|------------|-----------|----------|-------------|
-| **Id** | bigint | NO | Primary key, unique identifier for each configuration entry |
-| **Name** | varchar(50) | NO | Configuration setting name/key (unique identifier for the setting) |
-| **Value** | varchar(max) | NO | Configuration value (can store strings, numbers, JSON, etc.) |
-| **Order** | int | NO | Display/processing order for related configurations |
-| **CreatedTimestamp** | datetime | NO | When the configuration was first created |
-| **LastUpdatedTimestamp** | datetime | NO | When the configuration was last modified |
+The following sections describe in detail the meaning, purpose and uses for each of the fields in this table. Each subsection heading within this section maps to a field, and each subsection body describes that field in more detail.
+
+### Id
+
+Primary key, unique identifier for each configuration entry
+
+### Name
+
+Configuration setting name/key (unique identifier for the setting)
+
+### Value
+
+Configuration value (can store strings, numbers, JSON, etc.)
+
+### Order
+
+Display/processing order for related configurations
+
+### CreatedTimestamp
+
+When the configuration was first created
+
+### LastUpdatedTimestamp
+
+When the configuration was last modified
 
 ## Purpose and Usage
 

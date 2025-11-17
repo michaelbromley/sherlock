@@ -5,15 +5,35 @@ The `ApplicationHistories` table tracks the deployment and operational history o
 
 ## Table Structure
 
-| Column Name | Data Type | Nullable | Description |
-|------------|-----------|----------|-------------|
-| **Id** | bigint | NO | Primary key, unique identifier for each history entry |
-| **ApplicationVersion** | varchar(50) | NO | Version number of the application (e.g., "2.5.1", "3.0.0-beta") |
-| **Action** | varchar(50) | NO | Type of action performed (Deploy, Upgrade, Rollback, Restore, etc.) |
-| **ActionTimestamp** | datetime | NO | When the action occurred |
-| **ApplicationGUID** | uniqueidentifier | YES | Unique identifier for the application instance |
-| **IsRestored** | bit | YES | Flag indicating if this version was restored from backup |
-| **Timestamp** | datetime | YES | Additional timestamp for related events or backup time |
+The following sections describe in detail the meaning, purpose and uses for each of the fields in this table. Each subsection heading within this section maps to a field, and each subsection body describes that field in more detail.
+
+### Id
+
+Primary key, unique identifier for each history entry
+
+### ApplicationVersion
+
+Version number of the application (e.g., "2.5.1", "3.0.0-beta")
+
+### Action
+
+Type of action performed (Deploy, Upgrade, Rollback, Restore, etc.)
+
+### ActionTimestamp
+
+When the action occurred
+
+### ApplicationGUID
+
+Unique identifier for the application instance
+
+### IsRestored
+
+Flag indicating if this version was restored from backup
+
+### Timestamp
+
+Additional timestamp for related events or backup time
 
 ## Purpose and Usage
 

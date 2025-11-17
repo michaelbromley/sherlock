@@ -7,69 +7,251 @@ This table is central to tracking the growth and development of the Bahai commun
 
 ## Table Structure
 
-| Column Name | Data Type | Nullable | Description |
-|------------|-----------|----------|-------------|
-| **Id** | bigint | NO | Primary key, unique identifier for each cycle record |
-| **DisplayStartDate** | varchar(20) | NO | Human-readable cycle start date |
-| **StartDate** | datetime | NO | Actual cycle start date for system processing |
-| **DisplayEndDate** | varchar(20) | NO | Human-readable cycle end date |
-| **EndDate** | datetime | NO | Actual cycle end date |
-| **FriendsParticipatingInExpansionPhase** | int | YES | Number of individuals active in expansion activities |
-| **CompletedBook1** | int | YES | Number who completed Book 1 (Reflections on the Life of the Spirit) |
-| **CompletedBook2** | int | YES | Number who completed Book 2 (Arising to Serve) |
-| **CompletedBook3G1** | int | YES | Number who completed Book 3 Grade 1 (Teaching Children's Classes) |
-| **CompletedBook3G2** | int | YES | Number who completed Book 3 Grade 2 |
-| **CompletedBook3G3** | int | YES | Number who completed Book 3 Grade 3 |
-| **CompletedBook4** | int | YES | Number who completed Book 4 (The Twin Manifestations) |
-| **CompletedBook5** | int | YES | Number who completed Book 5 (Releasing the Powers of Junior Youth) |
-| **CompletedBook6** | int | YES | Number who completed Book 6 (Teaching the Cause) |
-| **CompletedBook7** | int | YES | Number who completed Book 7 (Walking Together on a Path of Service) |
-| **CompletedBook9U1** | int | YES | Number who completed Book 9 Unit 1 (Gaining an Historical Perspective) |
-| **CompletedBook9U2** | int | YES | Number who completed Book 9 Unit 2 |
-| **IsOverrideCompletedBookData** | bit | NO | Manual override flag for book completion data |
-| **DevotionalMeetingsNumber** | int | YES | Count of devotional meetings held |
-| **DevotionalMeetingsAttendance** | int | YES | Total attendance at devotional meetings |
-| **DevotionalMeetingsFriendsOfFaith** | int | YES | Non-Bahai participants in devotional meetings |
-| **IsOverrideDevotionalMeetingsData** | bit | NO | Manual override flag for devotional data |
-| **ChildrenClassesNumber** | int | YES | Number of children's classes operating |
-| **ChildrenClassesAttendance** | int | YES | Total children attending classes |
-| **ChildrenClassesFriendsOfFaith** | int | YES | Non-Bahai children in classes |
-| **JuniorYouthGroupsNumber** | int | YES | Number of junior youth groups operating |
-| **JuniorYouthGroupsAttendance** | int | YES | Total junior youth participating |
-| **JuniorYouthGroupsFriendsOfFaith** | int | YES | Non-Bahai junior youth in groups |
-| **IsOverrideJuniorYouthGroupsData** | bit | NO | Manual override flag for junior youth data |
-| **StudyCirclesNumber** | int | YES | Number of study circles operating |
-| **StudyCirclesAttendance** | int | YES | Total participants in study circles |
-| **StudyCirclesFriendsOfFaith** | int | YES | Non-Bahai participants in study circles |
-| **IsOverrideStudyCirclesData** | bit | NO | Manual override flag for study circle data |
-| **ChildrenAndJuniorYouthRegisteredDuringCycle** | int | YES | New child/junior youth enrollments |
-| **YouthAndAdultsEnrolledDuringCycle** | int | YES | New youth/adult enrollments |
-| **NewlyEnrolledBelieversInInstituteProcess** | int | YES | New believers who entered institute process |
-| **IsOverrideExpansionDuringCycleData** | bit | NO | Manual override flag for expansion data |
-| **BahaiChildren** | int | YES | Number of Bahai children (ages 0-11) |
-| **BahaiJuniorYouth** | int | YES | Number of Bahai junior youth (ages 12-15) |
-| **BahaiYouth** | int | YES | Number of Bahai youth (ages 15-21) |
-| **BahaiAdultMen** | int | YES | Number of adult male Bahai believers |
-| **BahaiAdultWomen** | int | YES | Number of adult female Bahai believers |
-| **TotalBahaiBelievers** | int | YES | Total Bahai population in cluster |
-| **IsOverrideBahaiPopulationData** | bit | NO | Manual override flag for population data |
-| **HomesVisitedForDeepening** | int | YES | Number of homes visited for spiritual education |
-| **LocalitiesInNineteenDayFeastHeld** | int | YES | Number of localities holding Nineteen Day Feast |
-| **NineteenDayFeastAttendanceEstimated** | int | YES | Estimated attendance at Feasts |
-| **LocalitiesObservedOneOrMoreHolyDays** | int | YES | Localities celebrating Bahai Holy Days |
-| **HolyDayAttendanceEstimated** | int | YES | Estimated attendance at Holy Day observances |
-| **IsOverrideCommunityDevelopmentData** | bit | NO | Manual override flag for community development data |
-| **ClusterId** | bigint | NO | Foreign key to Clusters table |
-| **IsCycleDateChanged** | bit | NO | Flag indicating cycle dates were modified |
-| **IsLocalityDataChanged** | bit | NO | Flag indicating locality-level data changed |
-| **IsRecalculated** | bit | NO | Flag indicating statistics were recalculated |
-| **CreatedTimestamp** | datetime | NO | When the record was created |
-| **CreatedBy** | uniqueidentifier | NO | User ID who created the record |
-| **LastUpdatedTimestamp** | datetime | NO | When the record was last modified |
-| **LastUpdatedBy** | uniqueidentifier | NO | User ID who last modified the record |
-| **ImportedTimestamp** | datetime | YES | When data was imported from external system |
-| **ImportedFrom** | uniqueidentifier | YES | Source system identifier for imported data |
-| **ImportedFileType** | varchar(50) | YES | File format of imported data |
+The following sections describe in detail the meaning, purpose and uses for each of the fields in this table. Each subsection heading within this section maps to a field, and each subsection body describes that field in more detail.
+
+### Id
+
+Primary key, unique identifier for each cycle record
+
+### DisplayStartDate
+
+Human-readable cycle start date
+
+### StartDate
+
+Actual cycle start date for system processing
+
+### DisplayEndDate
+
+Human-readable cycle end date
+
+### EndDate
+
+Actual cycle end date
+
+### FriendsParticipatingInExpansionPhase
+
+Number of individuals active in expansion activities
+
+### CompletedBook1
+
+Number who completed Book 1 (Reflections on the Life of the Spirit)
+
+### CompletedBook2
+
+Number who completed Book 2 (Arising to Serve)
+
+### CompletedBook3G1
+
+Number who completed Book 3 Grade 1 (Teaching Children's Classes)
+
+### CompletedBook3G2
+
+Number who completed Book 3 Grade 2
+
+### CompletedBook3G3
+
+Number who completed Book 3 Grade 3
+
+### CompletedBook4
+
+Number who completed Book 4 (The Twin Manifestations)
+
+### CompletedBook5
+
+Number who completed Book 5 (Releasing the Powers of Junior Youth)
+
+### CompletedBook6
+
+Number who completed Book 6 (Teaching the Cause)
+
+### CompletedBook7
+
+Number who completed Book 7 (Walking Together on a Path of Service)
+
+### CompletedBook9U1
+
+Number who completed Book 9 Unit 1 (Gaining an Historical Perspective)
+
+### CompletedBook9U2
+
+Number who completed Book 9 Unit 2
+
+### IsOverrideCompletedBookData
+
+Manual override flag for book completion data
+
+### DevotionalMeetingsNumber
+
+Count of devotional meetings held
+
+### DevotionalMeetingsAttendance
+
+Total attendance at devotional meetings
+
+### DevotionalMeetingsFriendsOfFaith
+
+Non-Bahai participants in devotional meetings
+
+### IsOverrideDevotionalMeetingsData
+
+Manual override flag for devotional data
+
+### ChildrenClassesNumber
+
+Number of children's classes operating
+
+### ChildrenClassesAttendance
+
+Total children attending classes
+
+### ChildrenClassesFriendsOfFaith
+
+Non-Bahai children in classes
+
+### JuniorYouthGroupsNumber
+
+Number of junior youth groups operating
+
+### JuniorYouthGroupsAttendance
+
+Total junior youth participating
+
+### JuniorYouthGroupsFriendsOfFaith
+
+Non-Bahai junior youth in groups
+
+### IsOverrideJuniorYouthGroupsData
+
+Manual override flag for junior youth data
+
+### StudyCirclesNumber
+
+Number of study circles operating
+
+### StudyCirclesAttendance
+
+Total participants in study circles
+
+### StudyCirclesFriendsOfFaith
+
+Non-Bahai participants in study circles
+
+### IsOverrideStudyCirclesData
+
+Manual override flag for study circle data
+
+### ChildrenAndJuniorYouthRegisteredDuringCycle
+
+New child/junior youth enrollments
+
+### YouthAndAdultsEnrolledDuringCycle
+
+New youth/adult enrollments
+
+### NewlyEnrolledBelieversInInstituteProcess
+
+New believers who entered institute process
+
+### IsOverrideExpansionDuringCycleData
+
+Manual override flag for expansion data
+
+### BahaiChildren
+
+Number of Bahai children (ages 0-11)
+
+### BahaiJuniorYouth
+
+Number of Bahai junior youth (ages 12-15)
+
+### BahaiYouth
+
+Number of Bahai youth (ages 15-21)
+
+### BahaiAdultMen
+
+Number of adult male Bahai believers
+
+### BahaiAdultWomen
+
+Number of adult female Bahai believers
+
+### TotalBahaiBelievers
+
+Total Bahai population in cluster
+
+### IsOverrideBahaiPopulationData
+
+Manual override flag for population data
+
+### HomesVisitedForDeepening
+
+Number of homes visited for spiritual education
+
+### LocalitiesInNineteenDayFeastHeld
+
+Number of localities holding Nineteen Day Feast
+
+### NineteenDayFeastAttendanceEstimated
+
+Estimated attendance at Feasts
+
+### LocalitiesObservedOneOrMoreHolyDays
+
+Localities celebrating Bahai Holy Days
+
+### HolyDayAttendanceEstimated
+
+Estimated attendance at Holy Day observances
+
+### IsOverrideCommunityDevelopmentData
+
+Manual override flag for community development data
+
+### ClusterId
+
+Foreign key to Clusters table
+
+### IsCycleDateChanged
+
+Flag indicating cycle dates were modified
+
+### IsLocalityDataChanged
+
+Flag indicating locality-level data changed
+
+### IsRecalculated
+
+Flag indicating statistics were recalculated
+
+### CreatedTimestamp
+
+When the record was created
+
+### CreatedBy
+
+User ID who created the record
+
+### LastUpdatedTimestamp
+
+When the record was last modified
+
+### LastUpdatedBy
+
+User ID who last modified the record
+
+### ImportedTimestamp
+
+When data was imported from external system
+
+### ImportedFrom
+
+Source system identifier for imported data
+
+### ImportedFileType
+
+File format of imported data
 
 ## Key Relationships
 

@@ -5,17 +5,43 @@ The `IndividualPhones` table stores phone numbers for individuals in the SRP dat
 
 ## Table Structure
 
-| Column Name | Data Type | Nullable | Description |
-|------------|-----------|----------|-------------|
-| **Id** | bigint | NO | Primary key, unique identifier for each phone record |
-| **PhoneNumber** | varchar(50) | NO | Phone number (may include country code, area code, extensions) |
-| **PhoneType** | tinyint | NO | Type of phone: 0=Mobile, 1=Home, 2=Work, 3=Other |
-| **IsPrimary** | bit | NO | Flag indicating if this is the primary phone for the individual |
-| **IndividualId** | bigint | NO | Foreign key to Individuals table |
-| **CreatedTimestamp** | datetime | NO | When the phone record was created |
-| **CreatedBy** | uniqueidentifier | NO | User ID who created the record |
-| **LastUpdatedTimestamp** | datetime | NO | When the record was last modified |
-| **LastUpdatedBy** | uniqueidentifier | NO | User ID who last modified the record |
+The following sections describe in detail the meaning, purpose and uses for each of the fields in this table. Each subsection heading within this section maps to a field, and each subsection body describes that field in more detail.
+
+### Id
+
+Primary key, unique identifier for each phone record
+
+### PhoneNumber
+
+Phone number (may include country code, area code, extensions)
+
+### PhoneType
+
+Type of phone: 0=Mobile, 1=Home, 2=Work, 3=Other
+
+### IsPrimary
+
+Flag indicating if this is the primary phone for the individual
+
+### IndividualId
+
+Foreign key to Individuals table
+
+### CreatedTimestamp
+
+When the phone record was created
+
+### CreatedBy
+
+User ID who created the record
+
+### LastUpdatedTimestamp
+
+When the record was last modified
+
+### LastUpdatedBy
+
+User ID who last modified the record
 
 ## Key Relationships
 
