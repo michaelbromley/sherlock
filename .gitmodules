@@ -1,0 +1,3 @@
+[submodule "db-tool"]
+	path = db-tool
+	url = https://github.com/jwiegley/db-tool.git
