@@ -247,6 +247,101 @@ WHERE C.[GeographicSize] IS NOT NULL
 ORDER BY [PopulationDensity] DESC
 ```
 
+### Cluster Activity Statistics with Geographic Context
+```sql
+-- Comprehensive cluster profile with activities and participants
+SELECT
+    c.[Name] AS ClusterName,
+    r.[Name] AS RegionName,
+    nc.[Name] AS Country,
+    c.[StageOfDevelopment],
+    c.[TotalPopulation],
+    COUNT(DISTINCT l.[Id]) AS LocalityCount,
+    COUNT(DISTINCT CASE WHEN a.[ActivityType] = 0 THEN a.[Id] END) AS ChildrensClasses,
+    COUNT(DISTINCT CASE WHEN a.[ActivityType] = 1 THEN a.[Id] END) AS JuniorYouthGroups,
+    COUNT(DISTINCT CASE WHEN a.[ActivityType] = 2 THEN a.[Id] END) AS StudyCircles,
+    COUNT(DISTINCT i.[Id]) AS ActiveIndividuals
+FROM [Clusters] c
+INNER JOIN [Regions] r ON c.[RegionId] = r.[Id]
+INNER JOIN [NationalCommunities] nc ON r.[NationalCommunityId] = nc.[Id]
+LEFT JOIN [Localities] l ON c.[Id] = l.[ClusterId]
+LEFT JOIN [Activities] a ON l.[Id] = a.[LocalityId] AND a.[IsCompleted] = 0
+LEFT JOIN [Individuals] i ON l.[Id] = i.[LocalityId] AND i.[IsArchived] = 0
+GROUP BY c.[Id], c.[Name], r.[Name], nc.[Name], c.[StageOfDevelopment], c.[TotalPopulation]
+ORDER BY r.[Name], c.[Name];
+```
+
+**Use Case:** Complete cluster profile for regional planning and resource allocation
+**Performance Notes:** Multiple LEFT JOINs can be expensive; consider materialized views for dashboards
+
+### Clusters Advancing Through Milestones
+```sql
+-- Track clusters that have progressed in development stage
+SELECT
+    c.[Name] AS ClusterName,
+    r.[Name] AS RegionName,
+    c.[StageOfDevelopment] AS CurrentStage,
+    c.[LastUpdatedTimestamp],
+    c.[LastUpdatedBy],
+    DATEDIFF(DAY, c.[LastUpdatedTimestamp], GETDATE()) AS DaysSinceUpdate
+FROM [Clusters] c
+INNER JOIN [Regions] r ON c.[RegionId] = r.[Id]
+WHERE c.[StageOfDevelopment] IS NOT NULL
+  AND c.[LastUpdatedTimestamp] >= DATEADD(MONTH, -6, GETDATE())
+ORDER BY c.[LastUpdatedTimestamp] DESC;
+```
+
+**Use Case:** Identifying recent cluster development progress for celebration and learning
+**Performance Notes:** Date filtering should use indexed LastUpdatedTimestamp
+
+### Cluster Resource and Capacity Analysis
+```sql
+-- Analyze coordinator capacity relative to population and activities
+SELECT
+    c.[Name],
+    c.[TotalPopulation],
+    c.[StageOfDevelopment],
+    (c.[ChildrenClassCoordinators] + c.[JuniorYouthGroupCoordinators] + c.[StudyCircleCoordinators]) AS TotalCoordinators,
+    COUNT(DISTINCT CASE WHEN a.[ActivityType] = 0 AND a.[IsCompleted] = 0 THEN a.[Id] END) AS ActiveChildrensClasses,
+    COUNT(DISTINCT CASE WHEN a.[ActivityType] = 1 AND a.[IsCompleted] = 0 THEN a.[Id] END) AS ActiveJYGroups,
+    COUNT(DISTINCT CASE WHEN a.[ActivityType] = 2 AND a.[IsCompleted] = 0 THEN a.[Id] END) AS ActiveStudyCircles,
+    CASE
+        WHEN (c.[ChildrenClassCoordinators] + c.[JuniorYouthGroupCoordinators] + c.[StudyCircleCoordinators]) > 0
+        THEN CAST(c.[TotalPopulation] AS FLOAT) / (c.[ChildrenClassCoordinators] + c.[JuniorYouthGroupCoordinators] + c.[StudyCircleCoordinators])
+        ELSE NULL
+    END AS PopulationPerCoordinator
+FROM [Clusters] c
+LEFT JOIN [Localities] l ON c.[Id] = l.[ClusterId]
+LEFT JOIN [Activities] a ON l.[Id] = a.[LocalityId]
+GROUP BY c.[Id], c.[Name], c.[TotalPopulation], c.[StageOfDevelopment],
+         c.[ChildrenClassCoordinators], c.[JuniorYouthGroupCoordinators], c.[StudyCircleCoordinators]
+HAVING (c.[ChildrenClassCoordinators] + c.[JuniorYouthGroupCoordinators] + c.[StudyCircleCoordinators]) > 0
+ORDER BY PopulationPerCoordinator DESC;
+```
+
+**Use Case:** Identifying clusters needing human resource development or coordinator training
+**Performance Notes:** Aggregation across activities requires good indexes on ActivityType and IsCompleted
+
+### Regional Milestone Distribution
+```sql
+-- Show distribution of cluster development stages within each region
+SELECT
+    r.[Name] AS RegionName,
+    COUNT(*) AS TotalClusters,
+    SUM(CASE WHEN c.[StageOfDevelopment] = 'Milestone1' THEN 1 ELSE 0 END) AS Milestone1Count,
+    SUM(CASE WHEN c.[StageOfDevelopment] = 'Milestone2' THEN 1 ELSE 0 END) AS Milestone2Count,
+    SUM(CASE WHEN c.[StageOfDevelopment] = 'Milestone3' THEN 1 ELSE 0 END) AS Milestone3Count,
+    SUM(CASE WHEN c.[StageOfDevelopment] IS NULL OR c.[StageOfDevelopment] NOT IN ('Milestone1', 'Milestone2', 'Milestone3') THEN 1 ELSE 0 END) AS OtherStages,
+    CAST(SUM(CASE WHEN c.[StageOfDevelopment] IN ('Milestone2', 'Milestone3') THEN 1 ELSE 0 END) * 100.0 / COUNT(*) AS DECIMAL(5,2)) AS PercentAdvanced
+FROM [Regions] r
+INNER JOIN [Clusters] c ON r.[Id] = c.[RegionId]
+GROUP BY r.[Id], r.[Name]
+ORDER BY PercentAdvanced DESC, r.[Name];
+```
+
+**Use Case:** Regional development analysis and strategic planning
+**Performance Notes:** Pivot-style aggregation; efficient for summary reports
+
 ## Business Rules and Constraints
 
 1. **Required Region**: Every cluster must belong to a region (RegionId is NOT NULL)
