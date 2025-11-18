@@ -603,6 +603,258 @@ Information supporting planning:
 - Resource allocation by population
 - Program effectiveness by segment
 
+## Privacy and Security
+
+**CRITICAL PRIVACY CLASSIFICATION** ⚠️
+
+This table contains highly sensitive personally identifiable information (PII) and requires the strictest privacy protections. Improper handling of this data could lead to privacy violations, compliance issues, and harm to individuals.
+
+### Privacy Classification
+
+**Reference:** See `reports/Privacy_and_Security_Classification_Matrix.md` for comprehensive privacy guidance across all tables.
+
+This table is classified as **CRITICAL** for privacy, meaning:
+- Contains direct personal identifiers that can identify specific individuals
+- Subject to data protection regulations (GDPR, CCPA, and similar laws)
+- Requires encryption, access controls, and audit logging
+- Never suitable for public reporting without aggregation
+- Requires explicit consent for data collection and storage
+
+### Field-Level Sensitivity
+
+| Field Name | Sensitivity Level | Privacy Concerns |
+|------------|------------------|------------------|
+| **FirstName** | **CRITICAL** | Direct personal identifier - never expose in reports |
+| **FamilyName** | **CRITICAL** | Direct personal identifier - never expose in reports |
+| **BirthDate** | **CRITICAL** | Exact birthdate can identify individuals - never expose |
+| **DisplayBirthDate** | **HIGH** | Even approximate birth information is sensitive |
+| **EstimatedYearOfBirthDate** | **HIGH** | Age information can identify individuals in small communities |
+| **IsRegisteredBahai** | **HIGH** | Religious affiliation is legally protected sensitive data |
+| **Email** (via IndividualEmails) | **CRITICAL** | Direct contact information - never expose |
+| **Phone** (via IndividualPhones) | **CRITICAL** | Direct contact information - never expose |
+| **Id** | **HIGH** | Unique identifier links to all personal data - never expose externally |
+| **GUID** | **HIGH** | Global identifier - never expose externally |
+| Gender | MODERATE | Demographic data - safe only in aggregates |
+| LocalityId, SubdivisionId | MODERATE | May identify individuals in small communities |
+| Comments | HIGH | May contain personal observations - review before any export |
+| IsArchived | LOW | Status flag - no privacy concerns |
+| Audit fields (CreatedBy, etc.) | LOW | System metadata - no privacy concerns when referring to operators, not subjects |
+
+### Prohibited Query Patterns
+
+**❌ NEVER DO THIS - Exposing Personal Identifiers:**
+```sql
+-- This violates privacy by exposing names, ages, and religious affiliation
+SELECT
+    [FirstName],
+    [FamilyName],
+    [BirthDate],
+    [IsRegisteredBahai],
+    L.[Name] AS [Locality]
+FROM [Individuals] I
+LEFT JOIN [Localities] L ON I.[LocalityId] = L.[Id]
+WHERE [IsArchived] = 0;
+```
+
+**❌ NEVER DO THIS - Individual-Level Records in Reports:**
+```sql
+-- This exposes individual participation records
+SELECT
+    I.[FirstName],
+    I.[FamilyName],
+    A.[ActivityType],
+    L.[Name] AS [Locality]
+FROM [Individuals] I
+JOIN [ActivityStudyItemIndividuals] ASI ON I.[Id] = ASI.[IndividualId]
+JOIN [Activities] A ON ASI.[ActivityId] = A.[Id]
+JOIN [Localities] L ON A.[LocalityId] = L.[Id];
+```
+
+**❌ NEVER DO THIS - Contact Information Export:**
+```sql
+-- This creates an unauthorized contact list
+SELECT
+    I.[FirstName],
+    I.[FamilyName],
+    E.[Email],
+    P.[PhoneNumber]
+FROM [Individuals] I
+LEFT JOIN [IndividualEmails] E ON I.[Id] = E.[IndividualId]
+LEFT JOIN [IndividualPhones] P ON I.[Id] = P.[IndividualId]
+WHERE I.[IsArchived] = 0;
+```
+
+### Secure Query Patterns
+
+**✅ CORRECT - Aggregated Demographics (No Personal Identifiers):**
+```sql
+-- Safe: Provides demographic statistics without exposing individuals
+SELECT
+    CASE
+        WHEN YEAR(GETDATE()) - [EstimatedYearOfBirthDate] < 12 THEN 'Children (5-11)'
+        WHEN YEAR(GETDATE()) - [EstimatedYearOfBirthDate] BETWEEN 12 AND 14 THEN 'Junior Youth (12-14)'
+        WHEN YEAR(GETDATE()) - [EstimatedYearOfBirthDate] BETWEEN 15 AND 30 THEN 'Youth (15-30)'
+        WHEN YEAR(GETDATE()) - [EstimatedYearOfBirthDate] BETWEEN 31 AND 60 THEN 'Adults (31-60)'
+        ELSE 'Seniors (60+)'
+    END AS [AgeGroup],
+    CASE [Gender]
+        WHEN 1 THEN 'Male'
+        WHEN 2 THEN 'Female'
+        ELSE 'Unspecified'
+    END AS [Gender],
+    COUNT(*) AS [Count],
+    CAST(COUNT(*) * 100.0 / SUM(COUNT(*)) OVER () AS DECIMAL(5,2)) AS [Percentage]
+FROM [Individuals]
+WHERE [IsArchived] = 0
+GROUP BY
+    CASE
+        WHEN YEAR(GETDATE()) - [EstimatedYearOfBirthDate] < 12 THEN 'Children (5-11)'
+        WHEN YEAR(GETDATE()) - [EstimatedYearOfBirthDate] BETWEEN 12 AND 14 THEN 'Junior Youth (12-14)'
+        WHEN YEAR(GETDATE()) - [EstimatedYearOfBirthDate] BETWEEN 15 AND 30 THEN 'Youth (15-30)'
+        WHEN YEAR(GETDATE()) - [EstimatedYearOfBirthDate] BETWEEN 31 AND 60 THEN 'Adults (31-60)'
+        ELSE 'Seniors (60+)'
+    END,
+    [Gender]
+ORDER BY [AgeGroup], [Gender];
+```
+
+**✅ CORRECT - Geographic Distribution (Cluster-Level Aggregation):**
+```sql
+-- Safe: Aggregates to cluster level, protecting individual privacy
+SELECT
+    R.[Name] AS [RegionName],
+    C.[Name] AS [ClusterName],
+    COUNT(DISTINCT I.[Id]) AS [TotalIndividuals],
+    SUM(CASE WHEN I.[IsRegisteredBahai] = 1 THEN 1 ELSE 0 END) AS [BahaiMembers],
+    SUM(CASE WHEN I.[IsRegisteredBahai] = 0 THEN 1 ELSE 0 END) AS [Friends]
+FROM [Individuals] I
+INNER JOIN [Localities] L ON I.[LocalityId] = L.[Id]
+INNER JOIN [Clusters] C ON L.[ClusterId] = C.[Id]
+INNER JOIN [Regions] R ON C.[RegionId] = R.[Id]
+WHERE I.[IsArchived] = 0
+GROUP BY R.[Name], C.[Name]
+HAVING COUNT(DISTINCT I.[Id]) >= 5  -- Minimum threshold to prevent small group identification
+ORDER BY R.[Name], C.[Name];
+```
+
+**✅ CORRECT - Contact Information Availability (No Actual Addresses/Phones):**
+```sql
+-- Safe: Reports existence of contact info without exposing it
+SELECT
+    C.[Name] AS [ClusterName],
+    COUNT(DISTINCT I.[Id]) AS [TotalIndividuals],
+    COUNT(DISTINCT E.[IndividualId]) AS [WithEmail],
+    COUNT(DISTINCT P.[IndividualId]) AS [WithPhone],
+    CAST(COUNT(DISTINCT E.[IndividualId]) * 100.0 / COUNT(DISTINCT I.[Id]) AS DECIMAL(5,2)) AS [PercentWithEmail],
+    CAST(COUNT(DISTINCT P.[IndividualId]) * 100.0 / COUNT(DISTINCT I.[Id]) AS DECIMAL(5,2)) AS [PercentWithPhone]
+FROM [Individuals] I
+INNER JOIN [Localities] L ON I.[LocalityId] = L.[Id]
+INNER JOIN [Clusters] C ON L.[ClusterId] = C.[Id]
+LEFT JOIN [IndividualEmails] E ON I.[Id] = E.[IndividualId]
+LEFT JOIN [IndividualPhones] P ON I.[Id] = P.[IndividualId]
+WHERE I.[IsArchived] = 0
+GROUP BY C.[Name]
+HAVING COUNT(DISTINCT I.[Id]) >= 10  -- Only show clusters with sufficient population
+ORDER BY C.[Name];
+```
+
+### Data Protection Requirements
+
+**Consent and Transparency:**
+- Obtain explicit consent before collecting FirstName, FamilyName, BirthDate, and contact information
+- Provide clear privacy notice explaining how data will be used (coordination, reporting, communication)
+- Allow individuals to review and correct their data on request
+- Implement mechanisms for individuals to request data deletion (IsArchived flag serves this purpose)
+
+**Security Measures:**
+- **Encryption:** Implement column-level encryption for FirstName, FamilyName, BirthDate at rest
+- **Access Control:** Use role-based access control (RBAC) limiting access based on legitimate need:
+  - Public reports: Aggregated statistics only (no names, no contact info)
+  - Cluster coordinators: Names and contact info for their cluster only
+  - Teachers: Names and ages of their students only
+  - Database administrators: Full access with comprehensive audit logging
+- **Audit Logging:** Log all queries accessing this table, especially those returning more than aggregates
+- **Secure Connections:** Always use SSL/TLS for database connections
+- **Strong Authentication:** Enforce strong password policies and multi-factor authentication for database access
+
+**Data Minimization:**
+- Only collect data necessary for community-building activities
+- Exact street addresses may NOT be necessary if Locality/Subdivision is sufficient for coordination
+- Consider whether optional fields like Comments are truly needed before populating
+
+**Data Retention:**
+- Archive individuals who haven't participated in activities for 5+ years (set IsArchived = 1)
+- Maintain statistical aggregates indefinitely, but consider archiving individual-level detail
+- Implement data retention policies aligned with legal requirements (GDPR, CCPA, local laws)
+- Allow individuals to exercise "right to be forgotten" by archiving their records
+
+### Compliance Considerations
+
+**GDPR (European Union):**
+If this system processes data of EU residents, GDPR applies with requirements including:
+- **Lawful basis:** Explicit consent or legitimate interest documented
+- **Right to access:** Individuals can request their data in machine-readable format
+- **Right to rectification:** Individuals can correct inaccurate data (via coordinators or database access)
+- **Right to erasure:** "Right to be forgotten" (IsArchived flag implements this)
+- **Data portability:** Provide export functionality
+- **Privacy by design:** Build encryption, access controls, and audit logging into system from the start
+- **Data Protection Officer (DPO):** May be required depending on scale of processing
+
+**CCPA (California, USA):**
+If this system processes data of California residents:
+- **Right to know:** Transparency about what personal information is collected (provide privacy notice)
+- **Right to delete:** Individuals can request deletion (archival mechanism)
+- **Right to opt-out:** Not directly applicable (system does not "sell" personal data)
+- **Non-discrimination:** Cannot deny services for exercising privacy rights
+
+**General Best Practice:**
+- Follow the most stringent applicable law (typically GDPR) as a baseline for all deployments
+- Consult local legal counsel when deploying in new jurisdictions
+- Document compliance measures and maintain records of data processing activities
+
+### Privacy Checklist for Queries
+
+Before executing any query involving the Individuals table, verify:
+
+- [ ] Query does NOT SELECT FirstName, FamilyName, BirthDate, Email, or Phone for external reports
+- [ ] All personal data is aggregated (COUNT, AVG, SUM) or grouped into categories (age ranges, gender)
+- [ ] Results with fewer than 5 individuals are suppressed or combined with other groups
+- [ ] Geographic granularity is appropriate (cluster-level safe; avoid small localities with population < 500)
+- [ ] Comments field results (if included) have been manually reviewed for personal information
+- [ ] User has legitimate need and proper authorization for this level of data access
+- [ ] Query execution will be logged for audit purposes
+- [ ] Result set is appropriate for intended audience (public report vs. internal coordinator use)
+- [ ] Query complies with applicable data protection laws (GDPR, CCPA, local regulations)
+
+### Examples with Fictitious Data Only
+
+**Important:** All documentation examples, test queries, and training materials should use **ONLY** fictitious data:
+
+**Safe Domains for Email Examples:** `.invalid`, `.example`, `.test`, `.localhost`
+**Safe Phone Numbers:** (555) 01XX range (reserved for fictional use in North America)
+
+**Example Fictitious Records:**
+| FirstName | FamilyName | Email | Phone | Locality |
+|-----------|------------|-------|-------|----------|
+| Jane | Doe | jane.example@email.invalid | (555) 0100 | Example City |
+| John | Smith | john.sample@email.invalid | (555) 0101 | Sample Town |
+| Maria | Garcia | maria.test@email.invalid | (555) 0102 | Test Village |
+
+Never use real names, email addresses, phone numbers, or other personal information in documentation, examples, or training materials.
+
+### Privacy Incident Response
+
+If unauthorized access or data exposure occurs:
+1. **Immediately** revoke compromised credentials and lock affected accounts
+2. **Notify** the Data Protection Officer or designated privacy coordinator
+3. **Assess** scope of exposure: which individuals, what data, who had access
+4. **Document** the incident with timestamps, affected records, and actions taken
+5. **Notify** affected individuals if legally required (GDPR: 72 hours for serious breaches)
+6. **Remediate** the vulnerability that led to the exposure
+7. **Review** and update access controls and security measures to prevent recurrence
+
+For questions about privacy requirements or to report privacy concerns, contact your regional Data Protection Officer or designated privacy coordinator.
+
 ## Future Considerations and Enhancements
 
 ### Potential Structural Improvements

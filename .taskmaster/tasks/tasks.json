@@ -503,17 +503,18 @@
           "7",
           "8"
         ],
-        "status": "pending",
+        "status": "done",
         "subtasks": [
           {
             "id": 1,
             "title": "Audit all 28 tables for PII and create privacy classification matrix",
             "description": "Systematically review each of the 28 database tables to identify all fields containing personally identifiable information (PII) or sensitive data, then create a comprehensive privacy matrix documenting sensitivity levels",
             "dependencies": [],
-            "details": "Read through all 28 schema documentation files in the schema/ directory. For each table, identify fields containing PII such as names, birthdates, contact information, addresses, or any other personal data. Create a privacy matrix in markdown format showing: 1) Table name, 2) Field name, 3) Data type, 4) Sensitivity level (High/Medium/Low), 5) Privacy considerations, 6) Anonymization requirements. Focus particularly on Individuals, IndividualEmails, IndividualPhones, but don't miss PII in other tables like Activities (participant data), Cycles (aggregated personal metrics), or audit fields with user information. Document which fields should never appear in public reports and establish clear data classification standards.",
-            "status": "pending",
+            "details": "Read through all 28 schema documentation files in the schema/ directory. For each table, identify fields containing PII such as names, birthdates, contact information, addresses, or any other personal data. Create a privacy matrix in markdown format showing: 1) Table name, 2) Field name, 3) Data type, 4) Sensitivity level (High/Medium/Low), 5) Privacy considerations, 6) Anonymization requirements. Focus particularly on Individuals, IndividualEmails, IndividualPhones, but don't miss PII in other tables like Activities (participant data), Cycles (aggregated personal metrics), or audit fields with user information. Document which fields should never appear in public reports and establish clear data classification standards.\n<info added on 2025-11-18T18:52:58.603Z>\nI'll analyze the codebase first to understand the current state and then provide the appropriate update text.Based on my analysis of the codebase and the comprehensive privacy matrix that was created, here is the new text that should be appended to subtask 9.1's details:\n\nSuccessfully completed comprehensive privacy classification matrix (925 lines) covering all 28 database tables documented in reports/Privacy_and_Security_Classification_Matrix.md. Implemented a 5-tier sensitivity classification system (CRITICAL/HIGH/MODERATE/LOW/MINIMAL) with detailed field-level privacy assessments for all tables containing personal information. The matrix includes SQL-based secure vs. unsafe query examples demonstrating proper anonymization techniques, data protection principles aligned with GDPR and CCPA requirements (purpose limitation, data minimization, consent, security, retention, access control), privacy-by-design recommendations at database/application/governance levels, and a 12-point privacy checklist for query and report validation. Special attention given to CRITICAL tables (Individuals, IndividualEmails, IndividualPhones, ClusterAuxiliaryBoardMembers) and HIGH sensitivity tables (Activities, ActivityStudyItemIndividuals) with specific guidance on preventing re-identification in small geographic units and activity groups. Established clear thresholds (minimum 5 participants, locality population > 500) for safe public reporting. All documentation examples use fictitious data following safe domain (.invalid, .example) and phone number ((555) 01XX) conventions to prevent accidental exposure of real personal information. Quick reference appendix provides at-a-glance privacy levels for all 28 tables.\n</info added on 2025-11-18T18:52:58.603Z>",
+            "status": "done",
             "testStrategy": "Verify that every table has been reviewed by checking against the complete table list. Ensure the privacy matrix includes all identified PII fields with no omissions. Validate that sensitivity classifications are consistent and appropriate for each data type.",
-            "parentId": "undefined"
+            "parentId": "undefined",
+            "updatedAt": "2025-11-18T18:53:04.908Z"
           },
           {
             "id": 2,
@@ -522,15 +523,17 @@
             "dependencies": [
               1
             ],
-            "details": "For each table identified as containing PII in the privacy matrix, add a prominent '## Privacy and Security Considerations' section to its schema documentation file. Include: 1) Clear warnings about sensitive fields, 2) Guidelines for data protection and handling, 3) Secure query examples using fictitious data or proper anonymization (e.g., using SUBSTRING for partial names, date ranges instead of exact birthdates, masked email domains), 4) Compliance requirements and best practices, 5) Instructions for data anonymization in reports. Ensure examples demonstrate techniques like data masking, aggregation for privacy, and role-based access patterns. Update Individuals.md, IndividualEmails.md, IndividualPhones.md first as they contain the most sensitive data, then proceed to other affected tables.",
-            "status": "pending",
+            "details": "For each table identified as containing PII in the privacy matrix, add a prominent '## Privacy and Security Considerations' section to its schema documentation file. Include: 1) Clear warnings about sensitive fields, 2) Guidelines for data protection and handling, 3) Secure query examples using fictitious data or proper anonymization (e.g., using SUBSTRING for partial names, date ranges instead of exact birthdates, masked email domains), 4) Compliance requirements and best practices, 5) Instructions for data anonymization in reports. Ensure examples demonstrate techniques like data masking, aggregation for privacy, and role-based access patterns. Update Individuals.md, IndividualEmails.md, IndividualPhones.md first as they contain the most sensitive data, then proceed to other affected tables.\n<info added on 2025-11-18T19:01:45.955Z>\nI'll analyze the codebase to verify the completion of this subtask before generating the update text.Based on my codebase analysis, I can confirm that comprehensive privacy and security sections have been successfully added to all 6 tables containing personal data as reported by the user. The sections are properly structured with field-level sensitivity classifications, prohibited/secure query patterns, compliance guidance (GDPR, CCPA, and CAN-SPAM/TCPA where applicable), data protection requirements, privacy checklists, and special considerations. The implementation exactly matches the user's detailed completion report.\n\n**COMPLETION SUMMARY:** Successfully added comprehensive privacy and security documentation to all 6 PII-containing tables: Individuals.md (252 lines with field sensitivity matrix, GDPR/CCPA compliance, data masking patterns), IndividualEmails.md (240 lines including CAN-SPAM Act requirements for email communications), IndividualPhones.md (138 lines with TCPA compliance for phone communications), ClusterAuxiliaryBoardMembers.md (116 lines addressing privacy for institutional officials and community leadership data), Activities.md (152 lines with special focus on children's safety and minor participant privacy), ActivityStudyItemIndividuals.md (229 lines covering participation privacy and educational activity data protection). Each table documentation now includes: field-level sensitivity classifications (HIGH/MEDIUM/LOW risk), prohibited query patterns with SQL examples showing privacy violations, secure query patterns demonstrating proper aggregation and anonymization, data protection requirements with encryption and access control guidance, comprehensive GDPR and CCPA compliance sections, privacy checklists for query validation, special considerations for each table's unique privacy challenges. Total: 1,127 lines of privacy documentation across 6 files. All examples use fictitious data with reserved domains (.invalid, .example) and fictional phone numbers (555-01XX range). Documentation provides clear guidance for developers and database users to prevent PII exposure in reports and ensure regulatory compliance.\n</info added on 2025-11-18T19:01:45.955Z>",
+            "status": "done",
             "testStrategy": "Review all updated documentation files to confirm privacy sections are prominent and complete. Verify that all SQL examples use only fictitious or properly anonymized data with no real PII exposed. Test that secure query examples execute correctly and properly protect sensitive information.",
-            "parentId": "undefined"
+            "parentId": "undefined",
+            "updatedAt": "2025-11-18T19:01:52.384Z"
           }
         ],
         "complexity": 3,
         "recommendedSubtasks": 2,
-        "expansionPrompt": "Break into subtasks for: 1) Auditing all 28 tables to identify PII fields and create privacy matrix, 2) Adding privacy sections and secure query examples to relevant documentation files"
+        "expansionPrompt": "Break into subtasks for: 1) Auditing all 28 tables to identify PII fields and create privacy matrix, 2) Adding privacy sections and secure query examples to relevant documentation files",
+        "updatedAt": "2025-11-18T19:01:52.384Z"
       },
       {
         "id": "10",
@@ -657,9 +660,9 @@
     ],
     "metadata": {
       "version": "1.0.0",
-      "lastModified": "2025-11-18T18:46:52.130Z",
+      "lastModified": "2025-11-18T19:01:52.385Z",
       "taskCount": 11,
-      "completedCount": 8,
+      "completedCount": 9,
       "tags": [
         "master"
       ]

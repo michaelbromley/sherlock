@@ -247,6 +247,122 @@ Table stores only name:
 - Consider linking to Individuals table for board members
 - Or add contact fields if needed
 
+## Privacy and Security
+
+**CRITICAL PRIVACY CLASSIFICATION** ⚠️
+
+This table contains names and assignments of institutional officials (Auxiliary Board members), constituting personally identifiable information requiring high-level privacy protection.
+
+### Privacy Classification
+
+**Reference:** See `reports/Privacy_and_Security_Classification_Matrix.md` for comprehensive privacy guidance.
+
+This table is classified as **CRITICAL** for privacy:
+- Contains names of appointed institutional officials
+- Links officials to specific geographic assignments
+- While assignments may be semi-public within the community, personal details require protection
+- Unauthorized disclosure could lead to unwanted contact, harassment, or security concerns for institutional officials
+
+###Field-Level Sensitivity
+
+| Field Name | Sensitivity Level | Privacy Concerns |
+|------------|------------------|------------------|
+| **IndividualId** | **HIGH** | Links to institutional official identity - restrict access to authorized coordinators |
+| **FirstName, FamilyName** | **CRITICAL** | Direct personal identifiers - protect from unauthorized access |
+| ClusterId | LOW | Geographic assignment - generally safe in institutional contexts |
+| StartDate, EndDate | MODERATE | Assignment timing - may identify individuals through correlation |
+| Comments | HIGH | May contain personal notes about officials - review before export |
+
+### Prohibited Query Patterns
+
+**❌ NEVER DO THIS - Public Exposure of Official Names:**
+```sql
+-- This exposes institutional officials' names without authorization
+SELECT [FirstName], [FamilyName], C.[Name] AS [ClusterName]
+FROM [ClusterAuxiliaryBoardMembers] AB
+INNER JOIN [Clusters] C ON AB.[ClusterId] = C.[Id];
+```
+
+**❌ NEVER DO THIS - Linking Officials to Contact Information:**
+```sql
+-- This creates an unauthorized contact list for institutional officials
+SELECT AB.[FirstName], AB.[FamilyName], E.[Email], P.[PhoneNumber]
+FROM [ClusterAuxiliaryBoardMembers] AB
+INNER JOIN [IndividualEmails] E ON AB.[IndividualId] = E.[IndividualId]
+INNER JOIN [IndividualPhones] P ON AB.[IndividualId] = P.[IndividualId];
+```
+
+### Secure Query Patterns
+
+**✅ CORRECT - Cluster Support Coverage (No Names):**
+```sql
+-- Safe: Analyzes support coverage without exposing official names
+SELECT
+    R.[Name] AS [RegionName],
+    COUNT(DISTINCT C.[Id]) AS [ClustersInRegion],
+    COUNT(DISTINCT AB.[ClusterId]) AS [ClustersWithSupport],
+    CAST(COUNT(DISTINCT AB.[ClusterId]) * 100.0 / COUNT(DISTINCT C.[Id]) AS DECIMAL(5,2)) AS [PercentCovered]
+FROM [Regions] R
+INNER JOIN [Clusters] C ON R.[Id] = C.[RegionId]
+LEFT JOIN [ClusterAuxiliaryBoardMembers] AB ON C.[Id] = AB.[ClusterId]
+GROUP BY R.[Name];
+```
+
+**✅ CORRECT - Support Distribution Statistics:**
+```sql
+-- Safe: Shows distribution of assignments without identifying officials
+SELECT
+    COUNT(DISTINCT [ClusterId]) AS [ClustersSupported],
+    COUNT(*) AS [TotalAssignments]
+FROM [ClusterAuxiliaryBoardMembers];
+```
+
+### Data Protection Requirements
+
+**Access Control:**
+- **Restricted Access:** Limit access to regional/national coordinators and authorized institutional personnel
+- **Need-to-Know Basis:** Only those requiring knowledge for coordination should have access
+- **Not Public Data:** Official assignments may be known within the community, but database access should be restricted
+- **Audit Logging:** Log all access to this table for accountability
+
+**Security Measures:**
+- Protect names and assignment details from unauthorized access
+- Do not publish official contact information without consent
+- Restrict export capabilities for this table
+- Implement row-level security if officials should only see their own assignments
+
+**Special Considerations:**
+- **Institutional Respect:** Handle information about appointed officials with appropriate respect and discretion
+- **Security Concerns:** Officials may face security risks in some regions - be especially protective
+- **Consent for Publication:** Obtain consent before publishing official names in newsletters, websites, or public reports
+- **Contact Protection:** Never expose personal contact information of officials without explicit authorization
+
+### Compliance
+
+- **GDPR:** Names of institutional officials are personal data requiring lawful basis and protection
+- **Right to Privacy:** Officials have privacy rights even in their institutional capacity
+- **Data Minimization:** Only collect necessary information for coordination purposes
+- **Retention:** Remove historical assignments when no longer needed for institutional purposes
+
+### Privacy Checklist
+
+Before any query or operation involving board member data:
+- [ ] User is authorized to access institutional official information
+- [ ] Purpose is legitimate institutional coordination need
+- [ ] Official names will NOT be exposed in public or unauthorized contexts
+- [ ] Contact information (if accessed) has explicit consent for use
+- [ ] Access is logged for audit
+- [ ] Result complies with institutional privacy policies
+
+### Best Practices for Institutional Data
+
+1. **Respect Institutional Appointments:** Handle official information with appropriate discretion
+2. **Protect Personal Details:** Never combine institutional assignments with personal contact info without authorization
+3. **Secure Communications:** When communicating about officials, use secure channels
+4. **Consent for Publication:** Always obtain consent before publishing official names externally
+5. **Regional Sensitivity:** Some regions require extra protection due to security concerns
+6. **Historical Privacy:** When officials complete their service, protect their historical assignment records
+
 ## Best Practices
 
 1. **Current Assignments**: Keep assignments up to date

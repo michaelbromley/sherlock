@@ -418,6 +418,246 @@ HAVING COUNT(DISTINCT [IndividualId]) > 1
 - Identify data quality issues
 - Support compliance requirements
 
+## Privacy and Security
+
+**CRITICAL PRIVACY CLASSIFICATION** ⚠️
+
+This table contains direct contact information (email addresses) that constitutes personally identifiable information (PII) requiring the highest level of privacy protection.
+
+### Privacy Classification
+
+**Reference:** See `reports/Privacy_and_Security_Classification_Matrix.md` for comprehensive privacy guidance across all tables.
+
+This table is classified as **CRITICAL** for privacy, meaning:
+- Contains direct personal contact information that enables communication with individuals
+- Email addresses are legally protected personal data under GDPR, CCPA, and similar regulations
+- Requires encryption, access controls, and explicit consent
+- **NEVER** expose email addresses in public reports or unauthorized contexts
+- Unauthorized disclosure could lead to spam, phishing, harassment, and privacy violations
+
+### Field-Level Sensitivity
+
+| Field Name | Sensitivity Level | Privacy Concerns |
+|------------|------------------|------------------|
+| **Email** | **CRITICAL** | Direct contact information - never expose without authorization |
+| **IndividualId** | **CRITICAL** | Links to personal identity - never expose externally |
+| Id | MODERATE | Junction table identifier - internal use only |
+| IsPrimary | LOW | Preference flag - safe when separated from email address |
+| Audit fields | LOW | System metadata - no privacy concerns |
+
+### Prohibited Query Patterns
+
+**❌ NEVER DO THIS - Exposing Email Addresses:**
+```sql
+-- This violates privacy by creating an unauthorized contact list
+SELECT
+    I.[FirstName],
+    I.[FamilyName],
+    E.[Email],
+    L.[Name] AS [Locality]
+FROM [IndividualEmails] E
+INNER JOIN [Individuals] I ON E.[IndividualId] = I.[Id]
+INNER JOIN [Localities] L ON I.[LocalityId] = L.[Id]
+WHERE E.[IsPrimary] = 1;
+```
+
+**❌ NEVER DO THIS - Email Export Without Authorization:**
+```sql
+-- This creates a mass mailing list without proper authorization
+SELECT [Email]
+FROM [IndividualEmails]
+WHERE [IsPrimary] = 1;
+```
+
+**❌ NEVER DO THIS - Linking Emails to Activity Participation:**
+```sql
+-- This reveals who participates in what activities with their contact info
+SELECT
+    I.[FirstName],
+    I.[FamilyName],
+    E.[Email],
+    A.[ActivityType],
+    L.[Name] AS [Locality]
+FROM [IndividualEmails] E
+INNER JOIN [Individuals] I ON E.[IndividualId] = I.[Id]
+INNER JOIN [ActivityStudyItemIndividuals] ASI ON I.[Id] = ASI.[IndividualId]
+INNER JOIN [Activities] A ON ASI.[ActivityId] = A.[Id]
+INNER JOIN [Localities] L ON A.[LocalityId] = L.[Id];
+```
+
+### Secure Query Patterns
+
+**✅ CORRECT - Email Availability Statistics (No Actual Addresses):**
+```sql
+-- Safe: Reports percentage with email without exposing addresses
+SELECT
+    C.[Name] AS [ClusterName],
+    COUNT(DISTINCT I.[Id]) AS [TotalIndividuals],
+    COUNT(DISTINCT E.[IndividualId]) AS [WithEmail],
+    CAST(COUNT(DISTINCT E.[IndividualId]) * 100.0 /
+         NULLIF(COUNT(DISTINCT I.[Id]), 0) AS DECIMAL(5,2)) AS [PercentWithEmail]
+FROM [Individuals] I
+INNER JOIN [Localities] L ON I.[LocalityId] = L.[Id]
+INNER JOIN [Clusters] C ON L.[ClusterId] = C.[Id]
+LEFT JOIN [IndividualEmails] E ON I.[Id] = E.[IndividualId]
+WHERE I.[IsArchived] = 0
+GROUP BY C.[Name]
+HAVING COUNT(DISTINCT I.[Id]) >= 10  -- Minimum threshold
+ORDER BY C.[Name];
+```
+
+**✅ CORRECT - Primary Email Designation Statistics:**
+```sql
+-- Safe: Analyzes primary email patterns without exposing addresses
+SELECT
+    CASE WHEN [IsPrimary] = 1 THEN 'Primary' ELSE 'Secondary' END AS [EmailType],
+    COUNT(*) AS [Count],
+    CAST(COUNT(*) * 100.0 / SUM(COUNT(*)) OVER () AS DECIMAL(5,2)) AS [Percentage]
+FROM [IndividualEmails]
+GROUP BY [IsPrimary];
+```
+
+### Data Protection Requirements
+
+**Explicit Consent Required:**
+- **NEVER** collect email addresses without explicit consent from the individual
+- Provide clear privacy notice explaining how email will be used (coordination, announcements, communication)
+- Allow individuals to review, correct, or delete their email addresses on request
+- Obtain separate consent for different uses (e.g., activity coordination vs. newsletters)
+- Document consent mechanism (checkbox, signed form, verbal with date/witness)
+
+**Security Measures:**
+- **Encryption:** Implement column-level encryption for the Email field at rest
+- **Secure Transit:** Always use SSL/TLS for database connections and email transmission
+- **Access Control:** Limit access to email addresses based on legitimate need:
+  - **Cluster coordinators:** Emails for individuals in their cluster only
+  - **Teachers:** Emails for their students and parents only
+  - **Communication staff:** Emails for authorized communications only
+  - **Database administrators:** Full access with comprehensive audit logging
+- **Audit Logging:** Log all queries that retrieve email addresses (not just SELECT * queries)
+- **Email Masking:** In user interfaces, mask email addresses (e.g., j***@example.com) unless user has authorization to see full address
+
+**Usage Restrictions:**
+- **Authorized Purposes Only:** Use emails ONLY for purposes consented to (activity coordination, announcements, safety communications)
+- **No Third-Party Sharing:** Never share email addresses with third parties without explicit consent
+- **No Commercial Use:** Never use for commercial marketing or advertising
+- **Opt-Out Mechanism:** Provide easy unsubscribe/opt-out for email communications
+- **Spam Prevention:** Implement rate limiting and abuse detection for email sending
+
+**Data Retention:**
+- Retain email addresses only as long as the individual remains active in community activities
+- When individual is archived (IsArchived = 1 in Individuals table), consider deleting or anonymizing email
+- Comply with data retention policies and legal requirements (GDPR, CCPA)
+- Allow individuals to request email deletion ("right to be forgotten")
+
+### Compliance Considerations
+
+**GDPR (European Union):**
+- Email addresses are personal data requiring lawful basis (consent or legitimate interest)
+- **Right to access:** Individuals can request confirmation of their email on file
+- **Right to rectification:** Individuals can update incorrect email addresses
+- **Right to erasure:** Individuals can request email deletion
+- **Data portability:** Provide email in machine-readable format on request
+- **Breach notification:** Notify authorities within 72 hours if email addresses are exposed
+- **Purpose limitation:** Use emails only for stated purposes; don't repurpose without new consent
+
+**CCPA (California, USA):**
+- **Right to know:** Disclose what email addresses are collected and how they're used
+- **Right to delete:** Honor requests to delete email addresses
+- **Right to opt-out:** Allow opting out of email communications (not "sale" as this system doesn't sell data)
+- **Non-discrimination:** Cannot deny services for exercising privacy rights
+
+**CAN-SPAM Act (USA - for email communications):**
+- Include physical address in all mass emails
+- Provide clear opt-out mechanism in every email
+- Honor opt-out requests within 10 business days
+- Don't use deceptive subject lines or "from" addresses
+- Identify messages as advertisements when applicable
+
+### Email Security Best Practices
+
+**Validation:**
+- Validate email format using proper regex or library (not just checking for @)
+- Verify domain exists (MX record lookup) before accepting
+- Send confirmation email with verification link to confirm address is valid and controlled by individual
+- Reject disposable/temporary email addresses for primary contact
+
+**Phishing Prevention:**
+- Educate users about phishing risks and how to verify legitimate emails
+- Use SPF, DKIM, and DMARC records to prevent email spoofing
+- Never request sensitive information (passwords, credit cards) via email
+- Include recognizable branding and contact information in legitimate emails
+
+**Email Hygiene:**
+- Regularly validate email addresses (bounce detection, engagement tracking)
+- Remove invalid, bouncing, or undeliverable addresses promptly
+- Update email addresses when individuals report changes
+- Merge duplicate email addresses (same email for multiple individuals may indicate data quality issue)
+
+### Privacy Checklist for Email Operations
+
+Before any operation involving email addresses, verify:
+
+- [ ] Explicit consent obtained from individual for this specific use
+- [ ] User has authorization to access email addresses for this purpose
+- [ ] Email addresses will be encrypted in transit (SSL/TLS)
+- [ ] Email addresses will NOT be exposed in logs, error messages, or public interfaces
+- [ ] Bulk email sending includes opt-out mechanism and complies with CAN-SPAM
+- [ ] Query results will NOT be exported to unauthorized systems or users
+- [ ] Access will be logged for audit purposes
+- [ ] Operation complies with GDPR, CCPA, and other applicable data protection laws
+- [ ] Privacy notice has been provided explaining how emails will be used
+- [ ] Individuals have been informed of their rights (access, rectification, deletion)
+
+### Incident Response
+
+If email addresses are accidentally exposed or breached:
+1. **Immediately** revoke compromised credentials and lock affected accounts
+2. **Notify** the Data Protection Officer or designated privacy coordinator within 1 hour
+3. **Assess** scope: how many email addresses, what other data, who had access
+4. **Contain** the breach: delete unauthorized copies, revoke access, disable compromised systems
+5. **Document** incident with full timeline, affected records, and actions taken
+6. **Notify** affected individuals if required by law (GDPR: 72 hours; CCPA: reasonable time)
+7. **Report** to authorities if legally required (data protection authorities under GDPR)
+8. **Remediate** the vulnerability and implement controls to prevent recurrence
+9. **Review** access controls, encryption, and security measures across the system
+
+**Potential Harms from Email Exposure:**
+- Spam and unwanted marketing
+- Phishing and social engineering attacks
+- Identity theft if combined with other personal data
+- Harassment or unwanted contact
+- Reputational harm to organization and individuals
+
+### Examples with Fictitious Data Only
+
+**Important:** All documentation, examples, and testing should use ONLY fictitious email addresses:
+
+**Safe Email Domains:**
+- `.invalid` - Reserved for non-existent domains (preferred)
+- `.example` - Reserved for examples
+- `.test` - Reserved for testing
+- `.localhost` - Local testing only
+
+**Example Fictitious Emails:**
+- jane.example@email.invalid
+- john.sample@email.invalid
+- maria.test@email.invalid
+- ahmad.demo@email.invalid
+
+**NEVER** use real email addresses in:
+- Documentation or training materials
+- Test databases or development environments
+- Example queries or code samples
+- Screenshots or demonstrations
+- Log files or error messages
+
+Using real email addresses in examples could:
+- Accidentally send emails to real people
+- Expose personal information in public documentation
+- Violate privacy policies and regulations
+- Create security vulnerabilities
+
 ## Special Considerations
 
 ### Family Email Addresses

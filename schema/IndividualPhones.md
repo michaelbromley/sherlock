@@ -633,6 +633,144 @@ ORDER BY I.[FamilyName], I.[FirstName]
 - Identify data quality issues
 - Support compliance requirements
 
+## Privacy and Security
+
+**CRITICAL PRIVACY CLASSIFICATION** ⚠️
+
+This table contains direct contact information (phone numbers) that constitutes personally identifiable information (PII) requiring the highest level of privacy protection.
+
+### Privacy Classification
+
+**Reference:** See `reports/Privacy_and_Security_Classification_Matrix.md` for comprehensive privacy guidance.
+
+This table is classified as **CRITICAL** for privacy:
+- Contains direct personal contact information enabling voice/SMS communication
+- Phone numbers are legally protected personal data under GDPR, CCPA, and similar regulations
+- Requires encryption, access controls, and explicit consent
+- **NEVER** expose phone numbers in public reports or unauthorized contexts
+- Unauthorized disclosure could lead to spam calls, phishing (vishing/smishing), harassment, and SIM-swapping attacks
+
+### Field-Level Sensitivity
+
+| Field Name | Sensitivity Level | Privacy Concerns |
+|------------|------------------|------------------|
+| **PhoneNumber** | **CRITICAL** | Direct contact information - never expose without authorization |
+| **IndividualId** | **CRITICAL** | Links to personal identity - never expose externally |
+| Id | MODERATE | Junction table identifier - internal use only |
+| PhoneType | LOW | Category (mobile/home/work) - safe when separated from phone number |
+| IsPrimary | LOW | Preference flag - safe when separated from phone number |
+| Audit fields | LOW | System metadata - no privacy concerns |
+
+### Prohibited Query Patterns
+
+**❌ NEVER DO THIS - Exposing Phone Numbers:**
+```sql
+SELECT I.[FirstName], I.[FamilyName], P.[PhoneNumber], P.[PhoneType]
+FROM [IndividualPhones] P
+INNER JOIN [Individuals] I ON P.[IndividualId] = I.[Id]
+WHERE P.[IsPrimary] = 1;
+```
+
+**❌ NEVER DO THIS - Creating Contact Lists:**
+```sql
+SELECT [PhoneNumber] FROM [IndividualPhones] WHERE [PhoneType] = 0;  -- All mobile numbers
+```
+
+### Secure Query Patterns
+
+**✅ CORRECT - Phone Availability Statistics (No Actual Numbers):**
+```sql
+SELECT
+    C.[Name] AS [ClusterName],
+    COUNT(DISTINCT I.[Id]) AS [TotalIndividuals],
+    COUNT(DISTINCT P.[IndividualId]) AS [WithPhone],
+    CAST(COUNT(DISTINCT P.[IndividualId]) * 100.0 / COUNT(DISTINCT I.[Id]) AS DECIMAL(5,2)) AS [PercentWithPhone]
+FROM [Individuals] I
+INNER JOIN [Localities] L ON I.[LocalityId] = L.[Id]
+INNER JOIN [Clusters] C ON L.[ClusterId] = C.[Id]
+LEFT JOIN [IndividualPhones] P ON I.[Id] = P.[IndividualId]
+WHERE I.[IsArchived] = 0
+GROUP BY C.[Name]
+HAVING COUNT(DISTINCT I.[Id]) >= 10;
+```
+
+**✅ CORRECT - Phone Type Distribution:**
+```sql
+SELECT
+    CASE [PhoneType]
+        WHEN 0 THEN 'Mobile'
+        WHEN 1 THEN 'Home'
+        WHEN 2 THEN 'Work'
+        ELSE 'Other'
+    END AS [PhoneType],
+    COUNT(*) AS [Count]
+FROM [IndividualPhones]
+GROUP BY [PhoneType];
+```
+
+### Data Protection Requirements
+
+**Explicit Consent Required:**
+- **NEVER** collect phone numbers without explicit consent
+- Obtain separate consent for different uses (SMS/calls/WhatsApp/emergency contact)
+- Document consent mechanism and retain records
+- Allow individuals to review, correct, or delete their phone numbers
+
+**Security Measures:**
+- **Encryption:** Column-level encryption for PhoneNumber field at rest
+- **Secure Transit:** SSL/TLS for all database connections
+- **Access Control:** Limit access based on legitimate need (cluster coordinators, teachers for their students only)
+- **Phone Masking:** In UIs, mask numbers (e.g., (555) ***-1234) unless authorized
+- **Audit Logging:** Log all queries retrieving phone numbers
+
+**Usage Restrictions:**
+- **Authorized Purposes Only:** Use ONLY for consented purposes (coordination, emergency contact, SMS reminders)
+- **No Third-Party Sharing:** Never share without explicit consent
+- **No Commercial Use:** Never use for telemarketing or advertising
+- **No Auto-Dialing Without Consent:** Comply with TCPA (USA) and similar regulations
+- **SMS Opt-In Required:** Obtain explicit opt-in before sending SMS/text messages
+
+**Compliance:**
+- **GDPR:** Phone numbers are personal data requiring lawful basis, right to access/erasure/portability
+- **CCPA:** Right to know, delete, and opt-out
+- **TCPA (USA):** Prior express written consent required for automated calls/texts to mobile numbers
+- **National Do-Not-Call Registries:** Check against DNC lists before calling
+
+### Privacy Checklist for Phone Operations
+
+Before any operation involving phone numbers:
+- [ ] Explicit consent obtained for this specific use (calls/SMS/WhatsApp)
+- [ ] User authorized to access phone numbers for this purpose
+- [ ] Numbers encrypted in transit and at rest
+- [ ] Numbers will NOT be exposed in logs, errors, or public interfaces
+- [ ] SMS sending includes opt-out mechanism and complies with TCPA
+- [ ] Access logged for audit
+- [ ] Complies with GDPR, CCPA, TCPA, and local telecom regulations
+
+### Incident Response
+
+If phone numbers are exposed:
+1. **Immediately** revoke credentials and lock accounts
+2. **Notify** Data Protection Officer within 1 hour
+3. **Assess** scope and potential harm (spam calls, SIM swapping risk)
+4. **Notify** affected individuals if legally required
+5. **Remediate** vulnerability and review security measures
+
+**Potential Harms:**
+- Spam/scam calls
+- SMS phishing (smishing)
+- SIM-swapping attacks (especially dangerous with 2FA via SMS)
+- Harassment and stalking
+- Doxxing when combined with other personal data
+
+### Examples with Fictitious Data Only
+
+**Safe Phone Numbers for Documentation:**
+- (555) 01XX range - Reserved for fictional use in North America
+- Examples: (555) 0100, (555) 0101, (555) 0102
+
+**NEVER** use real phone numbers in documentation, tests, examples, or training materials.
+
 ## Special Considerations
 
 ### International Phone Numbers

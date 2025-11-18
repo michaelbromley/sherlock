@@ -133,3 +133,155 @@ The dual date system (Display and actual dates) requires careful coordination to
 ## Integration and Synchronization
 
 The multiple identifier fields (Id, GUID, LegacyId, InstituteId) reflect the reality of distributed data management in a global community. These fields work together to support various integration scenarios: GUID enables synchronization between peer systems, LegacyId maintains continuity during system transitions, and InstituteId connects to specialized educational management tools. Understanding these relationships is crucial for anyone working with data integration or migration tasks involving the Activities table.
+
+## Privacy and Security
+
+**HIGH PRIVACY CLASSIFICATION** ⚠️
+
+While the Activities table primarily contains operational data about educational activities, it requires careful privacy handling due to the Comments field and potential identification of small groups.
+
+### Privacy Classification
+
+**Reference:** See `reports/Privacy_and_Security_Classification_Matrix.md` for comprehensive privacy guidance.
+
+This table is classified as **HIGH** for privacy:
+- **Comments field may contain personal names** or observations about participants
+- Small activity groups in small localities can enable individual identification
+- Activity participation linked to individuals via ActivityStudyItemIndividuals table
+
+### Field-Level Sensitivity
+
+| Field Name | Sensitivity Level | Privacy Concerns |
+|------------|------------------|------------------|
+| **Comments** | **HIGH** | May contain participant names, personal observations - **ALWAYS review before export** |
+| LocalityId, SubdivisionId | MODERATE | Small localities with few activities may enable identification |
+| Participants, BahaiParticipants | MODERATE | Small numbers (< 5) in reports may identify specific groups |
+| All other fields | LOW | Operational activity data - generally safe |
+
+### Prohibited Query Patterns
+
+**❌ NEVER DO THIS - Exposing Comments with Activity Details:**
+```sql
+-- Comments may contain personal information - never export without review
+SELECT L.[Name], A.[ActivityType], A.[Comments]
+FROM [Activities] A
+INNER JOIN [Localities] L ON A.[LocalityId] = L.[Id]
+WHERE A.[Comments] IS NOT NULL;
+```
+
+**❌ NEVER DO THIS - Small Group Identification:**
+```sql
+-- This could identify specific small groups in small localities
+SELECT L.[Name], A.[ActivityType], A.[Participants]
+FROM [Activities] A
+INNER JOIN [Localities] L ON A.[LocalityId] = L.[Id]
+WHERE A.[Participants] < 5;  -- Dangerous - could identify specific children or families
+```
+
+### Secure Query Patterns
+
+**✅ CORRECT - Activity Statistics with Minimum Thresholds:**
+```sql
+-- Safe: Aggregates to cluster level with minimum thresholds
+SELECT
+    C.[Name] AS [ClusterName],
+    CASE A.[ActivityType]
+        WHEN 0 THEN 'Children''s Classes'
+        WHEN 1 THEN 'Junior Youth Groups'
+        WHEN 2 THEN 'Study Circles'
+    END AS [ActivityType],
+    COUNT(*) AS [ActivityCount],
+    AVG(A.[Participants]) AS [AvgParticipants]
+FROM [Activities] A
+INNER JOIN [Localities] L ON A.[LocalityId] = L.[Id]
+INNER JOIN [Clusters] C ON L.[ClusterId] = C.[Id]
+WHERE A.[IsCompleted] = 0
+  AND A.[Participants] >= 5  -- Minimum threshold to protect small groups
+GROUP BY C.[Name], A.[ActivityType]
+HAVING COUNT(*) >= 3  -- Only show if cluster has 3+ activities of this type
+ORDER BY C.[Name], A.[ActivityType];
+```
+
+**✅ CORRECT - Regional Activity Trends (No Small Groups):**
+```sql
+-- Safe: Regional aggregates exclude small localities
+SELECT
+    R.[Name] AS [RegionName],
+    COUNT(DISTINCT C.[Id]) AS [ClustersWithActivities],
+    COUNT(DISTINCT A.[Id]) AS [TotalActivities],
+    SUM(A.[Participants]) AS [TotalParticipants]
+FROM [Activities] A
+INNER JOIN [Localities] L ON A.[LocalityId] = L.[Id] AND L.[TotalPopulation] >= 500  -- Exclude small localities
+INNER JOIN [Clusters] C ON L.[ClusterId] = C.[Id]
+INNER JOIN [Regions] R ON C.[RegionId] = R.[Id]
+WHERE A.[IsCompleted] = 0
+  AND A.[Participants] >= 5  -- Exclude very small groups
+GROUP BY R.[Name]
+ORDER BY R.[Name];
+```
+
+### Data Protection Requirements
+
+**Comments Field Protection:**
+- **ALWAYS manually review** Comments field contents before ANY export or public report
+- **Redact personal names:** Remove participant names, facilitator names, family names
+- **Redact observations:** Remove personal observations about individuals ("Sarah excels at...", "John struggles with...")
+- **Keep operational notes:** Retain relevant operational information ("Moved to larger room", "Schedule changed to Saturdays")
+
+**Small Group Protection:**
+- Apply **minimum threshold of 5 participants** before including activity data in reports
+- For localities with population < 500, aggregate to cluster level in public reports
+- Never report activity details that could identify specific children's classes or family groups
+- Consider geographic sensitivity - even larger activities may need protection in sensitive regions
+
+**Access Control:**
+- Regional coordinators: Access to activities in their region
+- Cluster coordinators: Access to activities in their cluster
+- Teachers/facilitators: Access to activities they lead only
+- Public reports: Aggregated statistics only, minimum thresholds applied
+
+### Privacy Checklist for Activity Queries
+
+Before querying or reporting on Activities data:
+- [ ] Comments field excluded OR manually reviewed and redacted
+- [ ] Participant counts meet minimum threshold (≥ 5) OR aggregated
+- [ ] Small localities (population < 500) aggregated to cluster level
+- [ ] No combination with Individuals table that could reveal names + participation
+- [ ] Result appropriate for intended audience (public vs. coordinator vs. administrative)
+- [ ] Query complies with privacy guidelines from classification matrix
+
+### Examples with Fictitious Data
+
+When documenting queries or creating examples, use fictitious data:
+- Locality names: "Example City", "Sample Town", "Test Village"
+- Activity counts and participant numbers that are clearly illustrative (10, 25, 50)
+- **Never** use real locality names with specific participant counts
+- **Never** include actual Comments field content in documentation
+
+### Special Considerations
+
+**Children's Safety:**
+- Children's class activities require extra privacy protection
+- Never publish information that could identify specific children or their participation
+- Protect information about which children attend which classes
+- Consider safety implications before sharing any activity details publicly
+
+**Small Community Sensitivity:**
+- In small localities, even aggregate activity statistics may identify families
+- Be especially protective in communities with only 1-2 activities
+- Consider that "5 children in Ruhi Book 3, Grade 2" in a small village may identify specific families
+- Default to cluster-level reporting in small or sensitive communities
+
+**Facilitator Privacy:**
+- Facilitator/teacher names often appear in Comments field
+- Protect facilitator identity unless they've consented to being named
+- Don't expose patterns that could identify facilitators (e.g., "same person teaches all 5 classes in locality")
+
+## Notes for Developers
+
+When working with the Activities table:
+- **Always filter archived records:** Use `WHERE [IsArchived] = 0` for current data
+- **Check Comments carefully:** Never export Comments without manual review
+- **Apply minimum thresholds:** Ensure participant counts ≥ 5 or aggregate further
+- **Consider geography:** Small localities need special handling
+- **Link carefully to Individuals:** Never create queries that link names to activity participation without authorization

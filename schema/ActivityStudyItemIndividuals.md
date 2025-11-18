@@ -411,3 +411,232 @@ For distributed systems:
 - Preserve completion status across systems
 - Coordinate role and type definitions
 - Track synchronization through timestamps
+
+## Privacy and Security
+
+**HIGH PRIVACY CLASSIFICATION** ⚠️
+
+This table creates direct links between individuals and their activity participation, making it highly sensitive from a privacy perspective. It reveals WHO participates in WHAT activities in WHICH roles.
+
+### Privacy Classification
+
+**Reference:** See `reports/Privacy_and_Security_Classification_Matrix.md` for comprehensive privacy guidance.
+
+This table is classified as **HIGH** for privacy:
+- **Directly links IndividualId to ActivityId** - reveals participation patterns
+- **IndividualType field reveals religious affiliation** and age category
+- **IndividualRole reveals service capacity** and responsibility level
+- Combined with Individuals and Activities tables, can expose complete participation profiles
+
+### Field-Level Sensitivity
+
+| Field Name | Sensitivity Level | Privacy Concerns |
+|------------|------------------|------------------|
+| **IndividualId** | **CRITICAL** | Direct link to personal identity - **NEVER expose in reports** |
+| **ActivityId** | **MODERATE** | Links to activity details that may identify small groups |
+| **IndividualType** | **HIGH** | Categorizes by religious affiliation and age - aggregate only |
+| **IndividualRole** | **MODERATE** | Reveals service capacity - safe in aggregates |
+| StudyItemId | LOW | Curriculum reference - generally safe |
+| IsCurrent, IsCompleted | LOW | Status flags - safe when aggregated |
+| All other fields | LOW | Operational data |
+
+### Prohibited Query Patterns
+
+**❌ NEVER DO THIS - Linking Names to Activity Participation:**
+```sql
+-- This violates privacy by exposing who participates in which activities
+SELECT
+    I.[FirstName],
+    I.[FamilyName],
+    A.[ActivityType],
+    L.[Name] AS [Locality],
+    CASE ASI.[IndividualRole]
+        WHEN 1 THEN 'Teacher'
+        WHEN 7 THEN 'Participant'
+        ELSE 'Other'
+    END AS [Role]
+FROM [ActivityStudyItemIndividuals] ASI
+INNER JOIN [Individuals] I ON ASI.[IndividualId] = I.[Id]
+INNER JOIN [Activities] A ON ASI.[ActivityId] = A.[Id]
+INNER JOIN [Localities] L ON A.[LocalityId] = L.[Id];
+```
+
+**❌ NEVER DO THIS - Exposing Individual Learning Journeys:**
+```sql
+-- This reveals an individual's complete educational path
+SELECT
+    I.[FirstName],
+    I.[FamilyName],
+    SI.[Name] AS [StudyItem],
+    ASI.[IsCompleted],
+    ASI.[EndDate]
+FROM [ActivityStudyItemIndividuals] ASI
+INNER JOIN [Individuals] I ON ASI.[IndividualId] = I.[Id]
+INNER JOIN [StudyItems] SI ON ASI.[StudyItemId] = SI.[Id]
+WHERE I.[Id] = @IndividualId;  -- Even with consent, be very careful with such queries
+```
+
+**❌ NEVER DO THIS - Identifying Children in Specific Classes:**
+```sql
+-- This could identify which children attend which classes
+SELECT
+    I.[FirstName],
+    I.[FamilyName],
+    A.[ActivityType],
+    L.[Name] AS [Locality]
+FROM [ActivityStudyItemIndividuals] ASI
+INNER JOIN [Individuals] I ON ASI.[IndividualId] = I.[Id]
+INNER JOIN [Activities] A ON ASI.[ActivityId] = A.[Id] AND A.[ActivityType] = 0  -- Children's classes
+INNER JOIN [Localities] L ON A.[LocalityId] = L.[Id]
+WHERE ASI.[IsCurrent] = 1;
+```
+
+### Secure Query Patterns
+
+**✅ CORRECT - Role Distribution Statistics (No Personal Identifiers):**
+```sql
+-- Safe: Analyzes role patterns without exposing individuals
+SELECT
+    CASE ASI.[IndividualRole]
+        WHEN 1 THEN 'Teacher/Primary Instructor'
+        WHEN 2 THEN 'Co-Teacher'
+        WHEN 3 THEN 'Tutor/Facilitator'
+        WHEN 4 THEN 'Coordinator'
+        WHEN 5 THEN 'Assistant/Helper'
+        WHEN 7 THEN 'Participant/Student'
+        ELSE 'Other'
+    END AS [RoleType],
+    COUNT(DISTINCT ASI.[IndividualId]) AS [UniqueIndividuals],
+    COUNT(*) AS [TotalRoleInstances],
+    CAST(COUNT(*) * 100.0 / SUM(COUNT(*)) OVER () AS DECIMAL(5,2)) AS [Percentage]
+FROM [ActivityStudyItemIndividuals] ASI
+WHERE ASI.[IsCurrent] = 1
+GROUP BY ASI.[IndividualRole]
+ORDER BY COUNT(DISTINCT ASI.[IndividualId]) DESC;
+```
+
+**✅ CORRECT - Cluster-Level Participation Trends (Aggregated):**
+```sql
+-- Safe: Shows participation trends at cluster level without individual details
+SELECT
+    C.[Name] AS [ClusterName],
+    COUNT(DISTINCT ASI.[IndividualId]) AS [UniqueParticipants],
+    COUNT(DISTINCT ASI.[ActivityId]) AS [DistinctActivities],
+    SUM(CASE WHEN ASI.[IsCompleted] = 1 THEN 1 ELSE 0 END) AS [CompletedParticipations],
+    CAST(SUM(CASE WHEN ASI.[IsCompleted] = 1 THEN 1 ELSE 0 END) * 100.0 /
+         NULLIF(COUNT(*), 0) AS DECIMAL(5,2)) AS [CompletionRate]
+FROM [ActivityStudyItemIndividuals] ASI
+INNER JOIN [Activities] A ON ASI.[ActivityId] = A.[Id]
+INNER JOIN [Localities] L ON A.[LocalityId] = L.[Id]
+INNER JOIN [Clusters] C ON L.[ClusterId] = C.[Id]
+WHERE ASI.[IsCurrent] = 1
+GROUP BY C.[Id], C.[Name]
+HAVING COUNT(DISTINCT ASI.[IndividualId]) >= 10  -- Minimum threshold
+ORDER BY C.[Name];
+```
+
+**✅ CORRECT - StudyItem Popularity (No Individual Links):**
+```sql
+-- Safe: Shows which study items are most commonly being studied, no personal data
+SELECT
+    SI.[Name] AS [StudyItemName],
+    SI.[ActivityStudyItemType],
+    COUNT(DISTINCT ASI.[ActivityId]) AS [ActivitiesUsingItem],
+    COUNT(*) AS [TotalEnrollments],
+    SUM(CASE WHEN ASI.[IsCompleted] = 1 THEN 1 ELSE 0 END) AS [Completions]
+FROM [ActivityStudyItemIndividuals] ASI
+INNER JOIN [StudyItems] SI ON ASI.[StudyItemId] = SI.[Id]
+WHERE ASI.[IsCurrent] = 1
+GROUP BY SI.[Id], SI.[Name], SI.[ActivityStudyItemType]
+ORDER BY COUNT(*) DESC;
+```
+
+### Data Protection Requirements
+
+**Access Control:**
+- **Never allow public access** to this table or queries that join it to Individuals with names
+- **Coordinators:** Access to participation data for their cluster only (implement row-level security)
+- **Teachers:** Access to participants in activities they lead only
+- **Researchers:** Aggregated, anonymized data only with minimum thresholds (≥10 individuals)
+- **Database administrators:** Full access with comprehensive audit logging
+
+**Query Restrictions:**
+- **NEVER join to Individuals table** with FirstName/FamilyName in SELECT clause unless specifically authorized
+- **Always aggregate** when reporting participation statistics
+- **Apply minimum thresholds** (≥10 participants) before showing cluster-level data
+- **Filter by authorization** - users should only see data for activities/clusters they're authorized for
+
+**Special Protections:**
+- **Children's participation** (ActivityType = 0) requires extra protection - never expose which children attend which classes
+- **Religious affiliation** (IndividualType) must always be aggregated - never link to names
+- **Small activities** (< 5 participants) should not appear in reports that could identify individuals
+
+### Compliance Considerations
+
+**GDPR:**
+- Participation records are personal data requiring lawful basis (consent or legitimate interest)
+- Individuals have **right to access** their participation records
+- Individuals have **right to erasure** - implement through IsCurrent flag and archival
+- **Purpose limitation** - use participation data only for coordination and educational planning
+- **Data minimization** - only link participation to individuals when necessary for coordination
+
+**CCPA:**
+- Right to know what participation data is collected
+- Right to delete participation records
+- Participation data should not be "sold" or shared with third parties
+
+**Child Protection:**
+- Extra safeguards required for children under 13 (COPPA in USA) or 16 (GDPR)
+- Parent/guardian consent may be required for tracking children's participation
+- Never expose information that could enable identification or contact of specific children
+
+### Privacy Checklist for Participation Queries
+
+Before any query involving ActivityStudyItemIndividuals:
+- [ ] Query does NOT join to Individuals with names in results
+- [ ] All personal data is aggregated (COUNT, AVG, SUM) with minimum thresholds
+- [ ] Small groups (< 10 participants) are suppressed or aggregated further
+- [ ] No data linking specific individuals to specific activities without authorization
+- [ ] User is authorized to access participation data for this geographic scope
+- [ ] Children's participation data has extra protection
+- [ ] Religious affiliation (IndividualType) never linked to names
+- [ ] Result complies with GDPR, CCPA, COPPA, and institutional privacy policies
+
+### Special Considerations
+
+**Participation Patterns Can Identify Individuals:**
+- In small communities, even aggregated data like "2 teachers and 8 participants in Book 5" may identify specific people
+- Be especially careful with:
+  - Small localities (population < 500)
+  - Rare study items (only one activity in entire cluster)
+  - High-level roles (coordinator, tutor) in small areas
+  - Children's class participation in small villages
+
+**Sensitive Role Information:**
+- **IndividualRole** reveals capacity for service and responsibility level
+- Listing all tutors in a cluster by name could create social pressure or unwanted attention
+- Protect information about who serves in what capacity unless consent obtained for publication
+
+**Religious Affiliation:**
+- **IndividualType** field categorizes by religious affiliation (Bahá'í vs. friend of the Faith)
+- This is **legally protected sensitive data** under GDPR and many other regulations
+- NEVER create reports that link names to religious affiliation
+- Always aggregate when analyzing participation by affiliation
+
+**Historical Participation:**
+- Past participation records (IsCurrent = 0) are still personal data
+- Maintain historical records for reporting trends, but protect individual identities
+- Consider data retention policies - how long to keep inactive participation records?
+
+## Notes for Developers
+
+When working with the ActivityStudyItemIndividuals table:
+- **NEVER SELECT IndividualId with names** from Individuals table in same query for reporting
+- **Always aggregate** participation data for statistical reports
+- **Implement row-level security** so users only see data they're authorized for
+- **Apply minimum thresholds** (≥10 participants) before showing statistics
+- **Filter by IsCurrent = 1** for active participants, or include status in analysis
+- **Check ActivityType** - children's activities (Type 0) need extra protection
+- **Protect IndividualType** - religious affiliation must never link to names
+- **Audit all queries** that access this table, especially those joining to Individuals
+- **Consider geographic scope** - cluster-level aggregation is safer than locality-level
