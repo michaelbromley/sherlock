@@ -1,240 +1,413 @@
 # ActivityStudyItemIndividuals Table
 
 ## Overview
-The `ActivityStudyItemIndividuals` table is a critical junction table that creates the many-to-many-to-many relationship between individuals (participants), activities, and study items (curriculum elements). This table tracks who participates in which activities, what role they play, which specific curriculum items they're studying, and their completion status.
+
+The `ActivityStudyItemIndividuals` table represents the heart of participant tracking within the SRP database, serving as the critical junction point that connects individuals with their educational journey through the institute process. This table captures the complex, multifaceted relationships between people, the activities they participate in, the curriculum they study, and the roles they play in the community-building process. Each record in this table tells a story of an individual's engagement with a specific aspect of the educational framework - whether as a student progressing through the Ruhi sequence, a tutor facilitating others' learning, a junior youth exploring concepts of moral empowerment, or a child learning spiritual principles through age-appropriate activities.
+
+This table goes beyond simple enrollment tracking to capture the dynamic nature of participation in Bahá'í educational activities. It recognizes that individuals often wear multiple hats - someone might be a participant in one study circle while simultaneously serving as a children's class teacher in another activity. The same person might be completing Book 7 to become a tutor while also assisting with a junior youth group. This complexity is essential to understanding the organic growth of human resources within communities, where capacity building is not linear but rather a rich tapestry of simultaneous learning and service experiences.
+
+The design of this table also reflects the principle that education within the Bahá'í framework is not merely about knowledge acquisition but about transformation and service. By tracking not just participation but also roles, completion status, and progression through materials, the table enables communities to understand how individuals are developing their capacities and contributing to the growth of their communities.
 
 ## Table Structure
 
-The following sections describe in detail the meaning, purpose and uses for each of the fields in this table. Each subsection heading within this section maps to a field, and each subsection body describes that field in more detail.
+### Id (bigint, NOT NULL)
 
-### Id
+The primary key serving as the unique identifier for each participation record. This auto-incrementing field ensures that every instance of an individual's engagement with an educational activity is distinctly tracked. The Id is particularly important because an individual might have dozens or even hundreds of records in this table over time, representing their journey through various books, their service in different capacities, and their involvement in multiple activities. Each Id captures a specific moment or phase in someone's educational and service path.
 
-Primary key, unique identifier for each enrollment record
+### IndividualType (tinyint, NOT NULL)
 
-### IndividualType
+This field categorizes participants into distinct types that reflect their demographic, spiritual, or functional classification within the community. The typing system helps communities understand the composition of their activities and track progress across different population segments.
 
-Category/type of the individual participant
+Common type categories typically include:
+- Type 1: Adult Bahá'í believers (ages 15+)
+- Type 2: Bahá'í youth (ages 15-30, sometimes tracked separately)
+- Type 3: Bahá'í junior youth (ages 12-14)
+- Type 4: Bahá'í children (ages 5-11)
+- Type 5: Friends of the Faith (non-Bahá'í participants of any age)
+- Type 6: Seekers or those investigating the Faith
+- Type 7: Special categories (visiting participants, etc.)
 
-### IndividualRole
+This categorization is crucial for understanding community demographics, measuring the reach of activities beyond the Bahá'í community, and ensuring age-appropriate educational experiences. It also helps in generating statistics about community integration and the inclusive nature of core activities.
 
-Role the individual plays in the activity (see Role Definitions below)
+### IndividualRole (tinyint, NOT NULL)
 
-### IsCurrent
+This critical field captures the specific capacity in which an individual participates in an activity, reflecting the diverse ways people contribute to the educational process. The role system recognizes that learning in the Bahá'í context is not passive but involves various levels of service and responsibility.
 
-Boolean indicating if the individual is currently active in this activity
+**Role 1: Teacher/Primary Instructor**
+The main facilitator responsible for delivering the curriculum. In children's classes, this is the teacher who plans lessons, prepares materials, and guides the class. In study circles, this might be the lead tutor. Teachers typically have completed the relevant training (Book 3 for children's class teachers, Book 7 for tutors) and carry primary responsibility for the activity's success.
 
-### IsCompleted
+**Role 2: Co-Teacher/Assistant Teacher**
+A secondary instructor who shares teaching responsibilities. This role often represents someone in training or providing support to the primary teacher. Co-teachers might lead specific portions of activities, help with classroom management, or provide continuity when the primary teacher is absent.
 
-Boolean indicating if the individual has completed the study item
+**Role 3: Tutor/Facilitator**
+Specifically used for those facilitating study circles or leading discussion-based learning. Tutors guide participants through the study materials, facilitate consultations, and help create an environment conducive to spiritual transformation. This role requires completion of Book 7 and represents a significant level of capacity in accompanying others through the institute process.
 
-### DisplayEndDate
+**Role 4: Coordinator**
+Individuals who coordinate multiple activities or oversee the educational programs in a locality or cluster. Coordinators might not directly teach but ensure activities run smoothly, resources are available, and communication flows between different actors. They often serve as a bridge between grassroots activities and institutional support structures.
 
-Human-readable completion/end date for display
+**Role 5: Assistant/Helper**
+Those who provide practical support without primary teaching responsibilities. In children's classes, assistants might help with crafts, games, or managing younger children. In study circles, they might help with logistics, refreshments, or technical support. This role often serves as a stepping stone for those developing their capacities.
 
-### EndDate
+**Role 6: Observer/Visitor**
+Temporary participants who are observing activities, perhaps considering joining or learning how activities function. This might include parents observing children's classes, potential tutors observing study circles, or visitors from other communities learning about local practices.
 
-Actual completion/end date for the individual's participation
+**Role 7: Participant/Student**
+The standard learner role, representing the vast majority of records (95,139 in the sample data). Participants are actively engaged in studying the curriculum, whether children learning prayers and virtues, junior youth exploring their potential, or adults studying the Ruhi sequence. This role is fundamental as it represents the primary purpose of educational activities.
 
-### IndividualId
+The distribution of roles (with participants being most numerous, followed by assistants, then tutors and teachers) reflects the natural pyramid of capacity building, where many participate, some assist, and a smaller number take on full teaching responsibilities.
 
-Foreign key to Individuals table
+### IsCurrent (bit, NOT NULL)
 
-### ActivityId
+A boolean flag indicating whether the individual's participation in this particular activity-study item combination is currently active. This field is essential for distinguishing between historical records (kept for reporting and tracking purposes) and active engagements.
 
-Foreign key to Activities table
+When TRUE, this indicates the individual is actively involved in this capacity. They're attending sessions, progressing through materials, or fulfilling their role responsibilities. Current participants are included in active statistics and ongoing activity counts.
 
-### StudyItemId
+When FALSE, this represents historical participation - the person has moved on, completed their involvement, or discontinued for any reason. These records are preserved to maintain a complete educational history, track completion rates over time, and understand patterns of participation and attrition.
 
-Foreign key to StudyItems table (specific curriculum element)
+The IsCurrent flag allows the same individual to have multiple records for the same study item (perhaps attempting it multiple times) while clearly identifying which represents their current status.
 
-### CreatedTimestamp
+### IsCompleted (bit, NOT NULL)
 
-When the record was created
+This boolean field specifically tracks whether the individual has successfully completed the study item associated with this record. Completion has specific meaning within the institute process and represents more than just attendance.
 
-### CreatedBy
+For study circles, completion typically means the participant has:
+- Attended the required percentage of sessions
+- Completed all practical components
+- Demonstrated understanding through participation
+- Fulfilled any service requirements associated with the book
 
-User ID who created the record
+For children's classes and junior youth groups, completion might indicate:
+- Finishing a grade level or text
+- Achieving learning objectives
+- Regular attendance through the program period
 
-### LastUpdatedTimestamp
+The IsCompleted flag is distinct from the activity's completion status and the IsCurrent flag. An individual might be currently enrolled (IsCurrent=TRUE) but not yet completed (IsCompleted=FALSE), or might have completed (IsCompleted=TRUE) but still be recorded as current if they're continuing to serve in that capacity or reviewing materials.
 
-When the record was last modified
+### DisplayEndDate (varchar(20), NULL)
 
-### LastUpdatedBy
+A human-readable representation of when the individual's participation ended or when they completed the study item. This field provides flexibility in how completion or departure dates are recorded and displayed, accommodating various levels of precision.
 
-User ID who last modified the record
+The field might contain:
+- Exact dates: "2018-07-20" for precise completion
+- Month indicators: "July 2018" when the exact day is unknown
+- Approximate periods: "Summer 2018" for less precise records
+- Descriptive text: "End of cycle" or "Before move" for contextual dating
 
-### ImportedTimestamp
+This flexibility is particularly valuable for historical data entry, imported records, or situations where exact dates weren't tracked but approximate timing is known. The 20-character limit provides sufficient space for most date representations while maintaining reasonable constraints.
 
-When data was imported from external system
+### EndDate (datetime, NULL)
 
-### ImportedFrom
+The precise datetime when the individual's participation concluded, whether through completion, withdrawal, or transition to another role. This field enables accurate duration calculations and temporal analysis of participation patterns.
 
-Source system identifier for imported data
+A NULL EndDate combined with IsCurrent=TRUE typically indicates ongoing participation. When populated, it might represent:
+- Successful completion of a study item
+- Departure from the community
+- Transition to a different activity or role
+- Temporary suspension with intention to return
 
-### ImportedFileType
+The relationship between EndDate, IsCompleted, and IsCurrent provides nuanced tracking:
+- EndDate + IsCompleted=TRUE: Successfully finished
+- EndDate + IsCompleted=FALSE: Discontinued without completing
+- NULL EndDate + IsCurrent=TRUE: Actively participating
+- NULL EndDate + IsCurrent=FALSE: Status uncertain or data incomplete
 
-File format of imported data
+### IndividualId (bigint, NOT NULL)
 
-### ActivityStudyItemId
+The foreign key linking this participation record to the Individuals table, identifying the specific person involved. This mandatory relationship ensures every participation record is associated with a known individual in the system.
 
-Foreign key to ActivityStudyItems table
+This link enables:
+- Tracking an individual's complete educational journey across multiple activities and study items
+- Understanding progression patterns through the institute curriculum
+- Identifying those ready for new responsibilities based on their completion history
+- Generating individual progress reports and transcripts
 
-## Key Relationships
+The IndividualId allows the system to construct a comprehensive view of each person's development, service record, and current involvements across all activities in the community.
 
-1. **Individuals** (IndividualId → Individuals.Id)
-   - Links to the person participating in the activity
-   - Required relationship
+### ActivityId (bigint, NULL)
 
-2. **Activities** (ActivityId → Activities.Id)
-   - Links to the specific activity (class, group, or circle)
-   - Can be NULL in some cases
+A foreign key linking this participation to a specific activity in the Activities table. Interestingly, this field is nullable, which reveals an important design flexibility in the system.
 
-3. **StudyItems** (StudyItemId → StudyItems.Id)
-   - Links to the specific curriculum element being studied
-   - Can be NULL if tracking general participation
+When populated, ActivityId creates the full connection: Individual → Activity → Study Item, enabling queries like "Who is participating in this Tuesday evening study circle studying Book 1?"
 
-4. **ActivityStudyItems** (ActivityStudyItemId → ActivityStudyItems.Id)
-   - Links to the activity-study item combination
-   - Provides additional context about the curriculum in the activity
+When NULL (as seen in several sample records), it indicates that study item completion is being tracked independently of a formal activity. This might occur when:
+- Individuals complete books through intensive courses not tracked as regular activities
+- Historical completions are recorded retrospectively without activity details
+- Self-study or informal study is recognized
+- Records are imported from systems that tracked completions differently
 
-## Individual Roles
+This flexibility allows the system to maintain comprehensive educational records even when the specific activity context is unknown or not applicable.
 
-Based on usage patterns in the database:
+### StudyItemId (bigint, NULL)
 
-| Role Value | Role Description | Typical Usage | Record Count |
-|------------|-----------------|---------------|--------------|
-| **7** | Participant | Standard participant/student in the activity | 95,139 |
-| **5** | Assistant/Helper | Assists with activity delivery | 12,720 |
-| **3** | Tutor/Facilitator | Leads small group discussions | 4,101 |
-| **1** | Teacher/Instructor | Primary instructor for the activity | 2,335 |
-| **4** | Coordinator | Coordinates multiple activities | 336 |
-| **6** | Observer/Visitor | Temporary or observing participant | 321 |
-| **2** | Co-Teacher | Secondary instructor role | 180 |
+The foreign key identifying the specific curriculum element (book, unit, grade, or text) being studied, linking to the StudyItems table. While nullable, this field is typically populated as it identifies what educational content the individual is engaging with.
 
-## Individual Types
+The StudyItemId enables tracking of:
+- Progression through the Ruhi sequence (Books 1-9 and beyond)
+- Completion of specific units within books
+- Grade levels in children's classes
+- Junior youth texts and materials
+- Specialized study materials
 
-The `IndividualType` field categorizes participants, likely based on:
-- Age group (child, junior youth, youth, adult)
-- Registration status (Bahá'í, friend of the Faith)
-- Special categories (animator, tutor-in-training)
+When NULL, the record might represent:
+- General participation without specific curriculum tracking
+- Administrative or support roles not tied to particular materials
+- Placeholder records awaiting curriculum assignment
+- Historical data where curriculum details weren't preserved
 
-## Participation Status Tracking
+### CreatedTimestamp (datetime, NOT NULL)
 
-### IsCurrent Flag
-- **TRUE**: Individual is actively participating
-- **FALSE**: Individual has stopped attending or moved to another activity
+Records the exact moment this participation record was created in the database. This audit field serves multiple purposes beyond simple record-keeping.
 
-### IsCompleted Flag
-- **TRUE**: Individual has successfully completed the study item
-- **FALSE**: Individual has not yet completed or dropped out
+For data quality, it helps identify:
+- When participants were enrolled relative to activity start dates
+- Patterns in data entry (batch processing vs. real-time entry)
+- Delays between actual enrollment and system recording
 
-### Date Management
-- **DisplayEndDate/EndDate**: When the individual stopped participating or completed
-- NULL EndDate with IsCurrent=TRUE indicates ongoing participation
+For analysis, it enables understanding of:
+- Growth patterns in program participation
+- Seasonal variations in enrollment
+- Response times to community campaigns or initiatives
 
-## Common Usage Patterns
+The timestamp might differ significantly from when the actual participation began, especially for:
+- Retrospective data entry
+- Migrated historical records
+- Batch imports from paper-based systems
 
-### Junior Youth Spiritual Empowerment Program (JYSEP)
-```sql
--- Junior youth who entered JYSEP (Role 7 = Participant)
-SELECT COUNT(DISTINCT IndividualId)
-FROM [ActivityStudyItemIndividuals]
-WHERE [IndividualRole] = 7
-  AND [ActivityId] IN (
-    SELECT [Id] FROM [Activities]
-    WHERE [ActivityType] = 1  -- Junior Youth Groups
-  )
-```
+### CreatedBy (uniqueidentifier, NOT NULL)
 
-### Tracking Completion Rates
-```sql
--- Completion rate by role
-SELECT
-    [IndividualRole],
-    COUNT(*) as Total,
-    SUM(CAST([IsCompleted] AS INT)) as Completed,
-    CAST(SUM(CAST([IsCompleted] AS INT)) * 100.0 / COUNT(*) AS DECIMAL(5,2)) as CompletionRate
-FROM [ActivityStudyItemIndividuals]
-WHERE [IsCurrent] = 1
-GROUP BY [IndividualRole]
-```
+The GUID of the user account that created this participation record, providing accountability and traceability in the enrollment process. This field is crucial for maintaining data quality and understanding data entry patterns.
 
-### Multiple Roles
-An individual can have multiple records in this table, representing:
-- Different roles in different activities (teacher in one, participant in another)
-- Progression through multiple study items in the same activity
-- Historical record of past participations
+This identifier helps:
+- Track which coordinators or administrators are entering data
+- Identify training needs based on data entry patterns
+- Investigate discrepancies or unusual entries
+- Maintain accountability in multi-user environments
 
-## Business Logic
+In practice, the CreatedBy field often points to:
+- Activity coordinators entering their own activity data
+- Cluster coordinators doing centralized data entry
+- System administrators performing bulk imports
+- Migration accounts used during system transitions
+
+### LastUpdatedTimestamp (datetime, NOT NULL)
+
+Captures when this participation record was most recently modified, providing crucial information for understanding how participant data evolves over time.
+
+Updates might occur when:
+- Completion status changes (IsCompleted becomes TRUE)
+- Roles change (participant becomes assistant)
+- Current status updates (IsCurrent changes)
+- End dates are added or modified
+- Corrections are made to historical data
+
+This timestamp is essential for:
+- Incremental reporting and synchronization
+- Identifying recently changed records for review
+- Understanding the freshness of participation data
+- Tracking the lifecycle of participant records
+
+### LastUpdatedBy (uniqueidentifier, NOT NULL)
+
+Records the GUID of the user who most recently modified this record, completing the audit trail for changes.
+
+This field helps track:
+- Who is maintaining and updating participation records
+- Whether updates come from coordinators, participants, or administrators
+- Patterns in data maintenance across different users
+- Authorization and access patterns
+
+Together with LastUpdatedTimestamp, this creates a clear picture of how participation data is maintained and by whom.
+
+### ImportedTimestamp (datetime, NULL)
+
+For records that originated from external systems, this field captures when the import occurred. This timestamp is distinct from CreatedTimestamp and provides specific information about data migration and integration processes.
+
+Import timestamps help:
+- Track waves of data migration from legacy systems
+- Identify records that might need verification
+- Understand the vintage of different data sets
+- Coordinate phased migration approaches
+
+The field is particularly relevant for:
+- Initial system implementations importing historical data
+- Periodic imports from regional or national systems
+- Integration with external institute management tools
+- Consolidation of data from multiple sources
+
+### ImportedFrom (uniqueidentifier, NULL)
+
+Identifies the specific source system or import batch from which this record originated. This GUID can be traced back to import logs, source systems, or batch identifiers.
+
+This field enables:
+- Tracing data lineage back to original sources
+- Grouping records by import source for validation
+- Understanding which systems contributed which data
+- Troubleshooting import-related issues
+
+In practice, this might identify:
+- Legacy database systems being replaced
+- Regional SRP installations being consolidated
+- Excel or CSV import batches
+- External institute management systems
+
+### ImportedFileType (varchar(50), NULL)
+
+Documents the specific format or type of file from which this record was imported, providing context about the import process and potential data quality considerations.
+
+Common values include:
+- "SRP_3_1_Region_File": Specific SRP format versions
+- "CSV": Comma-separated value files
+- "Excel": Spreadsheet imports
+- "LegacyDB": Direct database migrations
+- Custom format identifiers
+
+This information helps in:
+- Understanding potential format-related issues
+- Documenting import procedures
+- Troubleshooting data quality problems
+- Maintaining import process documentation
+
+### ActivityStudyItemId (bigint, NULL)
+
+A foreign key to the ActivityStudyItems table, providing an additional layer of relationship when activities and study items are formally linked. This field represents a denormalization that can improve query performance and maintain referential integrity.
+
+When populated, this field:
+- Confirms the activity-study item relationship
+- Enables faster joins without going through multiple tables
+- Provides redundancy for data validation
+- Supports scenarios where the activity-study item combination has specific properties
+
+When NULL, it might indicate:
+- Direct individual-study item relationships without activity context
+- Historical data before this relationship was tracked
+- Simplified tracking scenarios
+- Import situations where this relationship wasn't established
+
+## Key Relationships and Data Patterns
+
+### Individual Learning Journeys
+
+The table enables tracking of complete educational pathways. For instance, an individual's journey might look like:
+1. Starts as a participant (Role 7) in Book 1
+2. Completes Book 1, continues to Book 2
+3. Completes Book 3, becomes a children's class teacher (Role 1)
+4. While teaching, continues as participant in Books 4-6
+5. Completes Book 7, becomes a tutor (Role 3)
+6. Serves as tutor for Books 1-3 while participating in Book 8
+
+Each step creates a new record, building a comprehensive history of development and service.
+
+### Concurrent Participation Patterns
+
+The table's structure supports complex, real-world participation patterns:
+- An individual can be in multiple activities simultaneously
+- The same person can have different roles in different contexts
+- Progression through materials can be non-linear
+- Service and study can occur in parallel
+
+### Completion and Progression Tracking
+
+The combination of IsCompleted, IsCurrent, and date fields enables sophisticated tracking:
+- Completion rates by demographic (using IndividualType)
+- Time-to-completion analysis
+- Dropout patterns and re-enrollment
+- Success factors based on role and activity type
+
+### Data Quality and Integrity
+
+The nullable foreign keys (ActivityId, StudyItemId, ActivityStudyItemId) provide flexibility but require careful handling:
+- Validation rules should ensure at least minimal relationship data
+- NULL handling in queries must be explicit
+- Reports should account for varying levels of data completeness
+- Import processes need clear rules for handling incomplete relationships
+
+## Business Logic and Usage Patterns
+
+### Enrollment Management
+
+When a new participant joins an activity:
+1. A record is created with IsCurrent=TRUE, IsCompleted=FALSE
+2. IndividualRole is set based on their capacity
+3. IndividualType reflects their demographic category
+4. Links are established to Individual, Activity, and StudyItem
 
 ### Progression Tracking
-Individuals typically progress through study items in sequence:
-1. Start as participant (Role 7) in Book 1
-2. Complete Book 1 (IsCompleted = TRUE)
-3. Move to Book 2 (new record, IsCurrent = TRUE)
-4. May become assistant (Role 5) in Book 1 while studying Book 2
 
-### Activity Study Item Relationship
-The combination of ActivityId and StudyItemId indicates:
-- Which specific book/grade/text is being studied
-- In which activity context (which class or group)
-- Allows tracking the same curriculum across different activities
+As participants move through the curriculum:
+1. Completion of a study item sets IsCompleted=TRUE
+2. Moving to the next item creates a new record
+3. Previous record might remain IsCurrent if they're still serving
+4. EndDate is set when participation truly ends
 
-## Data Quality Considerations
+### Role Evolution
 
-### Nullable Foreign Keys
-- **ActivityId** can be NULL for historical or imported records
-- **StudyItemId** can be NULL for general participation tracking
-- **ActivityStudyItemId** provides additional linkage when available
+When participants develop new capacities:
+1. New records reflect new roles
+2. Historical roles are preserved for reporting
+3. Multiple concurrent roles are supported
+4. Transitions are tracked through timestamps
 
-### Current vs Historical Records
-- Historical participations kept for reporting (IsCurrent = FALSE)
-- Multiple records per individual common for progression tracking
-- EndDate marks when participation ended or item was completed
+### Statistical Reporting
 
-## Query Optimization
+The table supports various analytical needs:
+- Active participant counts (WHERE IsCurrent=TRUE)
+- Completion statistics (WHERE IsCompleted=TRUE)
+- Role distribution analysis
+- Demographic breakdowns using IndividualType
+- Temporal trends using date fields
 
-### Common Filters
-```sql
--- Active participants only
-WHERE [IsCurrent] = 1 AND [EndDate] IS NULL
+## Performance Considerations
 
--- Completed study items
-WHERE [IsCompleted] = 1
+### Indexing Strategy
 
--- Specific roles (e.g., participants)
-WHERE [IndividualRole] = 7
+Given the table's role as a junction table with multiple foreign keys and common query patterns:
+- Composite indexes on (IndividualId, IsCurrent) for individual history queries
+- Indexes on (ActivityId, IsCurrent) for activity participant lists
+- Indexes on (StudyItemId, IsCompleted) for curriculum completion analysis
+- Indexes on role and type fields for demographic analysis
 
--- Date range
-WHERE [CreatedTimestamp] BETWEEN @StartDate AND @EndDate
-```
+### Query Optimization
 
-### Efficient Joins
-```sql
--- Get participant details with activity and study item info
-SELECT
-    I.[FirstName] + ' ' + I.[FamilyName] AS ParticipantName,
-    A.[ActivityType],
-    SI.[Sequence] AS BookNumber,
-    ASI.[IndividualRole],
-    ASI.[IsCompleted]
-FROM [ActivityStudyItemIndividuals] ASI
-INNER JOIN [Individuals] I ON ASI.[IndividualId] = I.[Id]
-LEFT JOIN [Activities] A ON ASI.[ActivityId] = A.[Id]
-LEFT JOIN [StudyItems] SI ON ASI.[StudyItemId] = SI.[Id]
-WHERE ASI.[IsCurrent] = 1
-```
+Common query patterns that need optimization:
+- Current participants in an activity
+- Individual completion history
+- Role-based participant lists
+- Temporal cohort analysis
+- Cross-activity participation patterns
 
-## Important Notes
+### Data Volume Considerations
 
-1. **Role Changes**: An individual's role can change over time (participant becomes assistant)
-2. **Multiple Enrollments**: Same individual can be in multiple activities simultaneously
-3. **Completion Tracking**: IsCompleted refers to the study item, not the entire activity
-4. **Audit Trail**: All changes tracked through Created/Updated timestamps and user IDs
-5. **Import Support**: Fields for tracking data imported from external systems
+With 115,132 records in the sample database and growing:
+- Archiving strategies for historical data
+- Partitioning by date ranges or activity types
+- Summary tables for frequently accessed statistics
+- Careful management of NULL values in foreign keys
 
-## Related Tables
-- **Individuals**: Personal information about participants
-- **Activities**: The classes, groups, or circles
-- **StudyItems**: The curriculum elements (books, texts, grades)
-- **ActivityStudyItems**: Links activities to their curriculum
+## Data Migration and Integration
+
+### Import Considerations
+
+When importing participant data:
+- Preserve original identifiers where possible
+- Map roles and types to standard values
+- Validate foreign key relationships
+- Document any data transformations
+- Maintain audit trail through import fields
+
+### Export Requirements
+
+For reporting and integration:
+- Include related entity data (names, activity details)
+- Handle NULL foreign keys appropriately
+- Provide both display and system dates
+- Include completion and current status
+- Preserve role and type meanings
+
+### Synchronization Patterns
+
+For distributed systems:
+- Use IndividualId as the primary reference
+- Maintain activity associations where known
+- Preserve completion status across systems
+- Coordinate role and type definitions
+- Track synchronization through timestamps

@@ -1,429 +1,642 @@
 # Individuals Table
 
 ## Overview
-The `Individuals` table is the central entity for tracking all people involved in the Bahai community's educational and community-building activities. This includes Bahai believers, friends of the faith, children, junior youth, youth, and adults participating in various activities. The table stores comprehensive personal information, registration status, demographic data, and geographic assignment. It supports the tracking of individual progress through the institute process and participation in core activities.
+
+The `Individuals` table stands at the heart of the SRP database as the central repository for all people who participate in or are connected to the Bahá'í community's educational and spiritual activities. This table represents far more than a simple directory - it embodies the human dimension of community building, tracking each person's journey through educational programs, their development of capacities for service, and their contribution to the transformation of their communities. Every individual recorded here represents a unique story of growth, whether they are young children taking their first steps in moral education, youth discovering their potential for service, or adults deepening their understanding through systematic study.
+
+The comprehensive nature of this table reflects the inclusive vision of the Bahá'í community-building process, where participation is open to all regardless of religious affiliation. The table tracks both enrolled Bahá'í believers and friends of the Faith who participate in activities, recognizing that the work of building vibrant communities transcends religious boundaries. This inclusiveness is fundamental to the institute process, where people of diverse backgrounds come together to develop their capacities for service to humanity.
+
+The design of the table also reflects important principles of data stewardship and privacy. Personal information is handled with care, archival mechanisms preserve historical records while managing active participation, and multiple identification systems support both local autonomy and global coordination. The table serves as the foundation for understanding not just who participates, but how communities grow, develop, and sustain their educational activities over time.
 
 ## Table Structure
 
-The following sections describe in detail the meaning, purpose and uses for each of the fields in this table. Each subsection heading within this section maps to a field, and each subsection body describes that field in more detail.
+### Id (bigint, NOT NULL)
 
-### Id
+The primary key that uniquely identifies each individual in the database. This auto-incrementing field serves as the immutable anchor point for all relationships involving people - their participation in activities, their contact information, their educational progress, and their service contributions. Once assigned, this Id remains constant throughout the individual's presence in the system, even if they become inactive or their information is archived. The Id is the fundamental reference used throughout the database to maintain referential integrity and ensure that all data about an individual can be reliably connected.
 
-Primary key, unique identifier for each individual
+### FirstName (nvarchar(255), NOT NULL)
 
-### FirstName
+The given name or names of the individual, stored in Unicode to support names from all languages and scripts. This field is mandatory and represents how the person is primarily known in their community. The field may contain:
+- Single given names ("John", "Marie", "محمد")
+- Multiple given names ("Mary Elizabeth", "Jean-Pierre")
+- Cultural name formats that may include honorifics or titles
+- Names in non-Latin scripts (Arabic, Persian, Chinese, etc.)
 
-Given name(s) of the individual
+The 255-character limit provides ample space for even complex name structures while maintaining reasonable database constraints. The nvarchar type ensures proper storage and retrieval of names in any language, supporting the global nature of the community.
 
-### FamilyName
+### FamilyName (nvarchar(255), NOT NULL)
 
-Surname or family name
+The surname, last name, or family name of the individual. Like FirstName, this field uses Unicode to support international names and is required for every individual. This field accommodates:
+- Traditional Western surnames
+- Compound family names common in many cultures
+- Patronymic or matronymic naming systems
+- Single-name cultures where the family name might repeat the given name
+- Names with special characters, apostrophes, or hyphens
 
-### Gender
+Together with FirstName, this creates the individual's full name for identification and communication purposes. The system recognizes that name formats vary significantly across cultures and provides flexibility while maintaining the structure needed for sorting and searching.
 
-Gender: 'M' (Male), 'F' (Female)
+### Gender (tinyint, NOT NULL)
 
-### BirthYear
+A numeric code indicating the individual's gender, typically stored as 1 for Male and 2 for Female, though the tinyint type allows for potential expansion if needed. This demographic information serves several important purposes:
+- Statistical reporting on gender balance in activities
+- Age-gender breakdowns required for cycle reports
+- Ensuring appropriate accommodations in gender-specific contexts
+- Understanding participation patterns across different demographics
 
-Year of birth (YYYY format)
+While this field is marked as NOT NULL in the schema, the handling of gender information requires cultural sensitivity, recognizing that gender identification practices and preferences vary across communities and contexts.
 
-### IsBirthYearEstimated
+### EstimatedYearOfBirthDate (smallint, NOT NULL)
 
-Flag indicating if birth year is estimated vs. exact
+This field stores the year of birth, whether exact or estimated, providing the foundation for age-based categorization and analysis. The field name reflects the reality that in many parts of the world, exact birth dates are not always known or recorded. This field enables:
+- Age calculation for determining eligibility for different activities
+- Cohort analysis and demographic studies
+- Age-appropriate educational placement
+- Statistical reporting by age categories
 
-### IsBahai
+The smallint type efficiently stores four-digit years while using minimal storage space, important given this field exists for every individual record.
 
-Indicates if person is a registered Bahai believer
+### IsSelectedEstimatedYearOfBirthDate (bit, NULL)
 
-### BahaiRegistrationDate
+A boolean flag indicating whether the year of birth is an estimate rather than a precisely known value. When TRUE, this signals that:
+- The exact birth year is unknown but has been approximated
+- Age calculations should be considered approximate
+- Statistical analyses should account for this uncertainty
+- The individual or data entry person has explicitly marked this as an estimate
 
-Date when person enrolled as a Bahai
+This field is particularly important in communities where birth registration is not universal or where historical records are incomplete. It allows participation in age-based activities while acknowledging data limitations.
 
-### DisplayBahaiRegistrationDate
+### DisplayBirthDate (varchar(20), NOT NULL)
 
-Human-readable registration date
+A flexible text field for storing human-readable birth date information that may not conform to strict date formats. This field might contain:
+- Complete dates: "1984-08-20"
+- Partial dates: "March 1990" or "1975"
+- Approximate dates: "circa 1960" or "early 1950s"
+- Cultural date formats: Dates in local calendars
+- Descriptive information: "about 65 years old in 2020"
 
-### IsArchived
+The 20-character limit provides space for most date representations while preventing misuse of the field for non-date information. This flexibility is crucial for communities where precise dates are not culturally significant or where records are incomplete.
 
-Flag indicating if record is archived (inactive)
+### BirthDate (datetime, NULL)
 
-### ArchivedTimestamp
+The precise birth date and time when known, stored in SQL Server's datetime format for accurate age calculations and date operations. When populated, this field enables:
+- Exact age calculation to the day
+- Precise eligibility determination for age-based programs
+- Birthday tracking for community relationship building
+- Accurate demographic analysis
 
-When the record was archived
+The nullable nature acknowledges that exact birth dates are not always available, particularly for older individuals or those from regions with limited civil registration. When both DisplayBirthDate and BirthDate are present, the datetime provides computational precision while the display field offers human context.
 
-### ArchivedBy
+### IsRegisteredBahai (bit, NULL)
 
-User ID who archived the record
+A crucial boolean field that identifies whether the individual is an enrolled member of the Bahá'í Faith. This distinction is fundamental to many aspects of the system:
 
-### Comments
+When TRUE, the individual:
+- Is counted in Bahá'í population statistics
+- Is eligible for Bahá'í administrative participation
+- Appears in community membership reports
+- May have additional responsibilities and privileges
 
-Free-text notes about the individual
+When FALSE or NULL, the individual:
+- Is identified as a "friend of the Faith"
+- Participates in activities without formal membership
+- Is counted separately in statistical reports
+- Represents the inclusive nature of community activities
 
-### LocalityId
+This field enables the system to track both the growth of the Bahá'í community specifically and the broader reach of educational activities to the wider population.
 
-Foreign key to Localities table (residence)
+### DisplayRegistrationDate (varchar(20), NULL)
 
-### SubdivisionId
+A human-readable representation of when the individual became a Bahá'í, accommodating various levels of precision and cultural date formats. This field might contain:
+- Exact dates: "2014-08-15"
+- Approximate dates: "Summer 2010"
+- Significant periods: "During Ridván 2015"
+- Historical markers: "Youth Year" or "During pioneering"
 
-Foreign key to Subdivisions table (neighborhood)
+This flexibility is important because enrollment dates, particularly for those who became Bahá'ís many years ago or in different countries, may not always be precisely known or may be remembered in relation to significant events rather than calendar dates.
 
-### CreatedTimestamp
+### RegistrationDate (datetime, NULL)
 
-When the record was created
+The precise date and time when the individual officially enrolled as a Bahá'í, when this information is exactly known. This field is significant for:
+- Tracking new enrollments in specific time periods
+- Understanding growth patterns and teaching effectiveness
+- Calculating length of membership
+- Historical and statistical accuracy
 
-### CreatedBy
+The relationship between enrollment and participation in activities is complex - some individuals participate for extended periods before enrolling, while others enroll and then begin participating. This date helps understand those patterns.
 
-User ID who created the record
+### UnRegisteredTimestamp (datetime, NULL)
 
-### LastUpdatedTimestamp
+Records if and when an individual's Bahá'í membership status changed from registered to unregistered. This sensitive field handles the rare but important cases where:
+- An individual formally withdraws from membership
+- Administrative removal occurs
+- Historical corrections are made to registration status
+- Data cleanup identifies erroneous registrations
 
-When the record was last modified
+The presence of this field reflects the principle of maintaining complete historical records while accurately representing current status. It allows for statistical integrity while respecting individual choices.
 
-### LastUpdatedBy
+### Address (nvarchar(MAX), NULL)
 
-User ID who last modified the record
+A comprehensive field for storing postal address information, using Unicode to support international addresses and MAX length to accommodate complex address formats. This field typically contains:
+- Street addresses with apartment or unit numbers
+- City, state/province, postal codes
+- Country information for international contexts
+- Special delivery instructions or landmarks
+- Post office boxes or mail routing codes
 
-### ImportedTimestamp
+The unstructured nature of this field provides flexibility for the wide variety of address formats worldwide, though it requires careful handling to extract structured information for mailing or mapping purposes. Privacy considerations are paramount with this field.
 
-When data was imported from external system
+### IsArchived (bit, NOT NULL)
 
-### ImportedFrom
+A critical boolean flag that determines whether an individual's record is considered active or archived within the system. This field implements a soft-delete pattern that preserves historical data while managing active records:
 
-Source system identifier for imported data
+When FALSE (active):
+- Individual appears in standard queries and reports
+- Counted in population statistics
+- Available for activity enrollment
+- Included in communication lists
+- Considered part of the active community
 
-### ImportedFileType
+When TRUE (archived):
+- Excluded from standard queries unless specifically requested
+- Not counted in current population statistics
+- Historical participation records preserved
+- Cannot be enrolled in new activities
+- Typically indicates the person has moved away, passed away, or is no longer participating
 
-File format of imported data
+The archival system ensures that historical data remains intact for longitudinal studies while keeping active datasets manageable and relevant.
 
-### GUID
+### IsNonDuplicate (bit, NULL)
 
-Globally unique identifier for synchronization
+A flag used in data quality management to mark records that have been verified as unique individuals rather than duplicates of other records. This field supports:
+- Data cleanup operations where potential duplicates are identified
+- Marking records that have been manually reviewed
+- Preventing repeated merge operations
+- Quality assurance in data import processes
 
-### LegacyId
+The nullable nature allows for three states: verified unique (TRUE), identified duplicate (FALSE), or not yet evaluated (NULL).
 
-Original ID from legacy system
+### LegacyDataHadCurrentlyAttendingChildrensClass (bit, NULL)
 
-### InstituteId
+A historical flag preserved from data migration indicating whether the individual was attending children's classes at the time of migration from a legacy system. This field:
+- Preserves historical participation information
+- Helps understand pre-migration activity patterns
+- Provides continuity in tracking educational involvement
+- Supports validation of migrated data
 
-External institute system identifier
-
-### WasLegacyRecord
-
-Flag indicating record was migrated from legacy system
-
-## Key Relationships
-
-1. **Localities** (LocalityId → Localities.Id)
-   - Every individual must be assigned to a locality
-   - Primary residence assignment
-   - Used for geographic reporting and analysis
-
-2. **Subdivisions** (SubdivisionId → Subdivisions.Id)
-   - Optional more precise location within locality
-   - Used in urban areas for neighborhood-level tracking
-   - May be NULL for most individuals
-
-3. **ActivityStudyItemIndividuals** (One-to-Many)
-   - Links individuals to their activity participation
-   - Tracks roles (facilitator, participant, etc.)
-   - Records study item completion status
-   - Primary relationship for tracking educational progress
-
-4. **IndividualEmails** (One-to-Many)
-   - Stores email addresses for the individual
-   - Supports multiple emails per person
-   - Flags primary email address
-
-5. **IndividualPhones** (One-to-Many)
-   - Stores phone numbers for the individual
-   - Supports multiple phones per person
-   - Different phone types (mobile, home, work)
-
-## Personal Information
-
-### Name Fields
-- **FirstName**: Given name(s), may include middle names
-- **FamilyName**: Surname, last name, family name
-- Together form the individual's full name
-- Stored in local script/language
-
-### Demographic Data
-- **Gender**: Male (M) or Female (F)
-  - Used for statistical reporting
-  - Age-gender breakdowns in Cycles table
-  - May be NULL if not provided
-
-- **BirthYear**: Year of birth
-  - Enables age calculation and cohort analysis
-  - Used for determining children/junior youth/youth/adult categories
-  - May be NULL if unknown
-
-- **IsBirthYearEstimated**: Indicates approximate age
-  - TRUE when exact birth year unknown
-  - Common in areas without birth records
-  - Allows participation even without precise age
-
-## Bahai Registration Status
-
-### IsBahai Flag
-- **TRUE**: Person is a registered Bahai believer
-  - Counted in Bahai population statistics
-  - Eligible for Bahai administrative functions
-  - Included in community census
-
-- **FALSE**: Friend of the faith or participant
-  - Participating in activities but not enrolled
-  - Counted separately in "friends of faith" metrics
-  - May be children of Bahai parents or community participants
-
-### Registration Date
-- **BahaiRegistrationDate**: Actual date of enrollment
-- **DisplayBahaiRegistrationDate**: Human-readable format
-- Dual date pattern allows flexibility
-- Important for tracking new believers
-- Used in expansion statistics
-
-## Archival System
-
-### IsArchived Flag
-- **FALSE**: Active record, current participant
-  - Included in standard queries and reports
-  - Counted in population statistics
-  - Available for activity assignment
-
-- **TRUE**: Archived record, inactive
-  - Excluded from standard reports
-  - Historical record preserved
-  - Not counted in current statistics
-
-### Archival Tracking
-- **ArchivedTimestamp**: When record was archived
-- **ArchivedBy**: User who performed archival
-- Enables audit trail and potential restoration
-- Reasons for archival:
-  - Individual moved away
-  - Passed away
-  - No longer participating
-  - Data quality issues (duplicates)
-
-## Geographic Assignment
-
-### Location Hierarchy
-- **LocalityId**: Required, primary residence
-- **SubdivisionId**: Optional, neighborhood detail
+While this field may not be actively updated in the current system, it provides valuable historical context about the individual's past involvement.
+
+### LegacyDataHadCurrentlyParticipatingInAJuniorYouthGroup (bit, NULL)
+
+Similar to the children's class flag, this field indicates whether the individual was participating in a junior youth group at the time of system migration. This historical marker:
+- Documents past junior youth program involvement
+- Helps identify youth who may have aged into youth activities
+- Provides context for understanding individual development paths
+- Supports historical analysis of program growth
+
+These legacy fields demonstrate the importance of preserving historical context during system transitions.
+
+### Comments (nvarchar(MAX), NULL)
+
+A flexible free-text field for storing additional information about the individual that doesn't fit into structured fields. Based on sample data, this field commonly contains:
+- Bahá'í identification numbers (BID#)
+- Migration history and arrival dates
+- Ethnic or cultural background (with consent)
+- Language preferences
+- Relationship notes (family connections)
+- Historical notes about participation
+- Special circumstances or considerations
+- Cross-references to other systems or records
+
+The MAX length allows for extensive notes when needed, though most entries are concise. This field requires careful handling due to potential sensitivity of information stored.
+
+### LocalityId (bigint, NOT NULL)
+
+A fundamental foreign key that assigns each individual to a specific locality within the geographic hierarchy. This assignment:
 - Determines which cluster's statistics include this individual
-- Used for:
-  - Population demographics
-  - Activity proximity
-  - Communication and outreach
-  - Administrative boundaries
+- Identifies the primary community for the person
+- Enables geographic analysis and reporting
+- Supports coordination of local activities
+- Facilitates communication and home visits
 
-## Age Categories
+Every individual must be associated with a locality, making this a required field that places each person within the administrative and geographic structure of the community.
 
-Based on BirthYear, individuals fall into categories:
-- **Children** (0-11 years): Eligible for children's classes
-- **Junior Youth** (12-15 years): Eligible for junior youth groups
-- **Youth** (15-21 years): Youth activities and institute courses
-- **Adults** (21+ years): Full participation in all activities
+### SubdivisionId (bigint, NULL)
 
-These categories are calculated dynamically based on current date and birth year.
+An optional foreign key that provides more granular geographic placement within a locality, typically used in urban areas to identify specific neighborhoods or sectors. When populated, this field:
+- Enables neighborhood-level coordination
+- Supports more targeted outreach efforts
+- Helps identify geographic patterns of participation
+- Facilitates local transportation coordination
+- Allows for micro-level community analysis
 
-## Common Query Patterns
+The nullable nature recognizes that many localities, particularly smaller ones, don't require subdivision-level tracking.
 
-### Active Individuals in a Locality
-```sql
-SELECT
-    [FirstName],
-    [FamilyName],
-    [Gender],
-    [BirthYear],
-    [IsBahai]
-FROM [Individuals]
-WHERE [LocalityId] = @LocalityId
-    AND [IsArchived] = 0
-ORDER BY [FamilyName], [FirstName]
-```
+### CreatedTimestamp (datetime, NOT NULL)
 
-### Age Distribution
-```sql
-SELECT
-    CASE
-        WHEN YEAR(GETDATE()) - [BirthYear] < 12 THEN 'Children'
-        WHEN YEAR(GETDATE()) - [BirthYear] BETWEEN 12 AND 14 THEN 'Junior Youth'
-        WHEN YEAR(GETDATE()) - [BirthYear] BETWEEN 15 AND 20 THEN 'Youth'
-        ELSE 'Adults'
-    END AS AgeCategory,
-    COUNT(*) AS IndividualCount
-FROM [Individuals]
-WHERE [IsArchived] = 0
-    AND [BirthYear] IS NOT NULL
-GROUP BY
-    CASE
-        WHEN YEAR(GETDATE()) - [BirthYear] < 12 THEN 'Children'
-        WHEN YEAR(GETDATE()) - [BirthYear] BETWEEN 12 AND 14 THEN 'Junior Youth'
-        WHEN YEAR(GETDATE()) - [BirthYear] BETWEEN 15 AND 20 THEN 'Youth'
-        ELSE 'Adults'
-    END
-```
+Records the exact moment when this individual's record was first created in the database. This audit field serves multiple purposes:
+- Tracking when individuals were first recorded
+- Understanding data entry patterns and workload
+- Identifying records created during specific import operations
+- Supporting data quality investigations
+- Enabling temporal analysis of database growth
 
-### Bahai Population by Cluster
-```sql
-SELECT
-    C.[Name] AS ClusterName,
-    COUNT(I.[Id]) AS TotalIndividuals,
-    SUM(CASE WHEN I.[IsBahai] = 1 THEN 1 ELSE 0 END) AS BahaiCount,
-    SUM(CASE WHEN I.[IsBahai] = 0 THEN 1 ELSE 0 END) AS FriendsOfFaith
-FROM [Individuals] I
-INNER JOIN [Localities] L ON I.[LocalityId] = L.[Id]
-INNER JOIN [Clusters] C ON L.[ClusterId] = C.[Id]
-WHERE I.[IsArchived] = 0
-GROUP BY C.[Id], C.[Name]
-ORDER BY BahaiCount DESC
-```
+The timestamp may significantly differ from when the person first participated in activities, particularly for historical data entry or system migrations.
 
-### Recent Enrollments
-```sql
-SELECT
-    [FirstName],
-    [FamilyName],
-    [DisplayBahaiRegistrationDate],
-    [BahaiRegistrationDate],
-    L.[Name] AS Locality
-FROM [Individuals] I
-INNER JOIN [Localities] L ON I.[LocalityId] = L.[Id]
-WHERE I.[IsBahai] = 1
-    AND I.[IsArchived] = 0
-    AND I.[BahaiRegistrationDate] >= DATEADD(YEAR, -1, GETDATE())
-ORDER BY I.[BahaiRegistrationDate] DESC
-```
+### CreatedBy (uniqueidentifier, NOT NULL)
 
-### Individual Activity Participation
-```sql
-SELECT
-    I.[FirstName] + ' ' + I.[FamilyName] AS FullName,
-    COUNT(DISTINCT ASII.[ActivityId]) AS ActivitiesCount,
-    COUNT(DISTINCT ASII.[StudyItemId]) AS StudyItemsCount
-FROM [Individuals] I
-INNER JOIN [ActivityStudyItemIndividuals] ASII ON I.[Id] = ASII.[IndividualId]
-WHERE I.[IsArchived] = 0
-    AND ASII.[IsCurrent] = 1
-GROUP BY I.[Id], I.[FirstName], I.[FamilyName]
-ORDER BY ActivitiesCount DESC
-```
+The GUID of the user account that created this individual's record, providing accountability and traceability. This field helps:
+- Maintain data entry accountability
+- Track which users are entering individual records
+- Identify training needs based on data entry patterns
+- Support data quality investigations
+- Enable audit trails for compliance purposes
 
-### Full Contact Information
-```sql
-SELECT
-    I.[FirstName],
-    I.[FamilyName],
-    IE.[Email] AS EmailAddress,
-    IP.[PhoneNumber],
-    L.[Name] AS Locality,
-    S.[Name] AS Subdivision
-FROM [Individuals] I
-LEFT JOIN [IndividualEmails] IE ON I.[Id] = IE.[IndividualId] AND IE.[IsPrimary] = 1
-LEFT JOIN [IndividualPhones] IP ON I.[Id] = IP.[IndividualId] AND IP.[IsPrimary] = 1
-INNER JOIN [Localities] L ON I.[LocalityId] = L.[Id]
-LEFT JOIN [Subdivisions] S ON I.[SubdivisionId] = S.[Id]
-WHERE I.[Id] = @IndividualId
-```
+In practice, this might identify cluster coordinators, data entry volunteers, system administrators, or automated import processes.
 
-## Business Rules and Constraints
+### LastUpdatedTimestamp (datetime, NOT NULL)
 
-1. **Required Fields**: FirstName, FamilyName, LocalityId must be provided
-2. **Archival Logic**: Archived individuals excluded from active queries
-3. **Age Validation**: BirthYear should be reasonable (not future, not too old)
-4. **Registration Date**: Should not precede BirthYear + reasonable age (e.g., 15)
-5. **Gender**: Should be 'M' or 'F' when provided
-6. **IsBahai Consistency**: If TRUE, should have registration date
-7. **Unique Individuals**: Avoid duplicates (same name, birth year, locality)
+Captures when this individual's record was most recently modified, regardless of which field was changed. This timestamp is essential for:
+- Tracking data freshness and maintenance patterns
+- Supporting incremental synchronization between systems
+- Identifying recently changed records for review
+- Understanding how individual information evolves
+- Monitoring database activity
 
-## Data Quality Considerations
+Updates might occur due to address changes, activity enrollment, status changes, or data corrections.
+
+### LastUpdatedBy (uniqueidentifier, NOT NULL)
+
+Records the GUID of the user who most recently modified this record. Together with LastUpdatedTimestamp, this provides a complete picture of recent changes:
+- Who is maintaining individual records
+- Whether updates come from local coordinators or central administration
+- Patterns in data maintenance across different users
+- Authorization and access patterns
+- Quality control for data modifications
+
+### ArchivedTimestamp (datetime, NULL)
+
+Records the exact moment when an individual's record was archived (when IsArchived changed from FALSE to TRUE). This timestamp is valuable for:
+- Understanding patterns of attrition or movement
+- Tracking seasonal variations in participation
+- Historical analysis of community stability
+- Potential reactivation of archived records
+- Audit trails for archival decisions
+
+A NULL value indicates the record has never been archived (is currently active) or predates archival tracking.
+
+### ImportedTimestamp (datetime, NULL)
+
+For records that originated from external systems, this field captures when the import occurred. This timestamp helps:
+- Distinguish imported from directly-entered data
+- Track data migration waves
+- Understand data provenance
+- Coordinate phased migrations
+- Troubleshoot import-related issues
+
+This is particularly relevant for initial system implementations or when consolidating data from multiple sources.
+
+### ImportedFrom (uniqueidentifier, NULL)
+
+Identifies the specific source system, import batch, or migration process from which this record originated. This GUID can be traced back to:
+- Specific import operations
+- Source databases or systems
+- Regional or national databases being consolidated
+- Mobile application synchronization
+- Batch import identifiers
+
+This field is essential for maintaining data lineage and troubleshooting any issues related to imported data.
+
+### ImportedFileType (varchar(50), NULL)
+
+Documents the format or type of file from which this individual's data was imported. Common values include:
+- "SRP_3_1_Region_File": Specific SRP format versions
+- "CSV": Comma-separated value imports
+- "Excel": Spreadsheet imports
+- "AccessDB": Legacy database migrations
+- Custom format identifiers for specialized imports
+
+This information helps understand potential format-related issues and maintains documentation about data sources.
+
+### GUID (uniqueidentifier, NOT NULL)
+
+A globally unique identifier that provides a universal reference for this individual across all systems and synchronization operations. This GUID:
+- Remains constant even if local IDs change
+- Enables synchronization between distributed databases
+- Supports mobile app offline/online synchronization
+- Facilitates data exchange between regions or countries
+- Provides a stable reference for external systems
+
+The GUID is essential for maintaining data integrity in distributed deployments and ensuring that the same individual isn't duplicated across systems.
+
+### LegacyId (nvarchar(255), NULL)
+
+Preserves the original identifier from legacy systems during migration processes. This field might contain:
+- Alphanumeric IDs from previous databases
+- Composite keys concatenated into strings
+- External system reference numbers
+- Historical membership numbers
+- Custom identifiers from regional systems
+
+Maintaining these legacy identifiers is crucial for:
+- Cross-referencing historical records
+- Validating migration completeness
+- Supporting gradual system transitions
+- Maintaining continuity for long-time members
+
+### InstituteId (nvarchar(50), NULL)
+
+An external identifier that links this individual to records in separate institute management systems. Some communities use specialized systems for tracking institute progress, and this field maintains that connection. The identifier might reference:
+- National institute databases
+- Regional training institute systems
+- Online learning platforms
+- Mobile app user accounts
+- External curriculum management systems
+
+This field enables integration with specialized educational tools while maintaining the individual's identity across systems.
+
+### WasLegacyRecord (bit, NOT NULL)
+
+A boolean flag that permanently marks whether this record was migrated from a legacy system rather than created directly in the current system. When TRUE, this indicates:
+- The record originated in a previous database
+- Some fields might have been transformed during migration
+- Historical data might have different quality characteristics
+- Additional validation or cleanup might be needed
+- Legacy fields contain relevant historical information
+
+This flag helps interpret data quality and completeness, particularly for long-standing community members whose records may have passed through multiple systems.
+
+## Key Relationships and Data Patterns
+
+### Geographic Hierarchy and Assignment
+
+Every individual exists within a specific geographic context through their LocalityId, which places them within the full hierarchy: National Community → Region → Cluster → Locality → (optionally) Subdivision. This geographic assignment is fundamental to:
+- Understanding population distribution
+- Coordinating local activities
+- Generating cluster-level statistics
+- Planning expansion and consolidation
+- Facilitating communication and home visits
+
+### Educational Participation Network
+
+Through the ActivityStudyItemIndividuals table, each individual can be connected to multiple:
+- Activities they participate in or facilitate
+- Study items they've completed or are studying
+- Roles they play in different educational contexts
+- Historical and current educational involvement
+
+This creates a rich network of educational relationships that tracks individual development over time.
+
+### Contact Information Management
+
+The separate IndividualEmails and IndividualPhones tables implement a one-to-many pattern that recognizes modern communication realities:
+- Multiple email addresses (personal, work, family shared)
+- Various phone numbers (mobile, home, work, WhatsApp)
+- Primary vs. secondary contact methods
+- Changing contact information over time
+
+This structure provides flexibility while maintaining data normalization.
+
+### Demographic Categorization
+
+The combination of BirthDate/EstimatedYearOfBirthDate and Gender enables demographic analysis crucial for:
+- Age-appropriate activity assignment
+- Statistical reporting by age and gender
+- Understanding community composition
+- Planning for future capacity needs
+- Tracking demographic transitions
+
+### Enrollment and Participation Patterns
+
+The relationship between IsRegisteredBahai and activity participation reveals important patterns:
+- Friends of the Faith participating alongside Bahá'ís
+- Pre-enrollment participation periods
+- Post-enrollment activity patterns
+- Community integration levels
+- Inclusive nature of core activities
+
+## Data Quality and Integrity Considerations
 
 ### Duplicate Prevention
-- Check for existing individuals before creating
-- Compare FirstName, FamilyName, BirthYear, LocalityId
-- Use GUID for synchronization across systems
-- LegacyId tracks migrated records
 
-### Data Completeness
-- Core fields (name, locality) required
-- Demographic data (gender, birth year) strongly encouraged
-- Contact information (emails, phones) in separate tables
-- Comments field for special circumstances
+Preventing duplicate individual records is crucial for data integrity. Key strategies include:
+- Checking for existing records with similar names and birth years
+- Comparing localities and family relationships
+- Using the IsNonDuplicate flag during cleanup operations
+- Leveraging GUID for cross-system duplicate detection
+- Regular data quality audits
 
 ### Privacy and Security
-- Personal information requires protection
-- Access controls on individual data
-- Archival instead of deletion preserves history
-- GUID enables secure synchronization
 
-## Import and Migration
+The Individuals table contains sensitive personal information requiring careful handling:
+- Address information should be protected and limited in access
+- Birth dates and age information need appropriate security
+- Comments field may contain sensitive notes
+- Contact information (in related tables) requires protection
+- Archival instead of deletion preserves history while managing privacy
 
-### Legacy System Support
-- **LegacyId**: Original system identifier
-- **WasLegacyRecord**: Flags migrated records
-- **ImportedFrom**: Source system tracking
-- **ImportedFileType**: Data format (CSV, Excel, etc.)
-- **ImportedTimestamp**: When imported
+### Data Completeness Strategies
 
-### Synchronization
-- **GUID**: Global unique identifier
-- Enables multi-site deployments
-- Mobile app synchronization
-- Backup and restore operations
+While core fields are required, many fields are nullable to accommodate varying levels of information:
+- Progressive data collection as relationships develop
+- Cultural sensitivity around personal information
+- Historical records with incomplete information
+- Varying record-keeping practices across communities
+- Flexibility for diverse global contexts
 
-## Usage in Reporting
+### Archival Best Practices
 
-Individuals table feeds many reports:
-- **Population Demographics**: Age/gender breakdowns
-- **Growth Tracking**: New enrollments over time
-- **Participation Analysis**: Activity involvement
-- **Geographic Distribution**: Population by locality/cluster
-- **Institute Progress**: Course completions
-- **Community Development**: Active participants
+The archival system (IsArchived flag) requires consistent application:
+- Clear policies on when to archive (moves, inactivity periods)
+- Regular review of archived records
+- Potential reactivation processes
+- Preservation of historical participation data
+- Impact on statistical reporting
 
-## Performance Considerations
+## Business Rules and Validation
+
+### Age-Related Rules
+
+Several business rules govern age-related data:
+1. BirthDate should not be in the future
+2. Registration date should be reasonable relative to birth date
+3. Age categories determine activity eligibility
+4. Estimated years should be within reasonable ranges
+5. Historical dates should be validated for consistency
+
+### Geographic Assignment Rules
+
+Location assignment follows specific patterns:
+1. Every individual must have a LocalityId
+2. SubdivisionId must belong to the assigned Locality
+3. Geographic changes should be tracked over time
+4. Archived individuals retain their last known location
+5. Batch updates may be needed for boundary changes
+
+### Registration Status Rules
+
+Bahá'í registration follows specific logic:
+1. IsRegisteredBahai=TRUE should have a RegistrationDate
+2. UnRegisteredTimestamp should only exist if previously registered
+3. Registration dates should not precede reasonable age of enrollment
+4. Changes to registration status should be logged
+5. Historical registration information should be preserved
+
+### Data Entry Standards
+
+Consistent data entry improves quality:
+1. Names should follow consistent capitalization
+2. Dates should use standard formats where possible
+3. Gender coding should be consistent
+4. Comments should avoid duplicate structured information
+5. Contact information belongs in related tables
+
+## Performance Optimization Strategies
 
 ### Indexing Recommendations
-- LocalityId (frequent joins and filters)
-- IsArchived (exclude from most queries)
-- IsBahai (filtering believers vs. friends)
-- BirthYear (age calculations)
-- GUID (synchronization lookups)
 
-### Query Optimization
-- Always filter IsArchived = 0 for active records
-- Index on (LocalityId, IsArchived, IsBahai) for common queries
-- Consider materialized views for complex age calculations
-- Cache locality lists for filtering
+Key indexes for optimal query performance:
+1. **LocalityId** - Frequent filtering and joining
+2. **IsArchived** - Exclude archived records from most queries
+3. **IsRegisteredBahai** - Separate Bahá'ís from friends
+4. **LastUpdatedTimestamp** - Incremental synchronization
+5. **GUID** - Cross-system record matching
+6. Composite index on (LocalityId, IsArchived, IsRegisteredBahai)
+7. Covering index for common demographic queries
 
-## Notes for Developers
+### Query Optimization Patterns
 
-- **ALWAYS** filter IsArchived = 0 unless specifically querying archived records
-- Join with Localities to get cluster context
-- Use LEFT JOIN for Subdivisions (commonly NULL)
-- Calculate age dynamically from BirthYear
-- Handle NULL BirthYear gracefully in age calculations
-- Contact information in separate tables (one-to-many)
-- Respect privacy - limit data exposure in APIs/reports
+Common query patterns requiring optimization:
+```sql
+-- Active individuals filter (most common)
+WHERE IsArchived = 0
 
-## Special Considerations
+-- Bahá'í population queries
+WHERE IsArchived = 0 AND IsRegisteredBahai = 1
 
-### Children and Parents
-- System doesn't explicitly track family relationships
-- Children often tracked through parents' activities
-- Parent contact information typically used for children
-- Age-appropriate activity assignment
+-- Age calculation patterns
+WHERE IsArchived = 0
+  AND EstimatedYearOfBirthDate <= YEAR(GETDATE()) - @MinAge
+  AND EstimatedYearOfBirthDate >= YEAR(GETDATE()) - @MaxAge
+```
 
-### Data Retention
-- Archive instead of delete to preserve history
-- Archival is reversible if needed
-- Historical participation records maintained
-- Statistical integrity preserved
+### Data Volume Management
 
-### Cultural Sensitivity
-- Name formats vary by culture
-- Single name field may not suit all cultures
-- Gender may be culturally sensitive in some contexts
-- Age information may not be available in all regions
+With potentially tens of thousands of individuals:
+- Regular archival of inactive records
+- Partitioning by geographic regions for large deployments
+- Summary tables for frequently accessed statistics
+- Careful management of the Comments field size
+- Efficient handling of NULL values
+
+## Integration and Synchronization Patterns
+
+### Multi-System Identity Management
+
+The multiple identifier fields support various integration scenarios:
+- **Id**: Local system primary key
+- **GUID**: Universal identifier for synchronization
+- **LegacyId**: Historical system references
+- **InstituteId**: External education system links
+
+### Mobile Application Synchronization
+
+The GUID-based identity system supports:
+- Offline data collection in mobile apps
+- Conflict resolution when syncing
+- Distributed data entry across devices
+- Eventual consistency patterns
+- Cross-platform identity maintenance
+
+### Regional and National Consolidation
+
+For multi-level deployments:
+- Local clusters maintain their individual records
+- Regional systems aggregate local data
+- National systems consolidate regional information
+- GUID ensures unique identity across levels
+- Import fields track data lineage
+
+### External System Integration
+
+The InstituteId and other external references enable:
+- Integration with learning management systems
+- Connection to communication platforms
+- Links to donation or membership systems
+- Coordination with event registration systems
+- Compatibility with third-party analytics tools
+
+## Reporting and Analytics Use Cases
+
+### Demographic Analysis
+
+The Individuals table enables comprehensive demographic studies:
+- Population pyramids by age and gender
+- Geographic distribution mapping
+- Growth trends over time
+- Conversion and retention analysis
+- Comparative demographics across clusters
+
+### Participation Analytics
+
+Combined with activity data:
+- Individual learning journeys
+- Participation rates by demographic
+- Role progression over time
+- Activity effectiveness by population segment
+- Capacity development tracking
+
+### Community Health Metrics
+
+Key indicators derivable from this table:
+- Active vs. archived ratios
+- New enrollment trends
+- Geographic mobility patterns
+- Contact information completeness
+- Data quality metrics
+
+### Strategic Planning Data
+
+Information supporting planning:
+- Population projections based on age structure
+- Capacity needs based on demographics
+- Geographic expansion opportunities
+- Resource allocation by population
+- Program effectiveness by segment
+
+## Future Considerations and Enhancements
+
+### Potential Structural Improvements
+
+Consider future enhancements such as:
+- Structured address fields for better geocoding
+- Relationship tracking between individuals (families)
+- Multiple nationality or language preferences
+- Educational background or profession
+- Consent and privacy preference tracking
+
+### Scalability Preparations
+
+As communities grow:
+- Consider sharding strategies for very large populations
+- Implement caching for frequently accessed individuals
+- Develop archival strategies for long-term storage
+- Plan for increased mobile synchronization needs
+- Design for global deployment scenarios
+
+### Enhanced Privacy Features
+
+Future privacy enhancements might include:
+- Field-level encryption for sensitive data
+- Audit logs for all data access
+- Consent management workflows
+- Data retention policies
+- Right to erasure implementations
+
+### Integration Opportunities
+
+Potential integration expansions:
+- Social media identity linking (with consent)
+- Communication platform integration
+- Advanced analytics and machine learning
+- Geographic information systems
+- Community collaboration tools

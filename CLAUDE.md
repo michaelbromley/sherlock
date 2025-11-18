@@ -205,3 +205,7 @@ GROUP BY R.[Name], C.[Name], L.[Name]
 - The db-tool enforces read-only operations (SELECT, SHOW, DESCRIBE, EXPLAIN only)
 - Query logs may contain sensitive data - ensure proper access controls
 - Use read-only database users when possible
+
+## Task Master AI Instructions
+**Import Task Master's development workflow commands and guidelines, treat as if import is in the main CLAUDE.md file.**
+@./.taskmaster/CLAUDE.md
