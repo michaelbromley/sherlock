@@ -7,41 +7,328 @@ The `IndividualPhones` table stores phone numbers for individuals in the SRP dat
 
 The following sections describe in detail the meaning, purpose and uses for each of the fields in this table. Each subsection heading within this section maps to a field, and each subsection body describes that field in more detail.
 
-### Id
+### Id (bigint, NOT NULL)
 
-Primary key, unique identifier for each phone record
+The primary key serving as the unique identifier for each phone number record in the system. This auto-incrementing field ensures that every phone entry has a distinct reference point, supporting scenarios where:
+- The same phone number might be recorded for multiple individuals (family sharing)
+- An individual might have the same number recorded multiple times historically
+- Phone-specific operations need a stable reference point for updates and deletions
 
-### PhoneNumber
+The Id provides the system-level identity that remains constant throughout the phone record's lifecycle, distinct from the phone number itself which represents the actual contact information. This separation is crucial for maintaining referential integrity, tracking phone record changes over time, and supporting audit trails for phone number modifications.
 
-Phone number (may include country code, area code, extensions)
+### PhoneNumber (nvarchar(50), NOT NULL)
 
-### PhoneType
+The actual telephone number stored in a flexible format to accommodate international variations in phone number structures. This mandatory field uses Unicode support (nvarchar) to handle phone numbers from any country, including those with special characters or non-ASCII digits. The field accommodates:
 
-Type of phone: 0=Mobile, 1=Home, 2=Work, 3=Other
+**International Numbers:**
+- Country codes (+1, +33, +234, etc.)
+- International dialing prefixes (00, 011)
+- Regional area codes
+- Local numbers of varying lengths
 
-### IsPrimary
+**Special Formatting:**
+- Extensions (ext. 123, x456)
+- Parentheses for area codes: (555) 123-4567
+- Hyphens and spaces: 555-123-4567 or 555 123 4567
+- Dots as separators: 555.123.4567
+- Special characters for pauses or wait instructions
 
-Flag indicating if this is the primary phone for the individual
+**Storage Considerations:**
+- 50-character limit accommodates even complex international numbers with extensions
+- Numbers stored as entered, preserving user's formatting preference
+- No enforcement of specific format to support international diversity
+- Leading/trailing whitespace should be trimmed
+- Consider stripping formatting for comparison operations
 
-### IndividualId
+**Business Significance:**
+Phone numbers serve multiple critical purposes in community coordination:
+- Emergency contact for individuals and families
+- Activity reminders and notifications
+- Follow-up communication with participants
+- Coordination between facilitators and coordinators
+- Community event notifications
+- Pastoral care and support
+- Confirmation of participation and attendance
 
-Foreign key to Individuals table
+The flexible storage approach recognizes that phone number formats vary dramatically across countries and cultures, and enforcing a single format would create barriers to accurate data collection in global contexts.
 
-### CreatedTimestamp
+### PhoneType (tinyint, NOT NULL)
 
-When the phone record was created
+A numeric code categorizing the phone number by its usage context and ownership. This classification enables intelligent contact strategies and helps coordinators choose appropriate communication methods. The field uses the following enumeration:
 
-### CreatedBy
+**PhoneType Values:**
+- **0 = Mobile/Cell**: Personal mobile phone
+  - Most direct contact method
+  - Capable of receiving SMS/text messages
+  - Usually accessible throughout the day
+  - Preferred for time-sensitive communications
+  - Individual's personal device
+  - Best for emergency contact
 
-User ID who created the record
+- **1 = Home**: Residential landline telephone
+  - Fixed location home phone
+  - Often shared by entire family or household
+  - Traditional contact method
+  - May have limited hours of appropriate calling
+  - Increasingly less common in modern contexts
+  - Useful for reaching households rather than individuals
 
-### LastUpdatedTimestamp
+- **2 = Work**: Business or office number
+  - Professional contact point
+  - May require navigating phone systems or receptionists
+  - May include extension numbers
+  - Limited to business hours availability
+  - Organizational phone rather than personal
+  - Appropriate for formal or professional communications
 
-When the record was last modified
+- **3 = Other**: Alternative or specialized phone types
+  - Relative's or neighbor's phone
+  - Community phone or shared device
+  - Backup or emergency contact number
+  - Temporary contact method
+  - Special circumstances or arrangements
 
-### LastUpdatedBy
+**Usage Strategy by Type:**
+The phone type drives communication strategy:
+- **Mobile** phones enable immediate, direct contact and SMS capabilities
+- **Home** phones work best for evening/weekend contact and reaching families
+- **Work** phones appropriate for business-hours professional communication
+- **Other** phones typically used only when primary methods unavailable
 
-User ID who last modified the record
+This classification is essential for respecting individuals' privacy, optimizing communication success rates, and ensuring appropriate use of different contact methods in different circumstances.
+
+### IsPrimary (bit, NOT NULL)
+
+A boolean flag designating whether this phone number is the individual's primary contact number. This field implements a critical business rule ensuring each person has exactly one clearly designated primary phone for official communications.
+
+**When TRUE (1):**
+- This number is used for all official calls and SMS communications
+- Displayed prominently in individual profiles and contact lists
+- Selected by automated notification and reminder systems
+- Used for emergency contact purposes
+- Appears in default reports and contact summaries
+- Designated for coordinators' first contact attempts
+
+**When FALSE (0):**
+- Represents an alternative, backup, or specialized contact number
+- May be for specific purposes (work vs. personal, family vs. individual)
+- Available as fallback when primary number unreachable
+- Not used by automated communication systems
+- May represent historical numbers kept for reference
+- Used only when specifically selected or when primary fails
+
+**Business Logic Requirements:**
+Managing primary phone designation requires careful attention:
+1. Each individual must have at most ONE primary phone at any given time
+2. When designating a new phone as primary, any existing primary must be set to FALSE
+3. If an individual has only one phone number, it should be marked as primary
+4. Deleting or archiving a primary phone should trigger selection of a new primary
+5. User interfaces should clearly indicate which number is primary
+6. Primary designation changes should be logged for audit purposes
+
+**Strategic Importance:**
+The primary phone designation:
+- Eliminates confusion about which number to call
+- Ensures consistent contact attempts
+- Enables automated systems to reach people reliably
+- Respects individuals' communication preferences
+- Optimizes coordinator time by providing clear guidance
+- Supports emergency response protocols
+
+This field is fundamental to effective community coordination, ensuring that when contact is needed, coordinators know exactly which number to use without hesitation or guesswork.
+
+### IndividualId (bigint, NOT NULL)
+
+The mandatory foreign key linking each phone number to a specific individual in the Individuals table. This relationship field establishes the fundamental connection between contact methods and people, enabling:
+
+**Core Functionality:**
+- Association of multiple phone numbers with one individual
+- Lookup of all contact numbers for a given person
+- Validation that phone records belong to known, active individuals
+- Geographic and demographic context through the individual's profile
+- Participation tracking via the individual's activity involvement
+
+**Referential Integrity:**
+The IndividualId enforces that:
+- Every phone number must belong to exactly one individual
+- Phone records cannot exist without a valid parent individual record
+- Deleting an individual typically cascades to delete their phone numbers
+- Archiving an individual doesn't necessarily delete their phones
+- Changes to individual records don't orphan phone numbers
+
+**Usage Patterns:**
+The IndividualId enables critical operations:
+- Finding all contact methods for an individual (mobile, home, work)
+- Identifying individuals by their phone number (reverse lookup)
+- Building comprehensive communication lists by locality or cluster
+- Linking phone contact activity to participation patterns
+- Understanding phone coverage across geographic areas
+- Supporting SMS campaigns to specific populations
+
+**Data Integrity Considerations:**
+- IndividualId must reference valid, non-null Individuals.Id
+- Foreign key constraint prevents orphaned phone records
+- Cascade delete behavior should be carefully configured
+- Archive vs. delete decisions affect phone number retention
+- Historical phone data preservation may require special handling
+
+This field is the critical link that places phone contact information within the broader context of community participation, enabling coordinators to understand not just how to reach people, but also who they are reaching and how those individuals are engaged in community-building activities.
+
+### CreatedTimestamp (datetime, NOT NULL)
+
+Records the precise moment when this phone number was added to the database. This audit field captures when the contact information became available in the system, serving multiple important purposes:
+
+**Temporal Tracking:**
+- Documents when phone contact information was first obtained
+- May differ significantly from when the individual began participating
+- Enables analysis of contact data collection patterns
+- Supports understanding of data quality over time
+- Tracks growth in contactable individuals
+
+**Data Quality Applications:**
+- Identifying recently added phone numbers for validation
+- Determining recency for duplicate resolution decisions
+- Analyzing data entry timing and patterns
+- Supporting synchronization with external systems
+- Providing context for data quality investigations
+
+**Analytical Value:**
+- Understanding when contact coverage improved
+- Tracking coordinator effectiveness in gathering contact info
+- Identifying periods of high data collection activity
+- Supporting retrospective analysis of communication capabilities
+- Enabling trend analysis of contactability over time
+
+**Use Cases:**
+The CreatedTimestamp helps answer questions like:
+- "When did we first obtain phone contact for this person?"
+- "Which phone number is newer when resolving duplicates?"
+- "How long have we been able to reach this individual by phone?"
+- "What percentage of recent participants have phone numbers?"
+- "When was the last time contact information was added in this locality?"
+
+This field provides essential temporal context that helps coordinators and administrators understand the evolution of their contact databases and identify opportunities for improving contact information collection.
+
+### CreatedBy (uniqueidentifier, NOT NULL)
+
+The GUID identifier of the user account that created this phone record. This audit field maintains accountability for data entry and helps track which users are collecting and entering contact information.
+
+**Accountability Functions:**
+- Identifies which coordinators gathered phone numbers
+- Documents data entry sources and methods
+- Supports training needs identification for data quality
+- Enables authorization verification for data access
+- Tracks user activity and productivity patterns
+
+**Common Scenarios:**
+- **Coordinator entry**: Local coordinator recording phone during individual registration
+- **Administrator import**: Data admin importing phones from external source
+- **Self-registration**: Individual providing own phone through online portal
+- **Migration**: Data migration scripts creating historical records
+- **API integration**: Third-party systems adding phone data programmatically
+
+**Quality Control Applications:**
+- Tracing back questionable or incorrect phone numbers to their source
+- Identifying users who may need additional training on data entry
+- Understanding which users are most actively collecting contact info
+- Recognizing patterns in data entry errors by user
+- Supporting audits of data collection practices
+
+**Privacy and Governance:**
+The CreatedBy field supports:
+- Compliance with data protection regulations requiring activity logs
+- Accountability for handling personally identifiable information
+- Investigation capabilities for data breaches or misuse
+- Documentation of who has accessed and entered phone numbers
+- Support for access control and authorization models
+
+This field is particularly valuable for maintaining data integrity and supporting organizational accountability in handling sensitive contact information.
+
+### LastUpdatedTimestamp (datetime, NOT NULL)
+
+Captures the most recent moment when any aspect of this phone record was modified. This field automatically updates with every change, providing essential information for change tracking and data management.
+
+**Change Detection:**
+- Identifies recently modified phone numbers
+- Supports incremental synchronization between systems
+- Enables change tracking for audit purposes
+- Documents data maintenance activities
+- Tracks phone number volatility and update frequency
+
+**Triggers for Updates:**
+- Phone number correction or modification
+- Primary designation changes (IsPrimary toggle)
+- Phone type reclassification (Mobile ↔ Home ↔ Work)
+- Data quality improvements and standardization
+- Integration updates from external systems
+- Administrative corrections during data cleanup
+
+**Analytical Applications:**
+- Identifying stale contact information needing verification
+- Understanding update frequency patterns by locality or cluster
+- Supporting data governance and audit requirements
+- Enabling freshness metrics for contact databases
+- Tracking data maintenance effort and effectiveness
+
+**Synchronization Support:**
+This timestamp is crucial for:
+- Identifying changes since last synchronization with external systems
+- Supporting bi-directional sync protocols
+- Enabling incremental backup and replication
+- Detecting conflicts in multi-user editing scenarios
+- Optimizing data transfer by syncing only changed records
+
+**Data Quality Monitoring:**
+- Phone numbers not updated in extended periods may need verification
+- Recent updates might indicate active data quality initiatives
+- High update frequency could signal data instability issues
+- Update patterns can reveal systematic data problems
+- Timestamp distribution helps assess overall data freshness
+
+This field enables administrators to understand how actively phone contact information is being maintained and to identify records that may need attention or verification.
+
+### LastUpdatedBy (uniqueidentifier, NOT NULL)
+
+Records the GUID of the user who most recently modified this phone record. Together with LastUpdatedTimestamp, this completes the comprehensive audit trail for phone number maintenance.
+
+**Maintenance Tracking:**
+- Documents who is updating and maintaining phone numbers
+- Identifies patterns in data maintenance across users
+- Supports quality control for phone number changes
+- Tracks authorization for contact information modifications
+- Monitors user activity in data stewardship
+
+**Common Update Scenarios:**
+- **Coordinator correction**: Local coordinator updating phone after individual reports change
+- **Data quality admin**: Administrator standardizing phone number formats
+- **Automated process**: System updating phones from external authoritative sources
+- **Self-service**: Individual updating own phone through web portal
+- **Bulk operation**: Mass update during data cleanup or migration
+
+**Governance and Compliance:**
+The combined audit trail (Created + Updated fields) enables:
+- Complete lifecycle visibility for each phone record
+- Accountability for all modifications to contact information
+- Training needs identification for specific users or roles
+- Compliance with data protection regulations requiring change logs
+- Investigation capabilities for data integrity issues
+
+**Quality Management:**
+- Identifying users whose changes frequently require correction
+- Recognizing patterns in how different users handle phone data
+- Supporting targeted training based on user-specific issues
+- Tracking effectiveness of data quality initiatives by user
+- Understanding which users maintain the highest data quality
+
+**Privacy and Security:**
+These audit fields are essential for:
+- Maintaining accountability for personally identifiable information
+- Supporting investigations of unauthorized access or changes
+- Documenting handling of sensitive contact information
+- Complying with regulations requiring access logs
+- Demonstrating responsible data stewardship practices
+
+The combination of all audit fields (Created/Updated Timestamp/By) provides comprehensive traceability for every phone record, supporting both operational excellence and regulatory compliance in managing contact information.
 
 ## Key Relationships
 

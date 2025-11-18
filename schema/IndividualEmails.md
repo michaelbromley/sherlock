@@ -7,37 +7,182 @@ The `IndividualEmails` table stores email addresses for individuals tracked in t
 
 The following sections describe in detail the meaning, purpose and uses for each of the fields in this table. Each subsection heading within this section maps to a field, and each subsection body describes that field in more detail.
 
-### Id
+### Id (bigint, NOT NULL)
 
-Primary key, unique identifier for each email record
+The primary key serving as the unique identifier for each email record in the system. This auto-incrementing field ensures that every email address entry has a distinct reference point, even if the same email address is used by multiple individuals (though this should be rare). The Id is crucial for:
+- Maintaining referential integrity across the database
+- Tracking specific email records for audit purposes
+- Supporting email-specific operations like primary designation changes
+- Enabling efficient updates and deletions of specific email entries
 
-### Email
+Unlike the Email field itself, which represents the actual contact information, the Id provides the system-level identity that remains constant throughout the email record's lifecycle.
 
-Email address in standard format (user@domain.com)
+### Email (nvarchar(255), NOT NULL)
 
-### IsPrimary
+The actual email address stored in standard internet format (user@domain.extension). This mandatory field uses Unicode character support (nvarchar) to accommodate international domain names and email addresses containing non-ASCII characters. The field supports:
+- Standard ASCII email addresses (john.doe@example.com)
+- International email addresses with Unicode characters
+- Email addresses from various domains and providers
+- Both personal and organizational email formats
 
-Flag indicating if this is the primary email for the individual
+**Storage and Format Considerations:**
+- Maximum 255 characters accommodates even lengthy email addresses
+- Email is stored exactly as entered, preserving user's formatting
+- Comparisons should be case-insensitive (email@example.com = EMAIL@EXAMPLE.COM)
+- Leading/trailing whitespace should be trimmed before storage
+- Validation regex should be applied before insertion
 
-### IndividualId
+**Business Significance:**
+Email addresses serve as the primary digital communication channel for:
+- Activity notifications and reminders
+- Educational materials distribution
+- Community announcements and updates
+- Coordinatorcontact and follow-up
+- Institute course information
+- Conference and event registrations
 
-Foreign key to Individuals table
+The email field represents not just a technical contact method but a vital connection point for maintaining relationships and enabling participation in community-building activities.
 
-### CreatedTimestamp
+### IsPrimary (bit, NOT NULL)
 
-When the email record was created
+A boolean flag indicating whether this email address is designated as the individual's primary contact email. This field implements a critical business rule where each individual should have exactly one primary email address for official communications.
 
-### CreatedBy
+**When TRUE (1):**
+- This email is used for all official correspondence
+- Displayed prominently in individual profiles and contact lists
+- Used by automated notification systems
+- Selected for mass communication campaigns
+- Appears in default reports and summaries
+- Used for account-related communications (password resets, verifications)
 
-User ID who created the record
+**When FALSE (0):**
+- Represents an alternative or backup email address
+- May be for specific purposes (work vs. personal)
+- Available as secondary contact method
+- Not used in automated communications unless primary fails
+- May represent historical or deprecated email addresses kept for reference
 
-### LastUpdatedTimestamp
+**Business Logic Requirements:**
+The primary email designation requires careful management:
+1. Each individual must have at most ONE primary email at any time
+2. When setting a new email as primary, any existing primary must be set to FALSE
+3. If an individual has only one email address, it should be marked as primary
+4. Deleting or archiving a primary email should trigger selection of new primary
+5. UI should clearly indicate which email is primary
+6. Primary designation changes should be audit-logged
 
-When the record was last modified
+This field is essential for ensuring consistent, reliable communication with individuals and preventing confusion about which contact method to use.
 
-### LastUpdatedBy
+### IndividualId (bigint, NOT NULL)
 
-User ID who last modified the record
+The mandatory foreign key that links this email address to a specific individual in the Individuals table. This relationship field establishes the fundamental connection between contact information and people, enabling:
+- Association of multiple email addresses with one individual
+- Lookup of all emails for a given person
+- Validation that emails belong to known, active individuals
+- Geographic and demographic context through the individual's profile
+- Participation tracking via the individual's activity involvement
+
+**Referential Integrity:**
+This field enforces that:
+- Every email must belong to exactly one individual
+- Emails cannot exist without a valid parent individual record
+- Deleting an individual typically cascades to delete their email addresses
+- Archiving an individual doesn't necessarily delete their emails
+
+**Usage Patterns:**
+The IndividualId enables critical queries:
+- Finding all contact methods for an individual
+- Identifying individuals by their email address
+- Building comprehensive communication lists
+- Linking email activity to participation patterns
+- Understanding contact information coverage across localities
+
+### CreatedTimestamp (datetime, NOT NULL)
+
+Records the exact moment when this email address was added to the database. This audit field captures when the contact information became available in the system, which may differ from when the individual began participating in activities. The timestamp serves several purposes:
+- Tracking temporal patterns in data collection
+- Understanding when contact information becomes available
+- Supporting data quality investigations
+- Enabling chronological sorting of email addresses
+- Identifying recently added contact methods
+
+**Use Cases:**
+- Determining which emails are newer (for duplicate resolution)
+- Analyzing data entry timing patterns
+- Supporting synchronization with external systems
+- Providing context for data quality issues
+- Tracking growth in contactable individuals
+
+This field helps answer questions like "When did we obtain email contact for this person?" and "How recently was this contact information added?"
+
+### CreatedBy (uniqueidentifier, NOT NULL)
+
+The GUID identifier of the user account that created this email record. This audit field maintains accountability for data entry and helps track who is collecting and entering contact information. The field enables:
+- Identifying which coordinators are gathering contact information
+- Understanding data entry patterns and sources
+- Training needs identification for data quality issues
+- Authorization verification for data access
+- User activity tracking and analysis
+
+**Scenarios Captured:**
+- Coordinator entering email during individual registration
+- Administrator importing emails from external data source
+- Individual self-registering through online portal
+- Data migration scripts creating historical records
+- API integrations from third-party systems
+
+The CreatedBy field is particularly valuable for data quality investigations, helping administrators trace back to the source of any questionable or incorrect information.
+
+### LastUpdatedTimestamp (datetime, NOT NULL)
+
+Captures the most recent moment when any aspect of this email record was modified. This field automatically updates whenever changes occur, providing essential information for:
+- Tracking data freshness and currency
+- Identifying recently modified contact information
+- Supporting incremental synchronization processes
+- Understanding contact information volatility
+- Monitoring data maintenance activities
+
+**Triggers for Updates:**
+- Email address correction or change
+- Primary designation toggle
+- Data quality improvements
+- Integration updates from external systems
+- Administrative corrections or cleanup
+
+**Analytical Value:**
+- Identifying stale contact information
+- Understanding update frequency patterns
+- Supporting data governance requirements
+- Enabling change detection for synchronization
+- Tracking data maintenance effort
+
+This timestamp is crucial for systems that need to identify changes since last synchronization or for understanding how actively contact information is being maintained.
+
+### LastUpdatedBy (uniqueidentifier, NOT NULL)
+
+Records the GUID of the user who most recently modified this email record. Together with LastUpdatedTimestamp, this completes the audit trail for email address maintenance. This field tracks:
+- Who is maintaining and updating contact information
+- Patterns in data maintenance across different users
+- Authorization for contact information changes
+- Quality control and accountability
+- User activity in data stewardship
+
+**Common Scenarios:**
+- Coordinator updating email after individual reports change
+- Administrator correcting data quality issues
+- Automated processes updating from external sources
+- Individual self-service updates through portals
+- Bulk update operations during data cleanup
+
+**Governance Value:**
+The combination of created and updated user tracking enables:
+- Full lifecycle visibility for each email record
+- Accountability for all changes to contact information
+- Identifying training needs for specific users
+- Supporting compliance with data protection regulations
+- Investigating the source of data quality issues
+
+These audit fields are essential for maintaining data integrity and supporting organizational accountability for personal information management.
 
 ## Key Relationships
 
