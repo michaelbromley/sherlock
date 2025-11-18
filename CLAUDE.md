@@ -177,20 +177,76 @@ GROUP BY R.[Name], C.[Name], L.[Name]
 
 ## Output Structure
 
-- **Query logs**: `output/logs/<connection_name>.md` - Timestamped queries and results
-- **Reports**: `reports/<descriptive_filename>.md` - Analysis reports
+### Documentation Files
 - **Schema documentation (CRITICAL)**: `schema/[TableName].md` - Individual table documentation (**MUST READ**)
+  - 28 comprehensive table documentation files following 9-section template
+  - Privacy sections in CRITICAL/HIGH sensitivity tables
+  - Field descriptions, relationships, query examples, business rules
+- **Schema master index**: `schema/README.md` - Navigation hub with persona-specific quick-start guides
+
+### Analysis Reports
 - **Overall schema analysis**: `reports/SRP_Database_Schema_Analysis.md` - Database-wide relationships
+- **Privacy guide**: `reports/Privacy_and_Security_Classification_Matrix.md` - 5-tier classification, compliance requirements
+- **Foreign key matrix**: `reports/Foreign_Key_Cross_Reference_Matrix.md` - Complete FK relationship mapping, join patterns
+- **Custom reports**: `reports/<descriptive_filename>.md` - Ad-hoc analysis reports
+
+### Query Logs
+- **Query logs**: `output/logs/<connection_name>.md` - Timestamped queries and results from db-tool
+
+## Documentation Standards
+
+All schema documentation files follow a **9-section template** for consistency:
+
+1. **Overview** - Table purpose and business context
+2. **Table Structure** - Complete field descriptions with data types and meanings
+3. **Key Relationships** - Foreign keys and related tables
+4. **Common Query Patterns** - Practical SQL examples with explanations
+5. **Business Rules and Constraints** - Validation rules and data quality requirements
+6. **Data Quality Considerations** - Consistency checks and missing data patterns
+7. **Performance Notes** - Indexing recommendations and optimization tips
+8. **Integration Points** - External systems and import/export patterns
+9. **Developer Notes** - Implementation guidance and best practices
+
+**Privacy sections** are added to CRITICAL and HIGH sensitivity tables, including:
+- Field-level sensitivity classifications
+- Prohibited query patterns (showing unsafe examples)
+- Secure query patterns (showing safe aggregation)
+- Compliance requirements (GDPR, CCPA, COPPA, TCPA, CAN-SPAM)
+- Privacy checklists for validation
+
+**Fictitious data standards** for all examples:
+- Email domains: `.invalid`, `.example`, `.test` (RFC 2606 reserved)
+- Phone numbers: `(555) 01XX-XXXX` range (North American reserved)
+- Names: Use diverse, culturally-appropriate fictitious names
+- Never use real personal data in documentation
 
 ## Best Practices
 
+### Query Development
 1. **READ SCHEMA DOCUMENTATION FIRST**: Always read `schema/[TableName].md` before working with any table
-2. **Always filter archived records**: Include `WHERE [IsArchived] = 0` when querying Individuals
+2. **Check Privacy Classification**: Consult `reports/Privacy_and_Security_Classification_Matrix.md` for sensitivity level
 3. **Use proper identifier quoting**: Always use square brackets `[TableName]` for SQL Server
-4. **Leverage multi-language support**: Join with LocalizedStudyItems using appropriate language codes (e.g., 'en-US')
-5. **Respect audit fields**: Don't manually modify CreatedTimestamp, LastUpdatedTimestamp, etc.
-6. **Use geographic hierarchy**: Leverage the relationship structure for regional analysis
-7. **Understand field meanings**: Schema documentation explains the business purpose of each field
+4. **Filter archived records**: Include `WHERE [IsArchived] = 0` when querying Individuals, Activities, etc.
+5. **Leverage multi-language support**: Join with LocalizedStudyItems using appropriate language codes (e.g., 'en-US')
+
+### Privacy and Security
+6. **Apply privacy thresholds**: Use `HAVING COUNT(*) >= 10` for individual-level aggregations
+7. **Aggregate before reporting**: Never expose individual names/emails/phones without authorization
+8. **Small locality protection**: Aggregate localities with population < 500 to cluster level
+9. **Children's data protection**: Verify COPPA compliance for participants under 13/16
+10. **Use fictitious data**: Follow documentation standards for examples (`.invalid` emails, `555-01XX` phones)
+
+### Data Quality
+11. **Respect audit fields**: Don't manually modify CreatedTimestamp, LastUpdatedTimestamp, CreatedBy, LastUpdatedBy
+12. **Use geographic hierarchy**: Leverage relationships for regional analysis (Localities → Clusters → Regions)
+13. **Understand field meanings**: Schema documentation explains business purpose of each field
+14. **Check referential integrity**: Use validation queries from `reports/Foreign_Key_Cross_Reference_Matrix.md`
+
+### Performance
+15. **Index foreign keys**: All FK columns should have indexes for join performance
+16. **Limit result sets**: Use `TOP N` or date ranges to avoid full table scans
+17. **Filter early in JOINs**: Push WHERE predicates down to reduce intermediate result sets
+18. **Use EXISTS vs COUNT**: Prefer `EXISTS` over `COUNT(*) > 0` for existence checks
 
 ## Development Files
 
@@ -199,12 +255,84 @@ GROUP BY R.[Name], C.[Name], L.[Name]
 - `reports/`: Generated reports and analysis
 - `.env`: Database connection credentials (gitignored)
 
+## Privacy and Security 🔒
+
+**CRITICAL**: This database contains personally identifiable information (PII) requiring strict privacy protections.
+
+### Privacy Classification System
+
+The SRP database implements a **5-tier sensitivity classification** for all 28 tables:
+
+- **CRITICAL** (4 tables): Direct PII requiring maximum protection
+  - Individuals, IndividualEmails, IndividualPhones, ClusterAuxiliaryBoardMembers
+- **HIGH** (7 tables): Sensitive data requiring strong controls
+  - Activities, ActivityStudyItemIndividuals, ActivityStudyItems, Cycles, Localities, Subdivisions, ElectoralUnits
+- **MODERATE** (8 tables): Contextual sensitivity, moderate controls
+  - Clusters, Regions, Subregions, GroupOfRegions, GroupOfClusters, StudyItems, LocalizedStudyItems, NationalCommunities
+- **LOW** (5 tables): Limited sensitivity, basic controls
+  - Lists, ListColumns, ListDisplayColumns, ListFilterColumns, ListSortColumns
+- **MINIMAL** (4 tables): System data, minimal privacy concerns
+  - ApplicationConfigurations, ApplicationHistories, DBScriptHistories, LoadDataFiles
+
+**See comprehensive guide**: `reports/Privacy_and_Security_Classification_Matrix.md`
+
+### Privacy Requirements
+
+**Compliance**: GDPR (European Union), CCPA (California), COPPA (children under 13/16), TCPA (phone/SMS), CAN-SPAM Act (email)
+
+**Core privacy rules:**
+- ❌ **NEVER** expose personal names, emails, or phone numbers in public reports
+- ❌ **NEVER** link individuals to activity participation without authorization
+- ✅ **ALWAYS** aggregate personal data with minimum thresholds (≥5 or ≥10 individuals)
+- ✅ **ALWAYS** use fictitious data in documentation (`.invalid`, `.example`, `.test` domains; `(555) 01XX` phone numbers)
+
+### Secure Query Patterns
+
+**✅ SAFE - Aggregated with Privacy Threshold:**
+```sql
+-- Safe: Cluster-level statistics with minimum threshold
+SELECT
+    C.[Name] AS [ClusterName],
+    COUNT(*) AS [TotalIndividuals],
+    AVG(YEAR(GETDATE()) - I.[EstimatedYearOfBirthDate]) AS [AverageAge]
+FROM [Individuals] I
+INNER JOIN [Localities] L ON I.[LocalityId] = L.[Id]
+INNER JOIN [Clusters] C ON L.[ClusterId] = C.[Id]
+WHERE I.[IsArchived] = 0
+GROUP BY C.[Id], C.[Name]
+HAVING COUNT(*) >= 10;  -- Privacy: minimum threshold
+```
+
+**❌ UNSAFE - Personal Data Exposure:**
+```sql
+-- DANGEROUS: Exposes names and contact information
+SELECT I.[FirstName], I.[FamilyName], E.[Email], P.[PhoneNumber]
+FROM [Individuals] I
+LEFT JOIN [IndividualEmails] E ON I.[Id] = E.[IndividualId]
+LEFT JOIN [IndividualPhones] P ON I.[Id] = P.[IndividualId];
+-- This pattern is PROHIBITED without explicit authorization
+```
+
+### Privacy Checklist
+
+Before any query involving personal data:
+- [ ] User is authorized to access PII
+- [ ] Purpose has legitimate institutional need
+- [ ] Names/emails/phones will NOT be exposed publicly
+- [ ] Aggregated data uses minimum threshold (≥5 or ≥10)
+- [ ] Small populations (<500) aggregated to cluster level
+- [ ] Children's data has parental consent (COPPA)
+- [ ] Result complies with GDPR/CCPA requirements
+
 ## Security Considerations
 
-- Database credentials are stored in `.env` file (never commit to git)
-- The db-tool enforces read-only operations (SELECT, SHOW, DESCRIBE, EXPLAIN only)
-- Query logs may contain sensitive data - ensure proper access controls
-- Use read-only database users when possible
+- **Database credentials**: Stored in `.env` file (never commit to git)
+- **Read-only operations**: The db-tool enforces SELECT, SHOW, DESCRIBE, EXPLAIN only
+- **Query logs**: May contain sensitive data - ensure proper access controls
+- **Database users**: Use read-only accounts when possible
+- **Field-level encryption**: Encrypt CRITICAL PII (names, emails, phones) at rest
+- **Row-level security**: Implement for coordinators (restrict to their clusters)
+- **Audit logging**: Enable for all CRITICAL tables (Individuals, IndividualEmails, IndividualPhones, ClusterAuxiliaryBoardMembers)
 
 ## Task Master AI Instructions
 **Import Task Master's development workflow commands and guidelines, treat as if import is in the main CLAUDE.md file.**
