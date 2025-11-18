@@ -7,7 +7,7 @@ The `IndividualEmails` table stores email addresses for individuals tracked in t
 
 The following sections describe in detail the meaning, purpose and uses for each of the fields in this table. Each subsection heading within this section maps to a field, and each subsection body describes that field in more detail.
 
-### Id (bigint, NOT NULL)
+### Id (bigint, NOT NULL, PRIMARY KEY, auto-increment)
 
 The primary key serving as the unique identifier for each email record in the system. This auto-incrementing field ensures that every email address entry has a distinct reference point, even if the same email address is used by multiple individuals (though this should be rare). The Id is crucial for:
 - Maintaining referential integrity across the database
@@ -17,7 +17,7 @@ The primary key serving as the unique identifier for each email record in the sy
 
 Unlike the Email field itself, which represents the actual contact information, the Id provides the system-level identity that remains constant throughout the email record's lifecycle.
 
-### Email (nvarchar(255), NOT NULL)
+### Email (nvarchar(255), NULL)
 
 The actual email address stored in standard internet format (user@domain.extension). This mandatory field uses Unicode character support (nvarchar) to accommodate international domain names and email addresses containing non-ASCII characters. The field supports:
 - Standard ASCII email addresses (john.doe@example.com)
@@ -43,37 +43,43 @@ Email addresses serve as the primary digital communication channel for:
 
 The email field represents not just a technical contact method but a vital connection point for maintaining relationships and enabling participation in community-building activities.
 
-### IsPrimary (bit, NOT NULL)
+### Order (smallint, NULL)
 
-A boolean flag indicating whether this email address is designated as the individual's primary contact email. This field implements a critical business rule where each individual should have exactly one primary email address for official communications.
+A numeric field that establishes the priority sequence for multiple email addresses belonging to the same individual. This ordering system enables a flexible hierarchy of contact preferences, where lower numbers indicate higher priority (e.g., Order=1 is the primary email, Order=2 is secondary, Order=3 is tertiary).
 
-**When TRUE (1):**
-- This email is used for all official correspondence
-- Displayed prominently in individual profiles and contact lists
-- Used by automated notification systems
-- Selected for mass communication campaigns
-- Appears in default reports and summaries
-- Used for account-related communications (password resets, verifications)
+**Priority Hierarchy:**
+The Order field implements a more nuanced approach than simple primary/secondary designation:
+- **Order = 1**: Primary email address used for all official correspondence, automated notifications, and default communications
+- **Order = 2**: Secondary backup email, used when primary fails or for specific purposes
+- **Order = 3+**: Additional email addresses for specialized uses or historical reference
 
-**When FALSE (0):**
-- Represents an alternative or backup email address
-- May be for specific purposes (work vs. personal)
-- Available as secondary contact method
-- Not used in automated communications unless primary fails
-- May represent historical or deprecated email addresses kept for reference
+**Business Logic and Usage:**
+This sequential ordering provides important functionality:
+- Communication systems attempt contact in order sequence, trying Order=1 first, then Order=2 if the first fails
+- User interfaces display emails sorted by Order, making priority immediately visible
+- Multiple individuals in a system can be reached systematically without hard-coding "primary" flags
+- The nullable nature allows for unordered email collections where priority hasn't been established
+- When NULL, the email may be considered equal priority with others, or ordering may not be relevant
 
-**Business Logic Requirements:**
-The primary email designation requires careful management:
-1. Each individual must have at most ONE primary email at any time
-2. When setting a new email as primary, any existing primary must be set to FALSE
-3. If an individual has only one email address, it should be marked as primary
-4. Deleting or archiving a primary email should trigger selection of new primary
-5. UI should clearly indicate which email is primary
-6. Primary designation changes should be audit-logged
+**Operational Considerations:**
+The Order field requires thoughtful management:
+- Each individual should have at most ONE email with Order=1 (primary position)
+- When promoting an email to Order=1, existing Order=1 should be demoted to Order=2
+- Deleting an Order=1 email should trigger promotion of Order=2 to primary position
+- UI should provide easy mechanisms for reordering email priorities
+- Gap tolerance in numbering (1, 2, 5 instead of 1, 2, 3) allows for future insertions
+- Changes to Order values should be audit-logged for accountability
 
-This field is essential for ensuring consistent, reliable communication with individuals and preventing confusion about which contact method to use.
+**Implementation Notes:**
+This approach offers advantages over boolean IsPrimary flags:
+- Natural support for more than two levels of priority without schema changes
+- Explicit sequence when multiple fallback options exist
+- Clearer semantics when displaying ordered lists of contact methods
+- Compatibility with queue/retry logic in communication systems
 
-### IndividualId (bigint, NOT NULL)
+The Order field represents a mature approach to contact management that accommodates real-world complexity while maintaining clear priority structures essential for reliable community coordination.
+
+### IndividualId (bigint, NULL)
 
 The mandatory foreign key that links this email address to a specific individual in the Individuals table. This relationship field establishes the fundamental connection between contact information and people, enabling:
 - Association of multiple email addresses with one individual
@@ -97,7 +103,7 @@ The IndividualId enables critical queries:
 - Linking email activity to participation patterns
 - Understanding contact information coverage across localities
 
-### CreatedTimestamp (datetime, NOT NULL)
+### CreatedTimestamp (datetime, NULL)
 
 Records the exact moment when this email address was added to the database. This audit field captures when the contact information became available in the system, which may differ from when the individual began participating in activities. The timestamp serves several purposes:
 - Tracking temporal patterns in data collection
@@ -115,7 +121,7 @@ Records the exact moment when this email address was added to the database. This
 
 This field helps answer questions like "When did we obtain email contact for this person?" and "How recently was this contact information added?"
 
-### CreatedBy (uniqueidentifier, NOT NULL)
+### CreatedBy (uniqueidentifier, NULL)
 
 The GUID identifier of the user account that created this email record. This audit field maintains accountability for data entry and helps track who is collecting and entering contact information. The field enables:
 - Identifying which coordinators are gathering contact information
@@ -133,7 +139,7 @@ The GUID identifier of the user account that created this email record. This aud
 
 The CreatedBy field is particularly valuable for data quality investigations, helping administrators trace back to the source of any questionable or incorrect information.
 
-### LastUpdatedTimestamp (datetime, NOT NULL)
+### LastUpdatedTimestamp (datetime, NULL)
 
 Captures the most recent moment when any aspect of this email record was modified. This field automatically updates whenever changes occur, providing essential information for:
 - Tracking data freshness and currency
@@ -158,7 +164,7 @@ Captures the most recent moment when any aspect of this email record was modifie
 
 This timestamp is crucial for systems that need to identify changes since last synchronization or for understanding how actively contact information is being maintained.
 
-### LastUpdatedBy (uniqueidentifier, NOT NULL)
+### LastUpdatedBy (uniqueidentifier, NULL)
 
 Records the GUID of the user who most recently modified this email record. Together with LastUpdatedTimestamp, this completes the audit trail for email address maintenance. This field tracks:
 - Who is maintaining and updating contact information

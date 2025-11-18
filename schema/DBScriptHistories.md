@@ -5,47 +5,31 @@ The `DBScriptHistories` table tracks all database schema changes, migrations, an
 
 ## Table Structure
 
-The following sections describe in detail the meaning, purpose and uses for each of the fields in this table. Each subsection heading within this section maps to a field, and each subsection body describes that field in more detail.
+**Note:** The actual table schema contains 4 fields: Id, ScriptName, Version, and TimeStamp. The documentation below describes these actual fields, while subsequent sections discuss extended practices that may be implemented in related systems or future enhancements.
 
-### Id
+### Id (bigint, NULL)
 
-Primary key, unique identifier for each script execution
+The primary identifier for each database script execution record, providing a unique reference point for every schema migration or database change recorded in the system. This auto-incrementing field maintains sequential ordering of script executions and serves as the fundamental index for the history log, though it's not the primary key in the actual table structure.
 
-### Version
+In practice, the Id field provides a convenient numeric reference for script execution records, allowing administrators to reference specific migration events in documentation, incident reports, or troubleshooting discussions. While the field is nullable in the schema definition, operational usage should ensure it's always populated to maintain clear record identification. The sequential nature of this Id can provide implicit chronological ordering when combined with the TimeStamp field, helping administrators understand the sequence of database changes even if scripts are added or modified retroactively. During database maintenance operations, migration audits, or compliance reviews, this Id enables precise referencing of specific change events in the database's evolution, supporting clear communication about which schema modifications were applied when and in what order relative to other changes.
 
-Version number or identifier of the database script
+### ScriptName (nvarchar, NULL, PRIMARY KEY)
 
-### ScriptName
+The filename or descriptive identifier of the database migration script that was executed, serving as the primary identifier for tracking which changes have been applied to the database schema. This field typically contains values like "001_InitialSchema.sql", "20240115_AddIndexes.sql", "v2.5.0_CreateNewTable.sql", or other descriptive names that indicate the nature and sequence of the database change.
 
-Name/filename of the executed script
+The ScriptName field is crucial for preventing duplicate execution of migration scripts—before running a script, deployment tools check if its name already exists in this table, and if found, skip execution to maintain idempotency. This makes the naming convention critically important: scripts must have unique, descriptive, and sequentially-meaningful names that clearly communicate their purpose and order. Common naming patterns include sequential prefixes ("001_", "002_"), date-based prefixes ("20240115_01_", "20240115_02_"), or semantic version prefixes ("v1.0.0_", "v1.1.0_"). The descriptive portion of the name should clearly indicate what the script does ("AddUserTable", "CreateIndexes", "UpdateConstraints") so that administrators reviewing the migration history can quickly understand what changes were made. The nvarchar type supports Unicode characters, allowing script names in various languages or character sets. As a primary key component (combined with Version), this field must be unique within each version, preventing accidental duplicate execution while allowing the same script name to potentially exist across different versions if the versioning scheme creates uniqueness. When troubleshooting schema-related issues or auditing database changes, the ScriptName provides the essential identifier for locating the actual SQL script file in source control or backup archives, enabling administrators to review exactly what changes were applied at each point in the database's evolution.
 
-### ExecutedTimestamp
+### Version (varchar, NULL, PRIMARY KEY)
 
-When the script was executed
+The database schema version or release identifier associated with this script execution, providing versioning context that groups related migration scripts together and tracks the progression of the database schema through different application releases. This field typically contains values like "1.0.0", "2.5.1", "2024.01.15", or other version identifiers that align with application release numbering or database change management practices.
 
-### ExecutedBy
+The Version field serves multiple critical purposes in database change management and deployment coordination. First, it enables grouping of related migration scripts into logical units—all scripts with Version "2.5.0" represent the schema changes required for that application release, allowing deployment processes to identify and execute all migrations needed to reach a target version. Second, it supports incremental deployment strategies where administrators can query which versions have been fully applied and which remain pending, enabling controlled rollout of schema changes across multiple environments. Third, it provides correlation with the ApplicationHistories table, allowing administrators to understand the relationship between application deployments and database schema versions—ensuring that the database schema version is compatible with the deployed application version. The varchar type accommodates various versioning schemes including semantic versioning (MAJOR.MINOR.PATCH), date-based versioning (YYYY.MM.DD), sequential numbering (v1, v2, v3), or custom organizational schemes. As part of the composite primary key with ScriptName, the Version field ensures that the same script name can theoretically be executed in different versions if the migration strategy requires it, though in practice most script names should be globally unique. When planning upgrades or troubleshooting compatibility issues, the Version field enables administrators to quickly determine the current database schema level, identify which version-specific scripts have been applied, and ensure alignment between database schema and application code versions.
 
-User ID who executed the script
+### TimeStamp (datetime, NOT NULL)
 
-### ScriptHash
+Records the exact date and time when the database migration script was executed, providing the definitive temporal record of when each schema change was applied to the database. This timestamp captures the moment of script execution completion, creating an audit trail that tracks not just what changes were made, but precisely when they occurred in the database's operational timeline.
 
-Hash of the script content for integrity verification
-
-### ExecutionTime
-
-Time taken to execute the script (in milliseconds)
-
-### Success
-
-Whether the script executed successfully
-
-### ErrorMessage
-
-Error details if the script failed
-
-### RollbackScript
-
-SQL to rollback this change if needed
+The TimeStamp field serves as the authoritative chronological marker for all database schema changes, enabling time-based analysis of migration patterns, troubleshooting of schema-related issues, and correlation with application deployments or system events. During incident response, this timestamp becomes invaluable for establishing timeline causality—if a database error or performance issue appeared at a specific time, comparing that time against migration TimeStamps can quickly identify whether a recent schema change might be responsible. The field supports queries that analyze migration frequency, identify deployment windows when changes typically occur, calculate time between migrations, or measure how long the database has been at a particular schema version. In multi-environment deployments, comparing TimeStamp values across development, staging, and production databases reveals synchronization status and helps prevent version skew issues. The NOT NULL constraint ensures every script execution is definitively timestamped, maintaining a complete and unambiguous temporal history. For compliance and audit purposes, this timestamp provides documented evidence of when database structure changes occurred, supporting governance requirements and change management processes. When combined with the ScriptName and Version fields, TimeStamp enables reconstruction of the complete evolution of the database schema—not just knowing that a particular migration was applied, but understanding exactly when it happened relative to other changes, application deployments, and operational events.
 
 ## Purpose and Usage
 

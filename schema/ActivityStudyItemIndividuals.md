@@ -10,26 +10,21 @@ The design of this table also reflects the principle that education within the B
 
 ## Table Structure
 
-### Id (bigint, NOT NULL)
+### Id (bigint, NOT NULL, PRIMARY KEY)
 
-The primary key serving as the unique identifier for each participation record. This auto-incrementing field ensures that every instance of an individual's engagement with an educational activity is distinctly tracked. The Id is particularly important because an individual might have dozens or even hundreds of records in this table over time, representing their journey through various books, their service in different capacities, and their involvement in multiple activities. Each Id captures a specific moment or phase in someone's educational and service path.
+The primary key serving as the unique identifier for each individual participation record within the educational tracking system. This auto-incrementing bigint field ensures that every discrete instance of an individual's engagement with an educational activity is distinctly tracked and can be uniquely referenced throughout the database's complex web of relationships. The Id is particularly important and meaningful because a single individual might accumulate dozens or even hundreds of records in this table over their lifetime of engagement with the community's educational system, with each record representing a specific chapter in their journey - progressing through various books of the Ruhi sequence, serving in different teaching and facilitation capacities, participating in multiple concurrent activities, or re-engaging with materials in new contexts.
 
-### IndividualType (tinyint, NOT NULL)
+Each Id captures not just a static snapshot but a specific moment or phase in someone's educational and service path. For example, Individual #1523 might have record Id #8847 representing their participation as a student in Book 1 in 2015, Id #12901 showing their completion of Book 3 and transition to children's class teacher in 2016, Id #19445 documenting their simultaneous participation as a student in Book 7 while teaching children's classes in 2018, and Id #24673 marking their emergence as a tutor facilitating Book 1 study circles in 2020. This granular tracking enables the system to construct complete educational biographies, understand capacity development trajectories, and identify patterns in how individuals progress from learning to service across the community. The Id field's role as primary key also makes it the foundation for any future expansions of the schema that might need to reference specific participation instances, such as detailed assessment records or service project tracking linked to particular study circle participations.
 
-This field categorizes participants into distinct types that reflect their demographic, spiritual, or functional classification within the community. The typing system helps communities understand the composition of their activities and track progress across different population segments.
+### IndividualType (tinyint, NULL)
 
-Common type categories typically include:
-- Type 1: Adult Bahá'í believers (ages 15+)
-- Type 2: Bahá'í youth (ages 15-30, sometimes tracked separately)
-- Type 3: Bahá'í junior youth (ages 12-14)
-- Type 4: Bahá'í children (ages 5-11)
-- Type 5: Friends of the Faith (non-Bahá'í participants of any age)
-- Type 6: Seekers or those investigating the Faith
-- Type 7: Special categories (visiting participants, etc.)
+This tinyint field categorizes participants into distinct types that reflect their demographic characteristics, spiritual affiliation, or functional classification within the community structure. The typing system is fundamental to understanding the composition of educational activities and tracking the progress and engagement of different population segments. While nullable in the schema (allowing NULL values), this field when populated provides critical information for demographic analysis, measuring community reach, and ensuring educational programs serve diverse populations appropriately.
 
-This categorization is crucial for understanding community demographics, measuring the reach of activities beyond the Bahá'í community, and ensuring age-appropriate educational experiences. It also helps in generating statistics about community integration and the inclusive nature of core activities.
+The type categories commonly used across SRP implementations typically include: Type 1 for Adult Bahá'í believers (ages 15 and above), representing enrolled members of the Faith who are engaging in the institute process to deepen their understanding and develop capacity for service; Type 2 for Bahá'í youth (ages roughly 15-30), sometimes tracked separately from general adults to understand youth engagement patterns and specific youth-focused initiatives; Type 3 for Bahá'í junior youth (ages 12-14), representing young Bahá'ís in this critical developmental period who participate in the junior youth spiritual empowerment program; Type 4 for Bahá'í children (ages 5-11), representing younger members of the community enrolled in children's spiritual education classes; Type 5 for Friends of the Faith or non-Bahá'í participants of any age, representing the crucial population of interested neighbors, seekers, and community members who participate in educational activities without formal membership in the Faith; Type 6 for Seekers or those actively investigating the Faith, sometimes distinguished from general friends to track those on a specific journey toward potential enrollment; and Type 7 for Special categories such as visiting participants from other communities, temporary participants, or other classifications that don't fit standard categories.
 
-### IndividualRole (tinyint, NOT NULL)
+This categorization serves multiple crucial purposes in the educational tracking system. It enables understanding community demographics and the composition of educational activities, revealing whether study circles are predominantly attended by Bahá'ís or include significant participation from the wider community. It supports measuring the reach of core activities beyond the enrolled Bahá'í community, which is essential for understanding the inclusive nature of community life and the extent to which educational programs serve as vehicles for broader social engagement. The field helps ensure age-appropriate educational experiences by distinguishing children from junior youth from adults, each of whom require developmentally appropriate curriculum and pedagogical approaches. It generates vital statistics about community integration and the inclusive nature of core activities, tracking whether educational programs primarily serve an insular community or genuinely engage the broader population in processes of spiritual and moral education.
+
+### IndividualRole (tinyint, NULL)
 
 This critical field captures the specific capacity in which an individual participates in an activity, reflecting the diverse ways people contribute to the educational process. The role system recognizes that learning in the Bahá'í context is not passive but involves various levels of service and responsibility.
 
@@ -56,17 +51,15 @@ The standard learner role, representing the vast majority of records (95,139 in 
 
 The distribution of roles (with participants being most numerous, followed by assistants, then tutors and teachers) reflects the natural pyramid of capacity building, where many participate, some assist, and a smaller number take on full teaching responsibilities.
 
-### IsCurrent (bit, NOT NULL)
+### IsCurrent (bit, NULL)
 
-A boolean flag indicating whether the individual's participation in this particular activity-study item combination is currently active. This field is essential for distinguishing between historical records (kept for reporting and tracking purposes) and active engagements.
+A boolean bit flag indicating whether the individual's participation in this particular activity-study item combination is currently active and ongoing, serving as the critical temporal filter that distinguishes between live,ongoing engagements versus historical records preserved for institutional memory and analysis. While nullable in the schema design (allowing NULL values for uncertain status), this field when set to TRUE or FALSE is essential for accurately understanding who is presently involved in educational activities versus who participated in the past.
 
-When TRUE, this indicates the individual is actively involved in this capacity. They're attending sessions, progressing through materials, or fulfilling their role responsibilities. Current participants are included in active statistics and ongoing activity counts.
+When IsCurrent is TRUE, it signals that the individual is actively involved in this specific capacity at this moment in time - they are attending sessions regularly, progressively engaging with the curriculum materials, or actively fulfilling their role responsibilities whether as participant, teacher, tutor, or assistant. Current participants (IsCurrent=TRUE) are included in all active statistics used for planning and coordination, appear in ongoing activity participant counts distributed to coordinators, and represent the live engagement that coordinators work with directly in their clusters and localities. This TRUE status might persist for weeks, months, or even years depending on the nature of the activity - a children's class teacher might remain current for multiple years of continuous service, while a study circle participant's current status might span the 3-6 months typically needed to complete a single Ruhi book.
 
-When FALSE, this represents historical participation - the person has moved on, completed their involvement, or discontinued for any reason. These records are preserved to maintain a complete educational history, track completion rates over time, and understand patterns of participation and attrition.
+When IsCurrent is FALSE, it represents historical participation - documenting that the person previously engaged but has since moved on (completing the book and moving to the next one), completed their involvement (finishing their teaching commitment for a season), discontinued for any reason (moving away, life circumstances changing, or choosing to pause their participation), or transitioned to a different role or activity. These historical records are not discarded but carefully preserved to maintain a complete educational history for each individual, enable accurate calculation of completion rates and attrition patterns over time, support longitudinal studies of participation trends, and provide the full context needed to understand an individual's journey through the institute process. The IsCurrent flag's design allows the same individual to have multiple records for the same study item (perhaps attempting Book 5 multiple times across different years) while clearly identifying which record represents their current engagement status.
 
-The IsCurrent flag allows the same individual to have multiple records for the same study item (perhaps attempting it multiple times) while clearly identifying which represents their current status.
-
-### IsCompleted (bit, NOT NULL)
+### IsCompleted (bit, NULL)
 
 This boolean field specifically tracks whether the individual has successfully completed the study item associated with this record. Completion has specific meaning within the institute process and represents more than just attendance.
 
@@ -83,19 +76,15 @@ For children's classes and junior youth groups, completion might indicate:
 
 The IsCompleted flag is distinct from the activity's completion status and the IsCurrent flag. An individual might be currently enrolled (IsCurrent=TRUE) but not yet completed (IsCompleted=FALSE), or might have completed (IsCompleted=TRUE) but still be recorded as current if they're continuing to serve in that capacity or reviewing materials.
 
-### DisplayEndDate (varchar(20), NULL)
+### DisplayEndDate (varchar(20), NOT NULL)
 
-A human-readable representation of when the individual's participation ended or when they completed the study item. This field provides flexibility in how completion or departure dates are recorded and displayed, accommodating various levels of precision.
+A human-readable, user-facing representation of when the individual's participation ended or when they completed the study item, stored as a varchar(20) field that provides the flexibility needed to capture how communities actually communicate about participation timelines rather than forcing strict computational date formats. This field serves the crucial bridge between the database's need for precision (served by the EndDate datetime field) and human communication patterns that often work with approximate or contextual timeframes.
 
-The field might contain:
-- Exact dates: "2018-07-20" for precise completion
-- Month indicators: "July 2018" when the exact day is unknown
-- Approximate periods: "Summer 2018" for less precise records
-- Descriptive text: "End of cycle" or "Before move" for contextual dating
+The field's varchar design allows it to contain various forms of temporal expression that reflect real-world data collection scenarios: exact dates like "2018-07-20" when participation concluded on a precisely documented day, month indicators such as "July 2018" when the month is known but the specific day wasn't recorded or remembered, approximate periods like "Summer 2018" or "End of 2017" for less precise records where general timing is known, or contextual markers such as "End of cycle" or "Before move" that provide meaningful reference points even without specific dates. This flexibility acknowledges that educational participation doesn't always conclude on neat calendar boundaries - a participant might gradually fade from attendance, or a teacher might complete their commitment "at the end of the school year" without a specific final date.
 
-This flexibility is particularly valuable for historical data entry, imported records, or situations where exact dates weren't tracked but approximate timing is known. The 20-character limit provides sufficient space for most date representations while maintaining reasonable constraints.
+The 20-character limit provides sufficient space for most human-readable date representations (accommodating formats like "September 15, 2018") while maintaining reasonable database constraints that prevent the field from being misused for extensive narrative text. The NOT NULL constraint reflects that every participation record should have some indication of its end timing, even if approximate or still ongoing.
 
-### EndDate (datetime, NULL)
+### EndDate (datetime, NOT NULL)
 
 The precise datetime when the individual's participation concluded, whether through completion, withdrawal, or transition to another role. This field enables accurate duration calculations and temporal analysis of participation patterns.
 

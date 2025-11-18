@@ -7,76 +7,70 @@ The `Subregions` table represents an optional intermediate geographic level betw
 
 The following sections describe in detail the meaning, purpose and uses for each of the fields in this table. Each subsection heading within this section maps to a field, and each subsection body describes that field in more detail.
 
-### Id
+### Id (bigint, NOT NULL)
 
-Primary key, unique identifier for each subregion
+The primary key and unique identifier for each subregion record. This auto-incrementing field ensures that every subregion has a distinct reference point that remains constant throughout its lifecycle. The Id serves as the fundamental link between this table and related tables, particularly the Clusters table where individual clusters may optionally reference their parent subregion. In large regions with complex geographic structures, this Id provides the stable anchor point for tracking subregional divisions over time, even as boundaries or compositions may be adjusted. When querying geographic hierarchies that include subregions, this Id enables efficient joins and aggregations from the region level down through subregions to clusters and localities, supporting both detailed cluster coordination and regional strategic planning.
 
-### Name
+### Name (nvarchar, NULL)
 
-Name of the subregion
+The official name of the subregion in the local language and script. This field captures how the subregion is commonly known and referenced within the region, reflecting local linguistic and cultural conventions. The name typically describes a geographic area (such as "Northern District", "Coastal Area", or "Mountain Zone") or references major cities or landmarks that help identify the geographic scope. The nvarchar data type ensures full Unicode support, allowing names to be stored in any script including Arabic, Persian, Cyrillic, Chinese characters, or other non-Latin writing systems. While technically nullable in the database schema, in practice every subregion should have a meaningful name to facilitate communication and coordination among cluster coordinators and regional institutions. The name serves not only as an identifier but also helps coordinators and community members quickly understand which geographic area is being discussed, particularly important in regions with dozens of clusters spread across large territories.
 
-### LatinName
+### LatinName (nvarchar, NOT NULL)
 
-Romanized/Latin script version of the name
+The romanized or Latin-script version of the subregion name, providing a standardized representation that can be universally read and processed across different systems and contexts. This field is particularly important for regional and national reporting, cross-regional coordination, and technical system operations where consistent character encoding is essential. For subregions whose native Name is already in Latin script, this field typically contains the same value. For subregions with names in other scripts (such as "منطقة الساحلية" in Arabic or "北部地区" in Chinese), the LatinName provides a transliterated equivalent (like "Coastal District" or "Northern Area") that can be reliably sorted, searched, and displayed in systems that may have limited Unicode support. The NOT NULL constraint reflects the critical importance of this field for system interoperability - every subregion must have a Latin name to ensure it can be properly referenced across all contexts, particularly in multilingual national communities where regional reports may consolidate data from areas using different scripts.
 
-### Comments
+### Comments (nvarchar, NOT NULL)
 
-Free-text notes and additional information
+A free-text field designed to capture contextual information, rationale, and administrative notes about the subregion. This field serves multiple critical purposes: documenting why the subregion was created and what coordination needs it addresses, recording the specific clusters included and any boundary considerations, noting geographic features or governmental divisions it aligns with, and preserving institutional memory about how the subregion has evolved over time. For example, comments might explain "Created to group clusters in the coastal plain region for better coordination of training institute activities" or "Corresponds to the three northern provinces for administrative alignment." The nvarchar specification with no length limit (typically MAX) allows for extensive documentation when needed, supporting Unicode characters for multilingual notes. The NOT NULL constraint is somewhat unusual for a comments field and may reflect default database values rather than a strict business requirement - in practice, subregions should have at least minimal documentation explaining their purpose and boundaries to help future regional coordinators understand the organizational structure and the rationale behind subdivision decisions.
 
-### RegionId
+### RegionId (bigint, NULL)
 
-Foreign key to Regions table
+A foreign key establishing the essential relationship between this subregion and its parent region in the Regions table. This field places the subregion within the broader geographic hierarchy, ensuring that every subregion is clearly associated with a specific region. The relationship enables queries to traverse from the regional level down through subregions to individual clusters, supporting both detailed subregional analysis and regional-level aggregation. For example, a query might retrieve all subregions within a particular region to understand its organizational structure, or aggregate cluster statistics up through subregions to the regional level. While the field is nullable in the schema, in practice every subregion must belong to a region - a subregion cannot exist in isolation as it is by definition a subdivision of a region. The nullable specification may accommodate data migration scenarios or temporary states during data entry, but a properly configured subregion should always have a valid RegionId. This foreign key is essential for maintaining referential integrity and preventing orphaned records that could compromise the accuracy of regional statistics and reporting.
 
-### CreatedTimestamp
+### CreatedTimestamp (datetime, NULL)
 
-When the record was created
+Records the exact moment when this subregion record was first created in the database. This audit field provides crucial information for understanding when regional organizational structures were established, tracking the evolution of regional coordination approaches over time, and troubleshooting data quality issues. The timestamp captures not necessarily when the subregion began functioning as a coordination unit but when it was formally registered in the SRP system, which might be considerably later if the subregion existed informally before systematic data entry began. This field is particularly valuable in regions that have evolved their coordination structures as they grew - comparing creation timestamps across subregions can reveal patterns in organizational development, such as when a region transitioned from direct regional coordination of all clusters to using intermediate subregional groupings for more effective management. While nullable in the schema, this field should typically be populated automatically by the database system at record insertion time.
 
-### CreatedBy
+### CreatedBy (uniqueidentifier, NULL)
 
-User ID who created the record
+Stores the GUID of the user account that initially created this subregion record, providing accountability and traceability in the data entry process. This field identifies who was responsible for formally establishing the subregion in the system, which is particularly important for organizational records that shape the coordination structure used by cluster coordinators and regional institutions. Knowing who created the record allows administrators to follow up with questions about the subregion's purpose or composition, verify that appropriate authorization was obtained from regional bodies for creating this subdivision, and track patterns in how regional structures are being established across different regions. In systems where multiple regional coordinators, assistants to the Regional Teaching Committee, or database administrators might have access to create geographic entities, this field maintains a clear chain of responsibility. The uniqueidentifier format (GUID) enables this field to reference user accounts across distributed systems and supports synchronization scenarios where user identities must be maintained consistently across multiple SRP installations.
 
-### LastUpdatedTimestamp
+### LastUpdatedTimestamp (datetime, NULL)
 
-When the record was last modified
+Captures the most recent moment when any field in this subregion record was modified, providing a critical audit trail for tracking changes to regional organizational structures. This timestamp is automatically updated whenever any change is made to the record - whether modifying the name, updating the comments, adjusting the region assignment, or any other field modification. The field is essential for understanding how regional coordination structures evolve over time, identifying recently modified records that might need review, and supporting synchronization scenarios where systems need to identify which records have changed since the last sync operation. For organizational records like subregions that typically change infrequently once established, a recent LastUpdatedTimestamp might indicate boundary adjustments, cluster reassignments between subregions, or correction of data quality issues. Comparing this timestamp with CreatedTimestamp also reveals whether a subregion has been modified since its initial creation, which can be relevant for assessing data stability and the maturity of regional organizational structures.
 
-### LastUpdatedBy
+### LastUpdatedBy (uniqueidentifier, NULL)
 
-User ID who last modified the record
+Records the GUID of the user who most recently modified this subregion record, completing the audit trail for changes to regional organizational structures. Together with LastUpdatedTimestamp, this field provides full visibility into who is maintaining and adjusting coordination structures over time. This is particularly important for organizational records that affect cluster coordinators and regional planning - knowing who made recent changes allows administrators to understand the context of modifications, verify that changes were authorized by appropriate regional institutions, and follow up if clarification is needed about structural adjustments. In scenarios where Regional Teaching Committees or their appointed coordinators manage regional structures, this field helps ensure that changes are being made by authorized personnel. The uniqueidentifier format enables consistent user tracking across distributed systems and supports audit requirements in multi-user environments where various regional coordinators, assistants, or administrative staff might have access to modify organizational structures.
 
-### ImportedTimestamp
+### ImportedFrom (uniqueidentifier, NOT NULL)
 
-When data was imported from external system
+Identifies the source system or import batch from which this subregion record originated, using a GUID that can be traced back to specific import operations or source systems. This field is essential for data provenance in scenarios where SRP databases are populated from existing regional systems, legacy databases, or consolidated from multiple cluster-level sources. The uniqueidentifier format allows each import source or batch to be distinctly identified, enabling administrators to track which records came from which sources and potentially trace back to original systems if questions arise about data accuracy or completeness. For example, when consolidating data from multiple regional systems into a national database, or when regions transition from older tracking methods to the SRP system, this field maintains the connection to the original source, supporting validation and reconciliation processes. The NOT NULL constraint indicates that every record must have a source identifier - even records created directly in the current system would have an ImportedFrom value identifying the current system as the source, ensuring complete data lineage tracking.
 
-### ImportedFrom
+### ImportedTimestamp (datetime, NOT NULL)
 
-Source system identifier for imported data
+Captures the specific moment when this record was imported into the current database from an external source or created through an import process. This timestamp is distinct from CreatedTimestamp in that it specifically marks import operations rather than general record creation. For records that originated in the current system rather than being imported, this field might contain the same value as CreatedTimestamp, or might be set to a default value indicating no import occurred. The field is particularly valuable for tracking data migration waves, troubleshooting import-related issues, and understanding when regional organizational structure data was brought into the system from external sources. In scenarios where regions transition from paper records, spreadsheet tracking, or older systems to the SRP database, this timestamp helps administrators understand which records are part of historical data imports versus ongoing operational data entry. The NOT NULL constraint ensures that import timing is always tracked, supporting complete audit trails for all data in the system.
 
-### ImportedFileType
+### ImportedFileType (varchar(50), NOT NULL)
 
-File format of imported data
+Documents the format or type of file from which this subregion data was imported, such as "CSV", "Excel", "SRP_3_1_Region_File", or other specific format identifiers. This information is valuable for understanding the import process, troubleshooting format-specific issues that might affect data quality, and maintaining documentation about data sources and migration history. The 50-character limit accommodates most file type descriptions while preventing excessive storage use. For records created directly in the current system without an import process, this field might contain a default value like "Direct Entry" or "Native" to maintain the NOT NULL constraint while indicating no external file was involved. The field often includes version information about specific SRP file formats, which is particularly important when data is exchanged between different installations or versions of the SRP system, or when regional data is consolidated at the national level. Understanding the source file type helps administrators assess data quality expectations and identify systematic issues that might be related to particular import formats or regional data collection practices.
 
-### GUID
+### GUID (uniqueidentifier, NULL)
 
-Globally unique identifier for synchronization
-
-### LegacyId
-
-Original ID from legacy system
-
-### InstituteId
-
-External institute system identifier
+A globally unique identifier that remains constant for this subregion record across all systems, database instances, and synchronization operations. Unlike the Id field which is specific to this particular database instance and might differ if the record exists in multiple systems, the GUID provides a universal reference that can be used to match and synchronize this same subregion across distributed SRP installations. This field is essential in scenarios where regional systems need to synchronize with national systems, where data is shared between neighboring regions for coordination purposes, or where organizational structure information is exported and imported between different database instances. The GUID ensures that the same subregion can be reliably identified and matched across systems regardless of differences in local Id values. While nullable in the schema, in practice most subregions should have a GUID assigned to support synchronization and data exchange scenarios, particularly important for regions that coordinate with national databases or share information with neighboring regions. The uniqueidentifier format (typically a 128-bit value represented as a formatted string) provides sufficient uniqueness to avoid collisions even when multiple systems generate GUIDs independently.
 
 ## Key Relationships
 
 1. **Regions** (RegionId → Regions.Id)
    - Every subregion must belong to a region
    - Optional subdivision of regions
+   - Forms intermediate level: Region → Subregion → Cluster
 
 2. **Clusters** (One-to-Many)
    - Clusters can optionally belong to subregions
    - Clusters.SubregionId references this table
    - Provides intermediate grouping within region
+   - Many clusters may have NULL SubregionId even when subregions exist
 
 ## Geographic Hierarchy
 
@@ -87,10 +81,11 @@ NationalCommunity
       └── Subregion (optional)
           └── Cluster
               └── Locality
+                  └── Subdivision (optional)
 ```
 
 ### When Subregions Are Used
-- **Large Regions**: Many clusters (e.g., 50+ clusters)
+- **Large Regions**: Many clusters (e.g., 30-50+ clusters)
 - **Geographic Distribution**: Clusters spread over wide area
 - **Administrative Complexity**: Multiple coordination teams needed
 - **Natural Divisions**: Obvious geographic or cultural subdivisions
@@ -165,10 +160,11 @@ ORDER BY SubregionCount DESC
 ## Business Rules and Constraints
 
 1. **Required Region**: Every subregion must belong to a region
-2. **Name Required**: Subregion must have a name
-3. **Optional Usage**: Most regions do not use subregions
-4. **Cluster Assignment**: Clusters may have SubregionId NULL even when subregions exist
-5. **Unique Names**: Subregion names should be unique within region
+2. **Name Required**: Subregion must have a name (though nullable, should always be populated)
+3. **Latin Name Required**: Latin script version is mandatory for system interoperability
+4. **Optional Usage**: Most regions do not use subregions
+5. **Cluster Assignment**: Clusters may have SubregionId NULL even when subregions exist
+6. **Unique Names**: Subregion names should be unique within region
 
 ## Usage Patterns
 
