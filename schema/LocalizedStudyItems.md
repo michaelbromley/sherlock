@@ -210,6 +210,112 @@ WHERE [StudyItemId] = @StudyItemId
 ORDER BY [Language]
 ```
 
+### Translation Completeness Report
+
+```sql
+-- Identify which study items lack translations in key languages
+SELECT
+    si.[Id],
+    si.[Name] AS EnglishName,
+    si.[Sequence],
+    si.[ActivityStudyItemType],
+    MAX(CASE WHEN lsi.[LanguageCode] = 'es-ES' THEN 1 ELSE 0 END) AS HasSpanish,
+    MAX(CASE WHEN lsi.[LanguageCode] = 'fr-FR' THEN 1 ELSE 0 END) AS HasFrench,
+    MAX(CASE WHEN lsi.[LanguageCode] = 'pt-BR' THEN 1 ELSE 0 END) AS HasPortuguese,
+    MAX(CASE WHEN lsi.[LanguageCode] = 'fa-IR' THEN 1 ELSE 0 END) AS HasPersian,
+    MAX(CASE WHEN lsi.[LanguageCode] = 'ar-SA' THEN 1 ELSE 0 END) AS HasArabic,
+    COUNT(DISTINCT lsi.[LanguageCode]) AS TotalLanguages
+FROM [StudyItems] si
+LEFT JOIN [LocalizedStudyItems] lsi ON si.[Id] = lsi.[StudyItemId]
+WHERE si.[ParentStudyItemId] IS NULL  -- Root level items only
+GROUP BY si.[Id], si.[Name], si.[Sequence], si.[ActivityStudyItemType]
+ORDER BY si.[Sequence];
+```
+
+**Use Case:** Planning translation efforts and identifying gaps for priority languages
+**Performance Notes:** Pivot-style query using MAX/CASE; consider materializing for large datasets
+
+### Get Activity Materials in User's Language
+
+```sql
+-- Retrieve curriculum being studied in activities with localized names
+SELECT
+    a.[Id] AS ActivityId,
+    l.[Name] AS Locality,
+    c.[Name] AS Cluster,
+    COALESCE(lsi.[Name], si.[Name]) AS StudyItemName,
+    COALESCE(lsi.[ShortName], si.[Name]) AS ShortName,
+    si.[Sequence],
+    asi.[DisplayStartDate],
+    asi.[IsCompleted]
+FROM [Activities] a
+INNER JOIN [Localities] l ON a.[LocalityId] = l.[Id]
+INNER JOIN [Clusters] c ON l.[ClusterId] = c.[Id]
+INNER JOIN [ActivityStudyItems] asi ON a.[Id] = asi.[ActivityId]
+INNER JOIN [StudyItems] si ON asi.[StudyItemId] = si.[Id]
+LEFT JOIN [LocalizedStudyItems] lsi
+    ON si.[Id] = lsi.[StudyItemId]
+    AND lsi.[LanguageCode] = @UserLanguageCode
+WHERE a.[IsCompleted] = 0
+  AND asi.[EndDate] IS NULL
+  AND c.[Id] = @ClusterId
+ORDER BY l.[Name], si.[Sequence];
+```
+
+**Use Case:** Displaying activities with curriculum names in user's preferred language
+**Performance Notes:** COALESCE provides fallback to default language; indexes on language code recommended
+
+### Identify Missing Translations for Active Curriculum
+
+```sql
+-- Find currently active study items that lack translations in cluster's language
+SELECT DISTINCT
+    si.[Id],
+    si.[Name] AS EnglishName,
+    si.[Sequence],
+    si.[ActivityStudyItemType],
+    COUNT(DISTINCT asi.[ActivityId]) AS ActiveActivities,
+    MAX(CASE WHEN lsi.[LanguageCode] = @ClusterLanguage THEN 1 ELSE 0 END) AS HasTranslation
+FROM [StudyItems] si
+INNER JOIN [ActivityStudyItems] asi ON si.[Id] = asi.[StudyItemId]
+INNER JOIN [Activities] a ON asi.[ActivityId] = a.[Id]
+INNER JOIN [Localities] l ON a.[LocalityId] = l.[Id]
+INNER JOIN [Clusters] c ON l.[ClusterId] = c.[Id]
+LEFT JOIN [LocalizedStudyItems] lsi
+    ON si.[Id] = lsi.[StudyItemId]
+    AND lsi.[LanguageCode] = @ClusterLanguage
+WHERE asi.[EndDate] IS NULL
+  AND asi.[IsCompleted] = 0
+  AND c.[Id] = @ClusterId
+GROUP BY si.[Id], si.[Name], si.[Sequence], si.[ActivityStudyItemType]
+HAVING MAX(CASE WHEN lsi.[LanguageCode] = @ClusterLanguage THEN 1 ELSE 0 END) = 0
+ORDER BY COUNT(DISTINCT asi.[ActivityId]) DESC;
+```
+
+**Use Case:** Prioritizing translation needs based on active usage in cluster
+**Performance Notes:** Complex join with aggregation; filter on cluster early for performance
+
+### Language Usage Statistics
+
+```sql
+-- Analyze which languages are most commonly used across all activities
+SELECT
+    lsi.[LanguageCode],
+    COUNT(DISTINCT lsi.[StudyItemId]) AS ItemsTranslated,
+    COUNT(DISTINCT asi.[ActivityId]) AS ActivitiesUsingLanguage,
+    COUNT(DISTINCT a.[LocalityId]) AS LocalitiesReached
+FROM [LocalizedStudyItems] lsi
+INNER JOIN [ActivityStudyItems] asi ON lsi.[StudyItemId] = asi.[StudyItemId]
+INNER JOIN [Activities] a ON asi.[ActivityId] = a.[Id]
+WHERE lsi.[LanguageCode] != 'en-US'  -- Exclude English baseline
+  AND a.[IsCompleted] = 0
+GROUP BY lsi.[LanguageCode]
+ORDER BY COUNT(DISTINCT asi.[ActivityId]) DESC;
+```
+
+**Use Case:** Understanding language adoption and usage patterns across communities
+**Performance Notes:** Multiple distinct counts can be expensive; consider summary tables
+
 ## Business Rules and Constraints
 
 1. **Required Language**: Every study item should have at least English (en-US) localization

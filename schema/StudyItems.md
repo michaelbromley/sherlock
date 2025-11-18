@@ -356,6 +356,169 @@ When importing study items from external sources:
 - Coordinate localization imports
 - Validate against existing materials
 
+## Common Query Patterns
+
+This section provides practical SQL examples for working with the hierarchical curriculum structure.
+
+### Retrieve Complete Curriculum Hierarchy
+
+```sql
+-- Get the full curriculum tree with parent-child relationships
+WITH CurriculumHierarchy AS (
+    -- Root level items (no parent)
+    SELECT
+        [Id],
+        [ParentStudyItemId],
+        [Name],
+        [Sequence],
+        [ItemType],
+        [ActivityStudyItemType],
+        0 AS Level,
+        CAST([Name] AS NVARCHAR(500)) AS Path
+    FROM [StudyItems]
+    WHERE [ParentStudyItemId] IS NULL
+
+    UNION ALL
+
+    -- Child items recursively
+    SELECT
+        si.[Id],
+        si.[ParentStudyItemId],
+        si.[Name],
+        si.[Sequence],
+        si.[ItemType],
+        si.[ActivityStudyItemType],
+        ch.Level + 1,
+        CAST(ch.Path + ' > ' + si.[Name] AS NVARCHAR(500))
+    FROM [StudyItems] si
+    INNER JOIN CurriculumHierarchy ch ON si.[ParentStudyItemId] = ch.[Id]
+)
+SELECT * FROM CurriculumHierarchy
+ORDER BY Path, Sequence;
+```
+
+**Use Case:** Visualizing the complete curriculum structure for administrative planning
+**Performance Notes:** Recursive CTEs can be expensive; consider caching results for reference
+
+### Find All Children of a Specific Study Item
+
+```sql
+-- Get all child items (grades, sections) for a specific parent book
+SELECT
+    si.[Id],
+    si.[Name],
+    si.[Sequence],
+    si.[ItemType],
+    si.[ActivityStudyItemType]
+FROM [StudyItems] si
+WHERE si.[ParentStudyItemId] = @ParentStudyItemId
+ORDER BY si.[Sequence];
+```
+
+**Use Case:** Displaying available grades or sections when organizing a class or study circle
+**Performance Notes:** Index on ParentStudyItemId recommended for fast lookups
+
+### Get All Ruhi Books in Sequence
+
+```sql
+-- Retrieve all main Ruhi Institute books in order
+SELECT
+    [Id],
+    [Name],
+    [Sequence],
+    [DisplaySequence]
+FROM [StudyItems]
+WHERE [ParentStudyItemId] IS NULL
+  AND [ActivityStudyItemType] = 'Book'
+ORDER BY [Sequence];
+```
+
+**Use Case:** Displaying available books for study circle selection
+**Performance Notes:** Simple query that benefits from index on ActivityStudyItemType
+
+### Find Study Items by Language Availability
+
+```sql
+-- Identify which books have translations in a specific language
+SELECT
+    si.[Id],
+    si.[Name],
+    si.[Sequence],
+    COUNT(lsi.[Id]) AS TranslationCount,
+    MAX(CASE WHEN lsi.[LanguageCode] = @LanguageCode THEN 1 ELSE 0 END) AS HasTranslation
+FROM [StudyItems] si
+LEFT JOIN [LocalizedStudyItems] lsi ON si.[Id] = lsi.[StudyItemId]
+WHERE si.[ActivityStudyItemType] = 'Book'
+GROUP BY si.[Id], si.[Name], si.[Sequence]
+ORDER BY si.[Sequence];
+```
+
+**Use Case:** Determining curriculum availability for non-English communities
+**Performance Notes:** Join with LocalizedStudyItems can be expensive; consider filtered indexes
+
+### Get Currently Active Curriculum by Activity Type
+
+```sql
+-- Find what curriculum is currently being studied in active activities
+SELECT
+    si.[Name] AS StudyItemName,
+    si.[Sequence],
+    si.[ActivityStudyItemType],
+    COUNT(DISTINCT asi.[ActivityId]) AS ActiveActivities,
+    COUNT(DISTINCT a.[LocalityId]) AS LocalitiesInvolved
+FROM [StudyItems] si
+INNER JOIN [ActivityStudyItems] asi ON si.[Id] = asi.[StudyItemId]
+INNER JOIN [Activities] a ON asi.[ActivityId] = a.[Id]
+WHERE asi.[EndDate] IS NULL
+  AND asi.[IsCompleted] = 0
+  AND a.[IsCompleted] = 0
+  AND a.[ActivityType] = @ActivityType  -- 0=Children, 1=Youth, 2=Study Circles
+GROUP BY si.[Id], si.[Name], si.[Sequence], si.[ActivityStudyItemType]
+ORDER BY COUNT(DISTINCT asi.[ActivityId]) DESC;
+```
+
+**Use Case:** Understanding which curriculum materials are most actively used
+**Performance Notes:** Multiple joins require good indexes on foreign keys and activity status
+
+### Find Orphaned or Disconnected Study Items
+
+```sql
+-- Identify study items that have no parent but aren't root items
+-- or have invalid parent references
+SELECT
+    si.[Id],
+    si.[Name],
+    si.[ParentStudyItemId],
+    si.[ActivityStudyItemType]
+FROM [StudyItems] si
+LEFT JOIN [StudyItems] parent ON si.[ParentStudyItemId] = parent.[Id]
+WHERE si.[ParentStudyItemId] IS NOT NULL
+  AND parent.[Id] IS NULL;
+```
+
+**Use Case:** Data quality validation and cleanup
+**Performance Notes:** Self-join for validation; run periodically not in real-time
+
+### Get Study Items With Translation Coverage
+
+```sql
+-- Show translation coverage statistics for each curriculum item
+SELECT
+    si.[Name],
+    si.[Sequence],
+    si.[ActivityStudyItemType],
+    COUNT(DISTINCT lsi.[LanguageCode]) AS LanguageCount,
+    STRING_AGG(lsi.[LanguageCode], ', ') AS AvailableLanguages
+FROM [StudyItems] si
+LEFT JOIN [LocalizedStudyItems] lsi ON si.[Id] = lsi.[StudyItemId]
+WHERE si.[ParentStudyItemId] IS NULL  -- Root items only
+GROUP BY si.[Id], si.[Name], si.[Sequence], si.[ActivityStudyItemType]
+ORDER BY si.[Sequence];
+```
+
+**Use Case:** Identifying gaps in curriculum translations for language-specific communities
+**Performance Notes:** STRING_AGG available in SQL Server 2017+; use alternative for older versions
+
 ## Reporting and Analytics
 
 ### Curriculum Coverage Analysis
