@@ -293,7 +293,7 @@ Table stores only name:
 
 ## Privacy and Security
 
-**CRITICAL PRIVACY CLASSIFICATION** ⚠️
+**CRITICAL PRIVACY CLASSIFICATION**
 
 This table contains names and assignments of institutional officials (Auxiliary Board members), constituting personally identifiable information requiring high-level privacy protection.
 
@@ -319,7 +319,7 @@ This table is classified as **CRITICAL** for privacy:
 
 ### Prohibited Query Patterns
 
-**❌ NEVER DO THIS - Public Exposure of Official Names:**
+**NEVER DO THIS - Public Exposure of Official Names:**
 ```sql
 -- This exposes institutional officials' names without authorization
 SELECT [FirstName], [FamilyName], C.[Name] AS [ClusterName]
@@ -327,7 +327,7 @@ FROM [ClusterAuxiliaryBoardMembers] AB
 INNER JOIN [Clusters] C ON AB.[ClusterId] = C.[Id];
 ```
 
-**❌ NEVER DO THIS - Linking Officials to Contact Information:**
+**NEVER DO THIS - Linking Officials to Contact Information:**
 ```sql
 -- This creates an unauthorized contact list for institutional officials
 SELECT AB.[FirstName], AB.[FamilyName], E.[Email], P.[PhoneNumber]
@@ -338,7 +338,7 @@ INNER JOIN [IndividualPhones] P ON AB.[IndividualId] = P.[IndividualId];
 
 ### Secure Query Patterns
 
-**✅ CORRECT - Cluster Support Coverage (No Names):**
+**CORRECT - Cluster Support Coverage (No Names):**
 ```sql
 -- Safe: Analyzes support coverage without exposing official names
 SELECT
@@ -352,7 +352,7 @@ LEFT JOIN [ClusterAuxiliaryBoardMembers] AB ON C.[Id] = AB.[ClusterId]
 GROUP BY R.[Name];
 ```
 
-**✅ CORRECT - Support Distribution Statistics:**
+**CORRECT - Support Distribution Statistics:**
 ```sql
 -- Safe: Shows distribution of assignments without identifying officials
 SELECT

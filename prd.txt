@@ -1,0 +1,23 @@
+Ultrathink. Go through all of the files in the schema/ directory, and determine by using the database-explorer whether you can elaborate further on the meaning and purpose of the various columns of each database table. The text you came up before was a bit spare, I think because you wanted to fit it into a table format originally. Now you are free to use full or even multiple paragraphs, so you should elaborate where it is meaningful to do so. Use sequential-thinking to help you plan, and Perplexity in case you want to research the meaning of any of these things in the context of the Baha'i Faith. Take your time, be thorough, and make sure you consider every column of every table, visiting and refining every file in the schema/ directory!
+
+Do not reveal any personal details about individuals, like their phone number or address. These are sensitive and should never be shared.
+
+Here are some samples to give you an indication of how to begin, but feel free to enrich these files further with your findings and deliberations:
+
+1. @/Users/johnw/work/regional-statistics/srp-db/schema/Activities.md - Core educational activities tracking
+2. @/Users/johnw/work/regional-statistics/srp-db/schema/ActivityStudyItemIndividuals.md - Individual participation in activities
+3. @/Users/johnw/work/regional-statistics/srp-db/schema/ActivityStudyItems.md - Links between activities and curriculum
+4. @/Users/johnw/work/regional-statistics/srp-db/schema/Individuals.md - Central repository of all participants (with privacy considerations)
+5. @/Users/johnw/work/regional-statistics/srp-db/schema/StudyItems.md - Master catalog of educational curriculum
+
+In order to provide richer context for your understanding, I want you to read and comprehend these documents:
+
+- @/Users/johnw/work/regional-statistics/srp-db/guidance/itc_attaining_dynamics_growth.txt
+- @/Users/johnw/work/regional-statistics/srp-db/guidance/itc_building_momentum.txt
+- @/Users/johnw/work/regional-statistics/srp-db/guidance/itc_institutes_attaining_higher_level.txt
+- @/Users/johnw/work/regional-statistics/srp-db/guidance/uhj_five-year_plan_2006.txt
+- @/Users/johnw/work/regional-statistics/srp-db/guidance/uhj_five-year_plan_2011.txt
+- @/Users/johnw/work/regional-statistics/srp-db/guidance/uhj_framework_action_messages.txt
+- @/Users/johnw/work/regional-statistics/srp-db/guidance/uhj_nine-year_plan_2022.txt
+- @/Users/johnw/work/regional-statistics/srp-db/guidance/uhj_one-year_plan_2021-2022.txt
+- @/Users/johnw/work/regional-statistics/srp-db/guidance/uhj_turning_point_1996-2006.txt

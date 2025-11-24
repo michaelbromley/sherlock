@@ -426,7 +426,7 @@ HAVING COUNT(DISTINCT [IndividualId]) > 1
 
 ## Privacy and Security
 
-**CRITICAL PRIVACY CLASSIFICATION** ⚠️
+**CRITICAL PRIVACY CLASSIFICATION**
 
 This table contains direct contact information (email addresses) that constitutes personally identifiable information (PII) requiring the highest level of privacy protection.
 
@@ -453,7 +453,7 @@ This table is classified as **CRITICAL** for privacy, meaning:
 
 ### Prohibited Query Patterns
 
-**❌ NEVER DO THIS - Exposing Email Addresses:**
+**NEVER DO THIS - Exposing Email Addresses:**
 ```sql
 -- This violates privacy by creating an unauthorized contact list
 SELECT
@@ -467,7 +467,7 @@ INNER JOIN [Localities] L ON I.[LocalityId] = L.[Id]
 WHERE E.[IsPrimary] = 1;
 ```
 
-**❌ NEVER DO THIS - Email Export Without Authorization:**
+**NEVER DO THIS - Email Export Without Authorization:**
 ```sql
 -- This creates a mass mailing list without proper authorization
 SELECT [Email]
@@ -475,7 +475,7 @@ FROM [IndividualEmails]
 WHERE [IsPrimary] = 1;
 ```
 
-**❌ NEVER DO THIS - Linking Emails to Activity Participation:**
+**NEVER DO THIS - Linking Emails to Activity Participation:**
 ```sql
 -- This reveals who participates in what activities with their contact info
 SELECT
@@ -493,7 +493,7 @@ INNER JOIN [Localities] L ON A.[LocalityId] = L.[Id];
 
 ### Secure Query Patterns
 
-**✅ CORRECT - Email Availability Statistics (No Actual Addresses):**
+**CORRECT - Email Availability Statistics (No Actual Addresses):**
 ```sql
 -- Safe: Reports percentage with email without exposing addresses
 SELECT
@@ -512,7 +512,7 @@ HAVING COUNT(DISTINCT I.[Id]) >= 10  -- Minimum threshold
 ORDER BY C.[Name];
 ```
 
-**✅ CORRECT - Primary Email Designation Statistics:**
+**CORRECT - Primary Email Designation Statistics:**
 ```sql
 -- Safe: Analyzes primary email patterns without exposing addresses
 SELECT

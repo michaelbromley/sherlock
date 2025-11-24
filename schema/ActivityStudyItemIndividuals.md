@@ -403,7 +403,7 @@ For distributed systems:
 
 ## Privacy and Security
 
-**HIGH PRIVACY CLASSIFICATION** ⚠️
+**HIGH PRIVACY CLASSIFICATION**
 
 This table creates direct links between individuals and their activity participation, making it highly sensitive from a privacy perspective. It reveals WHO participates in WHAT activities in WHICH roles.
 
@@ -431,7 +431,7 @@ This table is classified as **HIGH** for privacy:
 
 ### Prohibited Query Patterns
 
-**❌ NEVER DO THIS - Linking Names to Activity Participation:**
+**NEVER DO THIS - Linking Names to Activity Participation:**
 ```sql
 -- This violates privacy by exposing who participates in which activities
 SELECT
@@ -450,7 +450,7 @@ INNER JOIN [Activities] A ON ASI.[ActivityId] = A.[Id]
 INNER JOIN [Localities] L ON A.[LocalityId] = L.[Id];
 ```
 
-**❌ NEVER DO THIS - Exposing Individual Learning Journeys:**
+**NEVER DO THIS - Exposing Individual Learning Journeys:**
 ```sql
 -- This reveals an individual's complete educational path
 SELECT
@@ -465,7 +465,7 @@ INNER JOIN [StudyItems] SI ON ASI.[StudyItemId] = SI.[Id]
 WHERE I.[Id] = @IndividualId;  -- Even with consent, be very careful with such queries
 ```
 
-**❌ NEVER DO THIS - Identifying Children in Specific Classes:**
+**NEVER DO THIS - Identifying Children in Specific Classes:**
 ```sql
 -- This could identify which children attend which classes
 SELECT
@@ -482,7 +482,7 @@ WHERE ASI.[IsCurrent] = 1;
 
 ### Secure Query Patterns
 
-**✅ CORRECT - Role Distribution Statistics (No Personal Identifiers):**
+**CORRECT - Role Distribution Statistics (No Personal Identifiers):**
 ```sql
 -- Safe: Analyzes role patterns without exposing individuals
 SELECT
@@ -504,7 +504,7 @@ GROUP BY ASI.[IndividualRole]
 ORDER BY COUNT(DISTINCT ASI.[IndividualId]) DESC;
 ```
 
-**✅ CORRECT - Cluster-Level Participation Trends (Aggregated):**
+**CORRECT - Cluster-Level Participation Trends (Aggregated):**
 ```sql
 -- Safe: Shows participation trends at cluster level without individual details
 SELECT
@@ -524,7 +524,7 @@ HAVING COUNT(DISTINCT ASI.[IndividualId]) >= 10  -- Minimum threshold
 ORDER BY C.[Name];
 ```
 
-**✅ CORRECT - StudyItem Popularity (No Individual Links):**
+**CORRECT - StudyItem Popularity (No Individual Links):**
 ```sql
 -- Safe: Shows which study items are most commonly being studied, no personal data
 SELECT

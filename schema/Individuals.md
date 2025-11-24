@@ -578,7 +578,7 @@ Archival effectiveness should be monitored: track percentage of records archived
 
 ## Privacy and Security
 
-**CRITICAL PRIVACY CLASSIFICATION** ⚠️
+**CRITICAL PRIVACY CLASSIFICATION**
 
 This table contains highly sensitive personally identifiable information (PII) and requires the strictest privacy protections. Improper handling of this data could lead to privacy violations, regulatory non-compliance, identity theft, harassment, and serious harm to individuals.
 
@@ -618,7 +618,7 @@ This table is classified as **CRITICAL** for privacy, meaning:
 
 These query patterns violate privacy and must NEVER be executed for public reports or unauthorized access:
 
-**❌ NEVER DO THIS - Exposing Names with Personal Details:**
+**NEVER DO THIS - Exposing Names with Personal Details:**
 ```sql
 -- PRIVACY VIOLATION: Exposes names, ages, religious affiliation, locations
 SELECT
@@ -632,7 +632,7 @@ LEFT JOIN [Localities] L ON I.[LocalityId] = L.[Id]
 WHERE [IsArchived] = 0;
 ```
 
-**❌ NEVER DO THIS - Individual Activity Participation Lists:**
+**NEVER DO THIS - Individual Activity Participation Lists:**
 ```sql
 -- PRIVACY VIOLATION: Links names to specific activity participation
 SELECT
@@ -646,7 +646,7 @@ INNER JOIN [Activities] A ON ASI.[ActivityId] = A.[Id]
 INNER JOIN [Localities] L ON A.[LocalityId] = L.[Id];
 ```
 
-**❌ NEVER DO THIS - Contact List Export:**
+**NEVER DO THIS - Contact List Export:**
 ```sql
 -- PRIVACY VIOLATION: Creates unauthorized contact list with personal identifiers
 SELECT
@@ -660,7 +660,7 @@ LEFT JOIN [IndividualPhones] P ON I.[Id] = P.[IndividualId]
 WHERE I.[IsArchived] = 0;
 ```
 
-**❌ NEVER DO THIS - Small Group Identification:**
+**NEVER DO THIS - Small Group Identification:**
 ```sql
 -- PRIVACY VIOLATION: Could identify specific individuals/families in small localities
 SELECT
@@ -678,7 +678,7 @@ WHERE L.[TotalPopulation] < 1000  -- Small community
 
 These patterns protect privacy while enabling meaningful analysis and reporting:
 
-**✅ CORRECT - Aggregated Demographics (No Personal Identifiers):**
+**CORRECT - Aggregated Demographics (No Personal Identifiers):**
 ```sql
 -- Safe: Provides demographic statistics without exposing individuals
 SELECT
@@ -711,7 +711,7 @@ HAVING COUNT(*) >= 5  -- Suppress small groups
 ORDER BY [AgeGroup], [Gender];
 ```
 
-**✅ CORRECT - Geographic Distribution (Cluster-Level, Minimum Thresholds):**
+**CORRECT - Geographic Distribution (Cluster-Level, Minimum Thresholds):**
 ```sql
 -- Safe: Aggregates to cluster level with minimum thresholds protecting small groups
 SELECT
@@ -730,7 +730,7 @@ HAVING COUNT(DISTINCT I.[Id]) >= 10  -- Minimum threshold prevents identificatio
 ORDER BY R.[Name], C.[Name];
 ```
 
-**✅ CORRECT - Contact Information Availability (No Actual Contact Details):**
+**CORRECT - Contact Information Availability (No Actual Contact Details):**
 ```sql
 -- Safe: Reports existence of contact info without exposing addresses or phone numbers
 SELECT
@@ -751,7 +751,7 @@ HAVING COUNT(DISTINCT I.[Id]) >= 20  -- Higher threshold for contact statistics
 ORDER BY C.[Name];
 ```
 
-**✅ CORRECT - Enrollment Trends (Temporal Aggregates, No Names):**
+**CORRECT - Enrollment Trends (Temporal Aggregates, No Names):**
 ```sql
 -- Safe: Shows enrollment patterns over time without individual identification
 SELECT

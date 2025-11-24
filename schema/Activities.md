@@ -136,7 +136,7 @@ The multiple identifier fields (Id, GUID, LegacyId, InstituteId) reflect the rea
 
 ## Privacy and Security
 
-**HIGH PRIVACY CLASSIFICATION** ⚠️
+**HIGH PRIVACY CLASSIFICATION**
 
 While the Activities table primarily contains operational data about educational activities, it requires careful privacy handling due to the Comments field and potential identification of small groups.
 
@@ -160,7 +160,7 @@ This table is classified as **HIGH** for privacy:
 
 ### Prohibited Query Patterns
 
-**❌ NEVER DO THIS - Exposing Comments with Activity Details:**
+**NEVER DO THIS - Exposing Comments with Activity Details:**
 ```sql
 -- Comments may contain personal information - never export without review
 SELECT L.[Name], A.[ActivityType], A.[Comments]
@@ -169,7 +169,7 @@ INNER JOIN [Localities] L ON A.[LocalityId] = L.[Id]
 WHERE A.[Comments] IS NOT NULL;
 ```
 
-**❌ NEVER DO THIS - Small Group Identification:**
+**NEVER DO THIS - Small Group Identification:**
 ```sql
 -- This could identify specific small groups in small localities
 SELECT L.[Name], A.[ActivityType], A.[Participants]
@@ -180,7 +180,7 @@ WHERE A.[Participants] < 5;  -- Dangerous - could identify specific children or 
 
 ### Secure Query Patterns
 
-**✅ CORRECT - Activity Statistics with Minimum Thresholds:**
+**CORRECT - Activity Statistics with Minimum Thresholds:**
 ```sql
 -- Safe: Aggregates to cluster level with minimum thresholds
 SELECT
@@ -202,7 +202,7 @@ HAVING COUNT(*) >= 3  -- Only show if cluster has 3+ activities of this type
 ORDER BY C.[Name], A.[ActivityType];
 ```
 
-**✅ CORRECT - Regional Activity Trends (No Small Groups):**
+**CORRECT - Regional Activity Trends (No Small Groups):**
 ```sql
 -- Safe: Regional aggregates exclude small localities
 SELECT

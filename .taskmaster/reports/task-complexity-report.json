@@ -1,0 +1,101 @@
+{
+	"meta": {
+		"generatedAt": "2025-11-18T17:32:32.734Z",
+		"tasksAnalyzed": 11,
+		"totalTasks": 11,
+		"analysisCount": 11,
+		"thresholdScore": 5,
+		"projectName": "Taskmaster",
+		"usedResearch": true
+	},
+	"complexityAnalysis": [
+		{
+			"taskId": 1,
+			"taskTitle": "Analyze existing documentation and establish baseline",
+			"complexityScore": 5,
+			"recommendedSubtasks": 4,
+			"expansionPrompt": "Break this into subtasks for: 1) Auditing existing 28 schema files to assess current documentation level, 2) Running db-tool introspection to gather technical schema details, 3) Analyzing guidance documents for context, 4) Creating documentation template and tracking system",
+			"reasoning": "This is primarily an analysis and planning task. The codebase already has 29 schema files with substantial documentation (Activities.md and Individuals.md show detailed field descriptions). The db-tool exists and is functional. This task requires reviewing existing content, establishing standards, and creating a template - moderate complexity but well-defined scope."
+		},
+		{
+			"taskId": 2,
+			"taskTitle": "Enhance core people management tables documentation",
+			"complexityScore": 4,
+			"recommendedSubtasks": 3,
+			"expansionPrompt": "Break into subtasks for: 1) Completing Individuals.md documentation with all 60 fields, 2) Creating comprehensive IndividualEmails.md documentation, 3) Creating comprehensive IndividualPhones.md documentation with privacy considerations for both contact tables",
+			"reasoning": "The Individuals.md file already has a strong foundation with detailed field descriptions. Based on the grep count showing 60 fields, some documentation exists but needs completion. The contact tables are simpler with fewer fields. The main work is completing existing documentation rather than starting from scratch."
+		},
+		{
+			"taskId": 3,
+			"taskTitle": "Document educational activity tracking system",
+			"complexityScore": 5,
+			"recommendedSubtasks": 3,
+			"expansionPrompt": "Break into subtasks for: 1) Completing Activities.md documentation for all 28 fields, 2) Creating ActivityStudyItems.md documentation for the linking table, 3) Creating ActivityStudyItemIndividuals.md documentation for participant roles and progress tracking",
+			"reasoning": "Activities.md already has substantial documentation but needs completion for all 28 fields. The two related tables (ActivityStudyItems with 38 fields and ActivityStudyItemIndividuals with 32 fields) need full documentation. These tables form a complex three-way relationship requiring clear explanation."
+		},
+		{
+			"taskId": 4,
+			"taskTitle": "Create curriculum and study materials documentation",
+			"complexityScore": 4,
+			"recommendedSubtasks": 2,
+			"expansionPrompt": "Break into subtasks for: 1) Documenting StudyItems.md with hierarchical structure and 32 fields, 2) Documenting LocalizedStudyItems.md with multi-language support system covering 44 fields",
+			"reasoning": "Two tables need documentation. StudyItems has a self-referential hierarchy that needs clear explanation. LocalizedStudyItems is larger (44 fields) but conceptually simpler as a translation table. Both tables have clear purposes in the curriculum system."
+		},
+		{
+			"taskId": 5,
+			"taskTitle": "Document geographic hierarchy tables",
+			"complexityScore": 7,
+			"recommendedSubtasks": 5,
+			"expansionPrompt": "Break into subtasks for: 1) Core hierarchy tables (NationalCommunities, Regions, Clusters, Localities), 2) Optional subdivision level (Subdivisions), 3) Grouping tables (GroupOfRegions, GroupOfClusters), 4) Administrative units (ElectoralUnits, Subregions), 5) Complex hierarchy queries and rollup examples",
+			"reasoning": "This involves 9 interrelated tables forming a complex 7-level hierarchy. Each table has 33-36 fields based on grep results. The relationships between tables are intricate, and clear documentation of the hierarchy flow is crucial. Requires extensive SQL examples for geographic aggregation."
+		},
+		{
+			"taskId": 6,
+			"taskTitle": "Enhance reporting and statistics tables documentation",
+			"complexityScore": 6,
+			"recommendedSubtasks": 2,
+			"expansionPrompt": "Break into subtasks for: 1) Documenting Cycles table with all 73 statistical fields and their calculation methods, 2) Documenting ClusterAuxiliaryBoardMembers table with institutional support system",
+			"reasoning": "The Cycles table is particularly complex with 73 fields (highest field count in the schema) representing various metrics. Each field needs explanation of what it measures and how it's calculated. ClusterAuxiliaryBoardMembers is simpler (32 fields) but requires understanding of institutional structure."
+		},
+		{
+			"taskId": 7,
+			"taskTitle": "Document system administration tables",
+			"complexityScore": 4,
+			"recommendedSubtasks": 4,
+			"expansionPrompt": "Break into subtasks for: 1) ApplicationConfigurations documentation, 2) ApplicationHistories documentation, 3) DBScriptHistories documentation, 4) LoadDataFiles documentation with import procedures",
+			"reasoning": "Four system tables with moderate complexity (24-43 fields each). These are technical tables but straightforward to document. LoadDataFiles is the most complex with 43 fields related to data import processes."
+		},
+		{
+			"taskId": 8,
+			"taskTitle": "Create dynamic list management documentation",
+			"complexityScore": 5,
+			"recommendedSubtasks": 5,
+			"expansionPrompt": "Break into subtasks for documenting: 1) Lists table core functionality, 2) ListColumns available columns, 3) ListDisplayColumns configuration, 4) ListFilterColumns filter system, 5) ListSortColumns sort configuration",
+			"reasoning": "Five interrelated tables forming a dynamic reporting system. Each table has 20-35 fields. The complexity lies in explaining how these tables work together to create custom reports. Requires good examples of list configuration."
+		},
+		{
+			"taskId": 9,
+			"taskTitle": "Implement privacy and security documentation layer",
+			"complexityScore": 3,
+			"recommendedSubtasks": 2,
+			"expansionPrompt": "Break into subtasks for: 1) Auditing all 28 tables to identify PII fields and create privacy matrix, 2) Adding privacy sections and secure query examples to relevant documentation files",
+			"reasoning": "This is an enhancement task that builds on completed documentation. It requires reviewing existing work and adding privacy sections rather than creating new documentation from scratch. The main work is identifying sensitive fields and providing guidance."
+		},
+		{
+			"taskId": 10,
+			"taskTitle": "Create comprehensive index and integration documentation",
+			"complexityScore": 4,
+			"recommendedSubtasks": 4,
+			"expansionPrompt": "Break into subtasks for: 1) Creating master README.md index with categories and navigation, 2) Building cross-reference matrix for foreign keys, 3) Creating query pattern library, 4) Adding glossary and quick-start guides",
+			"reasoning": "This is primarily an organizational and compilation task. A README.md already exists but needs enhancement. The work involves organizing completed documentation, creating navigation aids, and building reference materials. Most content will come from already-completed documentation."
+		},
+		{
+			"taskId": 11,
+			"taskTitle": "Perform quality assurance and final validation",
+			"complexityScore": 3,
+			"recommendedSubtasks": 3,
+			"expansionPrompt": "Break into subtasks for: 1) Creating compliance checklist and auditing all 28 files against PRD requirements, 2) Testing all SQL examples through db-tool, 3) Conducting final review and addressing identified gaps",
+			"reasoning": "This is a verification and validation task that depends on all other work being complete. It involves systematic checking rather than creation. The db-tool exists for testing queries. Complexity is low as it's mainly procedural verification work."
+		}
+	]
+}

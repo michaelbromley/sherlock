@@ -311,7 +311,7 @@ Standard import tracking fields support:
 
 ## Privacy and Security
 
-**MODERATE-HIGH PRIVACY CLASSIFICATION** ⚠️
+**MODERATE-HIGH PRIVACY CLASSIFICATION**
 
 The Localities table requires careful privacy handling due to its combination of geographic specificity with community vitality metrics that could identify small communities or reveal sensitive information about community development patterns.
 
@@ -361,7 +361,7 @@ Different localities require different privacy protections based on context:
 
 ### Prohibited Query Patterns
 
-**❌ NEVER DO THIS - Exposing Small Locality Details:**
+**NEVER DO THIS - Exposing Small Locality Details:**
 ```sql
 -- Dangerous: Could identify specific small communities or families
 SELECT
@@ -375,7 +375,7 @@ WHERE L.[NineteenDayFeastAttendance] < 10  -- Very small communities identifiabl
 ORDER BY L.[NineteenDayFeastAttendance];
 ```
 
-**❌ NEVER DO THIS - Comments with Locality Names:**
+**NEVER DO THIS - Comments with Locality Names:**
 ```sql
 -- Comments may contain personal information - never export without review
 SELECT L.[Name], L.[Comments]
@@ -383,7 +383,7 @@ FROM [Localities] L
 WHERE L.[Comments] IS NOT NULL AND LEN(L.[Comments]) > 0;
 ```
 
-**❌ NEVER DO THIS - Detailed Metrics in Sensitive Regions:**
+**NEVER DO THIS - Detailed Metrics in Sensitive Regions:**
 ```sql
 -- Exposing detailed community metrics could endanger believers in restricted areas
 SELECT
@@ -400,7 +400,7 @@ INNER JOIN [NationalCommunities] NC ON R.[NationalCommunityId] = NC.[Id]
 WHERE NC.[Name] = 'SensitiveCountry';  -- Never expose this level of detail
 ```
 
-**❌ NEVER DO THIS - Small Group Exposure via Combined Tables:**
+**NEVER DO THIS - Small Group Exposure via Combined Tables:**
 ```sql
 -- Combining localities with individuals could identify specific families
 SELECT
@@ -416,7 +416,7 @@ GROUP BY L.[Name], L.[NineteenDayFeastAttendance];
 
 ### Secure Query Patterns
 
-**✅ CORRECT - Cluster-Level Aggregates with Minimum Thresholds:**
+**CORRECT - Cluster-Level Aggregates with Minimum Thresholds:**
 ```sql
 -- Safe: Aggregates to cluster level, excludes small populations
 SELECT
@@ -433,7 +433,7 @@ HAVING COUNT(L.[Id]) >= 5  -- Only show clusters with 5+ qualifying localities
 ORDER BY C.[Name];
 ```
 
-**✅ CORRECT - Regional Statistics (No Sensitive Details):**
+**CORRECT - Regional Statistics (No Sensitive Details):**
 ```sql
 -- Safe: Regional aggregates with no small-community identification
 SELECT
@@ -450,7 +450,7 @@ GROUP BY R.[Id], R.[Name]
 ORDER BY R.[Name];
 ```
 
-**✅ CORRECT - Community Vitality Index (Aggregated, Protected):**
+**CORRECT - Community Vitality Index (Aggregated, Protected):**
 ```sql
 -- Safe: Uses ranges instead of exact numbers, aggregated view
 SELECT
@@ -471,7 +471,7 @@ HAVING COUNT(L.[Id]) >= 5  -- Sufficient localities to prevent identification
 ORDER BY C.[Name];
 ```
 
-**✅ CORRECT - Growth Trends (Time Series, Aggregated):**
+**CORRECT - Growth Trends (Time Series, Aggregated):**
 ```sql
 -- Safe: Aggregated over time and geography, no small-group exposure
 SELECT

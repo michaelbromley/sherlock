@@ -171,10 +171,10 @@ See **[Privacy_and_Security_Classification_Matrix.md](../reports/Privacy_and_Sec
 - Data protection requirements and access controls
 
 **Privacy rules:**
-- ❌ **NEVER** expose personal names, emails, or phone numbers in public reports
-- ❌ **NEVER** link individuals to activity participation without authorization
-- ✅ **ALWAYS** aggregate personal data with minimum thresholds (≥5 or ≥10 individuals)
-- ✅ **ALWAYS** use fictitious data in documentation (.invalid, .example domains)
+- **NEVER** expose personal names, emails, or phone numbers in public reports
+- **NEVER** link individuals to activity participation without authorization
+- **ALWAYS** aggregate personal data with minimum thresholds (≥5 or ≥10 individuals)
+- **ALWAYS** use fictitious data in documentation (.invalid, .example domains)
 
 ## Quick-Start Guides by Persona
 

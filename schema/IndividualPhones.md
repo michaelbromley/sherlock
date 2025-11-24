@@ -601,7 +601,7 @@ ORDER BY I.[FamilyName], I.[FirstName]
 
 ## Privacy and Security
 
-**CRITICAL PRIVACY CLASSIFICATION** ⚠️
+**CRITICAL PRIVACY CLASSIFICATION**
 
 This table contains direct contact information (phone numbers) that constitutes personally identifiable information (PII) requiring the highest level of privacy protection.
 
@@ -629,7 +629,7 @@ This table is classified as **CRITICAL** for privacy:
 
 ### Prohibited Query Patterns
 
-**❌ NEVER DO THIS - Exposing Phone Numbers:**
+**NEVER DO THIS - Exposing Phone Numbers:**
 ```sql
 SELECT I.[FirstName], I.[FamilyName], P.[PhoneNumber], P.[PhoneType]
 FROM [IndividualPhones] P
@@ -637,14 +637,14 @@ INNER JOIN [Individuals] I ON P.[IndividualId] = I.[Id]
 WHERE P.[IsPrimary] = 1;
 ```
 
-**❌ NEVER DO THIS - Creating Contact Lists:**
+**NEVER DO THIS - Creating Contact Lists:**
 ```sql
 SELECT [PhoneNumber] FROM [IndividualPhones] WHERE [PhoneType] = 0;  -- All mobile numbers
 ```
 
 ### Secure Query Patterns
 
-**✅ CORRECT - Phone Availability Statistics (No Actual Numbers):**
+**CORRECT - Phone Availability Statistics (No Actual Numbers):**
 ```sql
 SELECT
     C.[Name] AS [ClusterName],
@@ -660,7 +660,7 @@ GROUP BY C.[Name]
 HAVING COUNT(DISTINCT I.[Id]) >= 10;
 ```
 
-**✅ CORRECT - Phone Type Distribution:**
+**CORRECT - Phone Type Distribution:**
 ```sql
 SELECT
     CASE [PhoneType]
