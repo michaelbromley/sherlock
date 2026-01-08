@@ -4,6 +4,7 @@ on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -16,9 +17,6 @@ jobs:
           - os: macos-latest
             target: darwin-arm64
             bun_target: bun-darwin-arm64
-          - os: macos-13
-            target: darwin-x64
-            bun_target: bun-darwin-x64
           - os: ubuntu-latest
             target: linux-x64
             bun_target: bun-linux-x64
