@@ -193,10 +193,15 @@ export async function resolveConnection(
 
     // Handle SQLite
     if (config.type === DB_TYPES.SQLITE) {
-        const filename = config.filename || config.database || ':memory:';
+        const filename = config.filename || config.path || config.database || ':memory:';
+        // Bun.SQL requires file:// protocol for SQLite paths
+        let url = filename;
+        if (filename !== ':memory:' && !filename.startsWith('file:')) {
+            url = `file://${filename}`;
+        }
         return {
             type: DB_TYPES.SQLITE,
-            url: filename,
+            url,
         };
     }
 

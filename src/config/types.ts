@@ -27,6 +27,8 @@ export interface ConnectionConfig {
 
     /** Path to SQLite database file (for sqlite type) */
     filename?: string;
+    /** Alias for filename (for sqlite type) */
+    path?: string;
 }
 
 /**
