@@ -238,8 +238,12 @@ function setupCLI() {
             await withConnection(opts.connection, opts.config, async (sql, dbType) => {
                 const result = await executeQuery(sql, dbType, sqlQuery);
 
-                // Log the query and result (unless --no-log is specified)
-                if (opts.log !== false) {
+                // Log the query and result if enabled in connection config
+                // Logging is disabled by default for security (prod data protection)
+                // --no-log CLI flag can override to force logging off
+                const connConfig = getConnectionConfig(opts.connection, opts.config);
+                const loggingEnabled = connConfig.logging === true && opts.log !== false;
+                if (loggingEnabled) {
                     logQuery(opts.connection, sqlQuery, result);
                 }
 

@@ -184,11 +184,13 @@ export async function editConnectionWizard(): Promise<void> {
     const connName = selected as string;
     const existingConn = config.connections[connName];
 
+    const loggingStatus = existingConn.logging ? 'enabled' : 'disabled';
     const action = await p.select({
         message: `What would you like to do with "${connName}"?`,
         options: [
             { value: 'edit', label: 'Edit connection details' },
             { value: 'password', label: 'Update password' },
+            { value: 'logging', label: 'Toggle query logging', hint: `Currently ${loggingStatus}` },
             { value: 'delete', label: 'Delete connection', hint: 'Cannot be undone' },
         ],
     });
@@ -213,6 +215,15 @@ export async function editConnectionWizard(): Promise<void> {
             saveConfig(config);
             p.outro(`✓ Connection "${connName}" deleted.`);
         }
+        return;
+    }
+
+    if (action === 'logging') {
+        const newLogging = !existingConn.logging;
+        config.connections[connName].logging = newLogging;
+        saveConfig(config);
+        const status = newLogging ? 'enabled' : 'disabled';
+        p.outro(`✓ Query logging ${status} for "${connName}".`);
         return;
     }
 
@@ -340,6 +351,11 @@ async function promptForConnection(
                         if (!value) return 'File path is required';
                     },
                 }),
+            logging: () =>
+                p.confirm({
+                    message: 'Enable query logging?',
+                    initialValue: existingConfig?.logging ?? false,
+                }),
         });
 
         return {
@@ -347,6 +363,7 @@ async function promptForConnection(
             config: {
                 type: DB_TYPES.SQLITE,
                 filename: sqliteResult.filename as string,
+                logging: sqliteResult.logging as boolean,
             },
             password: '',
             storageMethod: 'env',
@@ -403,6 +420,11 @@ async function promptForConnection(
                         { value: 'env', label: 'Environment file', hint: '~/.config/sherlock/.env' },
                     ],
                 }),
+            logging: () =>
+                p.confirm({
+                    message: 'Enable query logging?',
+                    initialValue: existingConfig?.logging ?? false,
+                }),
         },
         {
             onCancel: () => {
@@ -421,6 +443,7 @@ async function promptForConnection(
             database: connResult.database as string,
             username: connResult.username as string,
             password: '', // Will be set based on storage method
+            logging: connResult.logging as boolean,
         },
         password: connResult.password as string,
         storageMethod: connResult.storageMethod as 'keychain' | 'env',

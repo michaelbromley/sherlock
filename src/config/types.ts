@@ -29,6 +29,9 @@ export interface ConnectionConfig {
     filename?: string;
     /** Alias for filename (for sqlite type) */
     path?: string;
+
+    /** Enable query logging for this connection (default: false) */
+    logging?: boolean;
 }
 
 /**

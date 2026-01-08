@@ -118,6 +118,7 @@ When the user asks a database question:
 - Explain your SQL queries to the user in plain language
 - If a query fails, explain why and suggest alternatives
 - Use aggregate functions (COUNT, SUM, AVG) for statistical queries
+- If you think a query might cause performance issues (CPU, memory usage on DB server), warn the user first
 
 ## Examples
 

@@ -108,13 +108,14 @@ Config lives at `~/.config/sherlock/config.json`:
       "username": { "$env": "PROD_DB_USER" },
       "password": { "$keychain": "prod-db" }
     },
-    "local-mysql": {
+    "local-dev": {
       "type": "mysql",
       "host": "localhost",
       "port": 3306,
       "database": "myapp",
       "username": { "$env": "LOCAL_DB_USER" },
-      "password": { "$env": "LOCAL_DB_PASS" }
+      "password": { "$env": "LOCAL_DB_PASS" },
+      "logging": true
     }
   }
 }
@@ -169,12 +170,36 @@ sherlock manage               # Connection manager menu
 ```bash
 -c, --connection <name>    # Required for DB commands
 --config <path>            # Override config file location
---no-log                   # Disable query logging
+--no-log                   # Disable query logging (overrides config)
 ```
 
 ## Query Logging
 
-By default, queries are logged to `~/.config/sherlock/logs/<connection>.md`. Disable with `--no-log`.
+Query logging is **disabled by default** to protect sensitive production data. When enabled, queries and results are logged to `~/.config/sherlock/logs/<connection>.md`.
+
+### Enabling Logging
+
+Enable logging per-connection in your config:
+
+```json
+{
+  "connections": {
+    "local-dev": {
+      "type": "postgres",
+      "logging": true
+    }
+  }
+}
+```
+
+Or toggle it via the interactive wizard:
+
+```bash
+sherlock edit
+# Select connection → Toggle query logging
+```
+
+The `--no-log` CLI flag can override to force logging off even if enabled in config.
 
 ## Claude Code Skill
 
