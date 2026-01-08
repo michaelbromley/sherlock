@@ -11,54 +11,70 @@ A read-only database query tool for AI assistants. Single binary, secure credent
 - **Multiple databases** - PostgreSQL, MySQL/MariaDB, SQLite
 - **Claude Code integration** - Works as a skill for AI-assisted database exploration
 
-## Installation
-
-### From Binary
-
-Download the latest release for your platform and add to your PATH:
-
-```bash
-# macOS / Linux
-chmod +x sherlock
-sudo mv sherlock /usr/local/bin/
-```
-
-### From Source (requires Bun 1.3+)
-
-```bash
-git clone <repo>
-cd db-tool
-bun install
-bun build ./src/query-db.ts --compile --outfile sherlock
-```
-
 ## Quick Start
 
-### 1. Set up your first connection
+### 1. Install
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/michaelbromley/sherlock/main/install.sh | bash
+```
+
+This installs the `sherlock` binary and the Claude Code skill.
+
+### 2. Set up a connection
 
 ```bash
 sherlock setup
 ```
 
-This interactive wizard will:
-- Create config at `~/.config/sherlock/config.json`
-- Store your password securely in the OS keychain
-- Test the connection
+The interactive wizard will guide you through:
+- Database type (PostgreSQL, MySQL, SQLite)
+- Connection details (host, port, database, credentials)
+- Secure password storage (OS keychain or env file)
 
-### 2. Query your database
+### 3. Use with Claude Code
+
+Once configured, just ask Claude Code questions about your data:
+
+> "Show me the top 10 customers by order value from prod-db"
+
+> "What tables are in the staging database?"
+
+> "How many users signed up last week?"
+
+Claude will use Sherlock to explore schemas and run queries on your behalf.
+
+---
+
+## Manual Installation
+
+### From Binary
+
+Download from [GitHub Releases](https://github.com/michaelbromley/sherlock/releases) and add to your PATH:
 
 ```bash
-# List tables
-sherlock -c mydb tables
+chmod +x sherlock
+mv sherlock ~/.local/bin/
+```
 
-# Describe a table
-sherlock -c mydb describe users
+### From Source (requires Bun 1.3+)
 
-# Run a query
+```bash
+git clone https://github.com/michaelbromley/sherlock
+cd sherlock
+bun install
+bun build ./src/query-db.ts --compile --outfile sherlock
+```
+
+## Commands
+
+### Query your database
+
+```bash
+sherlock -c mydb tables                         # List tables
+sherlock -c mydb describe users                 # Show table schema
 sherlock -c mydb query "SELECT * FROM users LIMIT 10"
-
-# Full schema introspection
-sherlock -c mydb introspect
+sherlock -c mydb introspect                     # Full schema dump (JSON)
 ```
 
 ## Configuration
@@ -147,7 +163,7 @@ By default, queries are logged to `~/.config/sherlock/logs/<connection>.md`. Dis
 
 ## Claude Code Skill
 
-Sherlock integrates with Claude Code as the `database-explorer` skill. Once configured, ask questions like:
+Sherlock integrates with Claude Code as the `sherlock` skill. Once configured, ask questions like:
 
 - "Show me the top 10 customers by order value"
 - "What's the schema of the users table?"

@@ -1,0 +1,139 @@
+#!/bin/bash
+set -e
+
+# Sherlock Installer
+# Usage: curl -fsSL https://raw.githubusercontent.com/michaelbromley/sherlock/main/install.sh | bash
+
+REPO="michaelbromley/sherlock"
+SKILL_DIR="$HOME/.claude/skills/sherlock"
+
+# Colors
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m' # No Color
+
+info() {
+    echo -e "${BLUE}==>${NC} $1"
+}
+
+success() {
+    echo -e "${GREEN}==>${NC} $1"
+}
+
+warn() {
+    echo -e "${YELLOW}==>${NC} $1"
+}
+
+error() {
+    echo -e "${RED}==>${NC} $1"
+    exit 1
+}
+
+# Detect platform
+detect_platform() {
+    local os arch
+
+    os=$(uname -s | tr '[:upper:]' '[:lower:]')
+    arch=$(uname -m)
+
+    case "$os" in
+        darwin)
+            case "$arch" in
+                arm64|aarch64)
+                    echo "darwin-arm64"
+                    ;;
+                x86_64)
+                    echo "darwin-x64"
+                    ;;
+                *)
+                    error "Unsupported architecture: $arch"
+                    ;;
+            esac
+            ;;
+        linux)
+            case "$arch" in
+                x86_64)
+                    echo "linux-x64"
+                    ;;
+                *)
+                    error "Unsupported architecture: $arch. Only x86_64 is supported on Linux."
+                    ;;
+            esac
+            ;;
+        *)
+            error "Unsupported operating system: $os"
+            ;;
+    esac
+}
+
+# Download file with curl or wget
+download() {
+    local url="$1"
+    local output="$2"
+
+    if command -v curl &> /dev/null; then
+        curl -fsSL "$url" -o "$output"
+    elif command -v wget &> /dev/null; then
+        wget -q "$url" -O "$output"
+    else
+        error "Neither curl nor wget found. Please install one of them."
+    fi
+}
+
+main() {
+    echo ""
+    echo "  🔍 Sherlock Installer"
+    echo "  ====================="
+    echo ""
+
+    # Detect platform
+    info "Detecting platform..."
+    PLATFORM=$(detect_platform)
+    success "Detected platform: $PLATFORM"
+
+    # Create skill directory
+    info "Creating skill directory..."
+    mkdir -p "$SKILL_DIR"
+
+    # Download binary
+    BINARY_URL="https://github.com/$REPO/releases/latest/download/sherlock-$PLATFORM"
+    info "Downloading sherlock binary..."
+
+    TEMP_FILE=$(mktemp)
+    if ! download "$BINARY_URL" "$TEMP_FILE"; then
+        rm -f "$TEMP_FILE"
+        error "Failed to download binary. Check your internet connection or if the release exists."
+    fi
+
+    # Install binary to skill directory
+    mv "$TEMP_FILE" "$SKILL_DIR/sherlock"
+    chmod +x "$SKILL_DIR/sherlock"
+    success "Installed binary to $SKILL_DIR/sherlock"
+
+    # Download skill
+    info "Downloading skill definition..."
+    SKILL_URL="https://raw.githubusercontent.com/$REPO/main/.claude/skills/sherlock/SKILL.md"
+    if download "$SKILL_URL" "$SKILL_DIR/SKILL.md"; then
+        success "Installed skill to $SKILL_DIR/SKILL.md"
+    else
+        warn "Failed to download skill file. You can manually copy it later."
+    fi
+
+    echo ""
+    success "Installation complete!"
+    echo ""
+    echo "  Installed to: $SKILL_DIR"
+    echo ""
+    echo "  Next steps:"
+    echo "  -----------"
+    echo "  1. Run '$SKILL_DIR/sherlock setup' to configure your database connections"
+    echo "  2. Use '/sherlock' in Claude Code to query your databases"
+    echo ""
+    echo "  To uninstall:"
+    echo "    rm -rf $SKILL_DIR"
+    echo ""
+}
+
+main "$@"

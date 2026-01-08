@@ -1,7 +1,7 @@
 #!/usr/bin/env tsx
 /* eslint-disable no-console */
 /**
- * Test suite for database-explorer skill
+ * Test suite for sherlock skill
  *
  * Tests all commands (tables, introspect, describe, query) for each configured database connection.
  * Run with: tsx src/db-query.spec.ts

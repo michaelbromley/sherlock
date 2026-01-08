@@ -10,8 +10,8 @@ output
 
 # Build artifacts
 dist/
-sherlock
-sherlock-*
+/sherlock
+/sherlock-*
 
 # Config files with credentials
 config.ts
