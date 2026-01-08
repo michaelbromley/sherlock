@@ -14,6 +14,19 @@ import {
     deleteKeychainPassword,
     hasKeychainPassword,
 } from './credentials/providers/keychain';
+import {
+    runSetupWizard,
+    addConnectionWizard,
+    editConnectionWizard,
+    connectionManagerMenu,
+} from './tui';
+import {
+    runDaemon,
+    isDaemonRunning,
+    getDaemonPid,
+    DaemonClient,
+    shouldUseDaemon,
+} from './daemon';
 
 /**
  * Prompt for password input (hidden)
@@ -155,6 +168,19 @@ function setupCLI() {
         .description('List all tables in the database')
         .action(async () => {
             const opts = program.opts();
+
+            // Use daemon if running
+            if (shouldUseDaemon()) {
+                try {
+                    const tables = await DaemonClient.tables(opts.connection);
+                    console.log(JSON.stringify({ tables }, null, 2));
+                    return;
+                } catch (error: any) {
+                    console.error(JSON.stringify({ error: error.message }));
+                    process.exit(1);
+                }
+            }
+
             await withConnection(opts.connection, opts.config, async (sql, dbType) => {
                 const tables = await getTables(sql, dbType);
                 console.log(JSON.stringify({ tables }, null, 2));
@@ -167,6 +193,19 @@ function setupCLI() {
         .description('Get schema information for all tables')
         .action(async () => {
             const opts = program.opts();
+
+            // Use daemon if running
+            if (shouldUseDaemon()) {
+                try {
+                    const result = await DaemonClient.introspect(opts.connection);
+                    console.log(JSON.stringify(result, null, 2));
+                    return;
+                } catch (error: any) {
+                    console.error(JSON.stringify({ error: error.message }));
+                    process.exit(1);
+                }
+            }
+
             await withConnection(opts.connection, opts.config, async (sql, dbType) => {
                 const result = await introspectSchema(sql, dbType);
                 console.log(JSON.stringify(result, null, 2));
@@ -179,6 +218,19 @@ function setupCLI() {
         .description('Describe a specific table schema')
         .action(async (tableName: string) => {
             const opts = program.opts();
+
+            // Use daemon if running
+            if (shouldUseDaemon()) {
+                try {
+                    const result = await DaemonClient.describe(tableName, opts.connection);
+                    console.log(JSON.stringify(result, null, 2));
+                    return;
+                } catch (error: any) {
+                    console.error(JSON.stringify({ error: error.message }));
+                    process.exit(1);
+                }
+            }
+
             await withConnection(opts.connection, opts.config, async (sql, dbType) => {
                 const result = await describeTable(sql, dbType, tableName);
                 console.log(JSON.stringify(result, null, 2));
@@ -197,6 +249,24 @@ function setupCLI() {
             if (validationError) {
                 console.error(JSON.stringify({ error: validationError }));
                 process.exit(1);
+            }
+
+            // Use daemon if running
+            if (shouldUseDaemon()) {
+                try {
+                    const result = await DaemonClient.query(sqlQuery, opts.connection);
+
+                    // Log the query and result (unless --no-log is specified)
+                    if (opts.log !== false) {
+                        logQuery(opts.connection, sqlQuery, result);
+                    }
+
+                    console.log(JSON.stringify(result, null, 2));
+                    return;
+                } catch (error: any) {
+                    console.error(JSON.stringify({ error: error.message }));
+                    process.exit(1);
+                }
             }
 
             await withConnection(opts.connection, opts.config, async (sql, dbType) => {
@@ -226,10 +296,42 @@ function setupCLI() {
             }
         });
 
-    // Init command
+    // Setup command (interactive wizard)
+    program
+        .command('setup')
+        .description('Interactive setup wizard')
+        .action(async () => {
+            await runSetupWizard();
+        });
+
+    // Manage command (interactive connection manager)
+    program
+        .command('manage')
+        .description('Interactive connection manager')
+        .action(async () => {
+            await connectionManagerMenu();
+        });
+
+    // Add connection (interactive)
+    program
+        .command('add')
+        .description('Add a new connection (interactive)')
+        .action(async () => {
+            await addConnectionWizard();
+        });
+
+    // Edit connection (interactive)
+    program
+        .command('edit')
+        .description('Edit an existing connection (interactive)')
+        .action(async () => {
+            await editConnectionWizard();
+        });
+
+    // Init command (non-interactive, creates template)
     program
         .command('init')
-        .description('Initialize Sherlock configuration')
+        .description('Create config template (non-interactive)')
         .action(async () => {
             await initConfig();
         });
@@ -243,6 +345,20 @@ function setupCLI() {
             const connName = connectionName || opts.connection;
 
             console.log(`Testing connection: ${connName}...`);
+
+            // Use daemon if running
+            if (shouldUseDaemon()) {
+                try {
+                    const result = await DaemonClient.test(connName);
+                    console.log(`\x1b[32m✓ Connection "${connName}" successful!\x1b[0m`);
+                    console.log(`  Type: ${result.type}`);
+                    return;
+                } catch (error: any) {
+                    console.error(`\x1b[31m✗ Connection "${connName}" failed\x1b[0m`);
+                    console.error(`  Error: ${error.message}`);
+                    process.exit(1);
+                }
+            }
 
             try {
                 const config = await resolveConnection(connName, opts.config);
@@ -337,6 +453,139 @@ function setupCLI() {
                     const status = hasPassword ? '\x1b[32m✓\x1b[0m' : '\x1b[31m✗\x1b[0m';
                     console.log(`  ${status} ${conn}`);
                 }
+            } catch (error: any) {
+                console.error(`Error: ${error.message}`);
+                process.exit(1);
+            }
+        });
+
+    // Daemon command group
+    const daemon = program
+        .command('daemon')
+        .description('Manage the Sherlock daemon (caches credentials)');
+
+    daemon
+        .command('start')
+        .description('Start the daemon (resolves credentials once, caches them)')
+        .option('-f, --foreground', 'Run in foreground (don\'t daemonize)')
+        .action(async (cmdOpts) => {
+            if (isDaemonRunning()) {
+                console.log('Daemon is already running (PID: ' + getDaemonPid() + ')');
+                return;
+            }
+
+            if (cmdOpts.foreground) {
+                // Run in foreground
+                await runDaemon();
+            } else {
+                // Fork to background using process.execPath which works for both
+                // bun run (returns bun binary) and compiled binary (returns the binary itself)
+                const { spawn } = await import('child_process');
+                const execPath = process.execPath;
+
+                // For bun run, we need to pass the script as first arg
+                // For compiled binary, we just pass the command directly
+                const isCompiledBinary = !process.argv[1]?.endsWith('.ts');
+                const args = isCompiledBinary
+                    ? ['daemon', 'start', '-f']
+                    : [process.argv[1], 'daemon', 'start', '-f'];
+
+                // Log output for debugging
+                const logPath = path.join(getConfigDir(), 'daemon.log');
+                const logFile = fs.openSync(logPath, 'a');
+
+                const child = spawn(execPath, args, {
+                    detached: true,
+                    stdio: ['ignore', logFile, logFile],
+                    env: process.env,
+                    cwd: process.cwd(),
+                });
+                child.unref();
+                fs.closeSync(logFile);
+
+                console.log('Daemon starting in background...');
+                console.log('Resolving credentials (this may prompt for keychain access)...');
+
+                // Poll for daemon readiness (up to 30 seconds for credential resolution)
+                const maxWait = 30000;
+                const pollInterval = 500;
+                let waited = 0;
+
+                while (waited < maxWait) {
+                    await new Promise(r => setTimeout(r, pollInterval));
+                    waited += pollInterval;
+
+                    if (isDaemonRunning()) {
+                        console.log(`\x1b[32m✓\x1b[0m Daemon started (PID: ${getDaemonPid()})`);
+                        console.log('\nCredentials are now cached. Commands will be faster!');
+                        return;
+                    }
+                }
+
+                // Check if process exited with error
+                console.error('\x1b[31m✗\x1b[0m Daemon did not start in time.');
+                console.error(`Check logs: ${logPath}`);
+                process.exit(1);
+            }
+        });
+
+    daemon
+        .command('stop')
+        .description('Stop the daemon')
+        .action(async () => {
+            if (!isDaemonRunning()) {
+                console.log('Daemon is not running');
+                return;
+            }
+
+            try {
+                await DaemonClient.shutdown();
+                console.log('\x1b[32m✓\x1b[0m Daemon stopped');
+            } catch (error: any) {
+                // If shutdown command fails, try to kill the process directly
+                const pid = getDaemonPid();
+                if (pid) {
+                    process.kill(pid, 'SIGTERM');
+                    console.log('\x1b[32m✓\x1b[0m Daemon stopped');
+                } else {
+                    console.error(`Error stopping daemon: ${error.message}`);
+                }
+            }
+        });
+
+    daemon
+        .command('status')
+        .description('Check if daemon is running')
+        .action(async () => {
+            if (isDaemonRunning()) {
+                const pid = getDaemonPid();
+                console.log(`\x1b[32m✓\x1b[0m Daemon is running (PID: ${pid})`);
+
+                try {
+                    const connections = await DaemonClient.listConnections();
+                    console.log(`\nCached connections: ${connections.join(', ')}`);
+                } catch {
+                    // Ignore errors
+                }
+            } else {
+                console.log('\x1b[31m✗\x1b[0m Daemon is not running');
+                console.log('\nStart it with: sherlock daemon start');
+            }
+        });
+
+    daemon
+        .command('reload')
+        .description('Reload credentials (re-reads config, may prompt for keychain)')
+        .action(async () => {
+            if (!isDaemonRunning()) {
+                console.log('Daemon is not running');
+                return;
+            }
+
+            try {
+                const result = await DaemonClient.reload();
+                console.log('\x1b[32m✓\x1b[0m ' + result.message);
+                console.log(`Connections: ${result.connections.join(', ')}`);
             } catch (error: any) {
                 console.error(`Error: ${error.message}`);
                 process.exit(1);
