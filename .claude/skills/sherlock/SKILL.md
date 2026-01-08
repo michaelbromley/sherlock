@@ -1,6 +1,8 @@
 ---
 name: sherlock
 description: Allows read-only access to SQL databases for querying and analysis using natural language
+allowed-tools: 
+   - Bash(~/.claude/skills/sherlock/sherlock:*)
 ---
 
 # Sherlock

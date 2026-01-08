@@ -82,6 +82,60 @@ download() {
     fi
 }
 
+# =============================================================================
+# WORKAROUND: Add sherlock to Claude Code allowed permissions
+# This is a workaround for: https://github.com/anthropics/claude-code/issues/14956
+# The SKILL.md allowed-tools frontmatter should handle this, but currently doesn't.
+# Once the bug is fixed, this section can be removed.
+# =============================================================================
+add_claude_permission() {
+    local PERMISSION='Bash(~/.claude/skills/sherlock/sherlock:*)'
+    local SETTINGS_FILE=""
+
+    # Check for settings file (settings.local.json takes precedence)
+    if [ -f "$HOME/.claude/settings.local.json" ]; then
+        SETTINGS_FILE="$HOME/.claude/settings.local.json"
+    elif [ -f "$HOME/.claude/settings.json" ]; then
+        SETTINGS_FILE="$HOME/.claude/settings.json"
+    fi
+
+    # If no settings file exists, nothing to do
+    if [ -z "$SETTINGS_FILE" ]; then
+        return 0
+    fi
+
+    # Check if jq is available
+    if ! command -v jq &> /dev/null; then
+        warn "jq not found - skipping automatic permission setup"
+        warn "You may need to manually allow sherlock in Claude Code settings"
+        return 0
+    fi
+
+    # Check if permission already exists
+    if jq -e ".permissions.allow | index(\"$PERMISSION\")" "$SETTINGS_FILE" > /dev/null 2>&1; then
+        # Permission already exists
+        return 0
+    fi
+
+    # Add permission to the allow array
+    local TEMP_SETTINGS=$(mktemp)
+    if jq ".permissions.allow += [\"$PERMISSION\"]" "$SETTINGS_FILE" > "$TEMP_SETTINGS" 2>/dev/null; then
+        mv "$TEMP_SETTINGS" "$SETTINGS_FILE"
+        info "Added sherlock to Claude Code allowed permissions"
+        echo ""
+        echo -e "  ${YELLOW}Note:${NC} Added permission to $SETTINGS_FILE"
+        echo "  This is a workaround for: https://github.com/anthropics/claude-code/issues/14956"
+        echo "  It allows sherlock to run without prompting for permission each time."
+        echo ""
+        return 0
+    else
+        rm -f "$TEMP_SETTINGS"
+        warn "Could not update Claude Code settings automatically"
+        warn "You may need to manually allow sherlock in Claude Code"
+        return 0
+    fi
+}
+
 main() {
     echo ""
     echo "  🔍 Sherlock Installer"
@@ -135,6 +189,9 @@ main() {
         chmod 600 "$SKILL_DIR/config.json"
         success "Created config.json (portable mode enabled)"
     fi
+
+    # Add permission to Claude Code settings (workaround for bug)
+    add_claude_permission
 
     # Get new version
     NEW_VERSION=$("$SKILL_DIR/sherlock" --version 2>/dev/null || echo "unknown")
