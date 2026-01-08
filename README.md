@@ -44,6 +44,21 @@ Once configured, just ask Claude Code questions about your data:
 
 Claude will use Sherlock to explore schemas and run queries on your behalf.
 
+## Upgrading
+
+Run the same install command to upgrade to the latest version:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/michaelbromley/sherlock/main/install.sh | bash
+```
+
+The installer will detect your existing installation, preserve your `config.json`, and show the version change:
+
+```
+==> Existing installation found (v0.0.1) - upgrading...
+==> Upgrade complete! (v0.0.1 -> v0.0.3)
+```
+
 ---
 
 ## Manual Installation

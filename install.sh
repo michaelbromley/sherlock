@@ -93,6 +93,14 @@ main() {
     PLATFORM=$(detect_platform)
     success "Detected platform: $PLATFORM"
 
+    # Check for existing installation
+    UPGRADING=false
+    if [ -f "$SKILL_DIR/sherlock" ]; then
+        UPGRADING=true
+        OLD_VERSION=$("$SKILL_DIR/sherlock" --version 2>/dev/null || echo "unknown")
+        info "Existing installation found (v$OLD_VERSION) - upgrading..."
+    fi
+
     # Create skill directory
     info "Creating skill directory..."
     mkdir -p "$SKILL_DIR"
@@ -128,25 +136,34 @@ main() {
         success "Created config.json (portable mode enabled)"
     fi
 
+    # Get new version
+    NEW_VERSION=$("$SKILL_DIR/sherlock" --version 2>/dev/null || echo "unknown")
+
     echo ""
-    success "Installation complete!"
+    if [ "$UPGRADING" = true ]; then
+        success "Upgrade complete! (v$OLD_VERSION -> v$NEW_VERSION)"
+    else
+        success "Installation complete! (v$NEW_VERSION)"
+    fi
     echo ""
     echo "  Installed to: $SKILL_DIR"
     echo ""
-    echo "  Next steps:"
-    echo "  -----------"
-    echo "  1. Run '$SKILL_DIR/sherlock setup' to configure your database connections"
-    echo "  2. Use '/sherlock' in Claude Code to query your databases"
-    echo ""
-    echo "  Tip: Add sherlock to your PATH for easier access:"
-    echo ""
-    echo "    # Add to ~/.zshrc or ~/.bashrc:"
-    echo "    export PATH=\"\$HOME/.claude/skills/sherlock:\$PATH\""
-    echo ""
-    echo "    # Then you can just run:"
-    echo "    sherlock setup"
-    echo "    sherlock -c mydb tables"
-    echo ""
+    if [ "$UPGRADING" = false ]; then
+        echo "  Next steps:"
+        echo "  -----------"
+        echo "  1. Run '$SKILL_DIR/sherlock setup' to configure your database connections"
+        echo "  2. Use '/sherlock' in Claude Code to query your databases"
+        echo ""
+        echo "  Tip: Add sherlock to your PATH for easier access:"
+        echo ""
+        echo "    # Add to ~/.zshrc or ~/.bashrc:"
+        echo "    export PATH=\"\$HOME/.claude/skills/sherlock:\$PATH\""
+        echo ""
+        echo "    # Then you can just run:"
+        echo "    sherlock setup"
+        echo "    sherlock -c mydb tables"
+        echo ""
+    fi
     echo "  To uninstall:"
     echo "    rm -rf $SKILL_DIR"
     echo ""
