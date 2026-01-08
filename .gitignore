@@ -7,3 +7,16 @@ seeds/**/*.sql
 # Data
 data
 output
+
+# Build artifacts
+dist/
+sherlock
+sherlock-*
+
+# Config files with credentials
+config.ts
+.sherlock.json
+.env
+
+# Bun
+bun.lockb

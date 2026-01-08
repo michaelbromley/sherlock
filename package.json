@@ -1,23 +1,33 @@
 {
-  "name": "db-tool",
-  "version": "1.0.0",
-  "description": "Tooling to allow AI-assisted DB interactions",
-  "main": "index.js",
+  "name": "sherlock",
+  "version": "2.0.0",
+  "description": "Database query tool with read-only access - a database detective",
+  "type": "module",
+  "main": "src/query-db.ts",
+  "bin": {
+    "sherlock": "./src/query-db.ts"
+  },
   "scripts": {
-    "test": "tsx src/db-query.spec.ts",
+    "start": "bun run src/query-db.ts",
+    "test": "bun test",
+    "build": "bun build ./src/query-db.ts --compile --outfile sherlock",
+    "build:all": "npm run build:macos-arm64 && npm run build:macos-x64 && npm run build:linux-x64",
+    "build:macos-arm64": "bun build ./src/query-db.ts --compile --target=bun-darwin-arm64 --outfile dist/sherlock-macos-arm64",
+    "build:macos-x64": "bun build ./src/query-db.ts --compile --target=bun-darwin-x64 --outfile dist/sherlock-macos-x64",
+    "build:linux-x64": "bun build ./src/query-db.ts --compile --target=bun-linux-x64 --outfile dist/sherlock-linux-x64",
+    "build:windows": "bun build ./src/query-db.ts --compile --target=bun-windows-x64 --outfile dist/sherlock-windows.exe",
     "setup:demo": "bash scripts/download-chinook.sh"
   },
   "author": "Michael Bromley",
   "license": "MIT",
   "dependencies": {
-    "@types/node": "^24.10.0",
-    "better-sqlite3": "^12.4.1",
-    "commander": "^14.0.2",
-    "dotenv": "^17.2.3",
-    "mysql2": "^3.15.3",
-    "pg": "^8.16.3",
-    "tsx": "^4.20.6",
-    "typeorm": "^0.3.27",
+    "commander": "^14.0.2"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
     "typescript": "^5.9.3"
+  },
+  "engines": {
+    "bun": ">=1.2.0"
   }
 }
