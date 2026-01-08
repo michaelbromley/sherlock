@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.3] - 2025-01-08
+
+### Added
+
+- Portable mode: config, logs, and binary all stored in `~/.claude/skills/sherlock/`
+- SQLite config now accepts `path` as alias for `filename`
+- Install script creates empty config.json to enable portable mode
+- Install script shows tip for adding sherlock to PATH
+
+### Fixed
+
+- SQLite connections now work correctly (added required `file://` protocol prefix for Bun.SQL)
+- Version command now reads from package.json instead of hardcoded value
+
 ## [0.0.1] - 2025-01-08
 
 ### Added
