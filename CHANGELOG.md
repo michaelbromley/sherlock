@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.4] - 2025-01-08
+
+### Added
+
+- Install script detects existing installations and shows version transition on upgrade
+- Install script automatically adds sherlock to Claude Code allowed permissions
+  - Workaround for [claude-code#14956](https://github.com/anthropics/claude-code/issues/14956)
+- Upgrade documentation in README
+
+### Changed
+
+- Install script skips "Next steps" and PATH tip when upgrading (user already knows)
+
 ## [0.0.3] - 2025-01-08
 
 ### Added
