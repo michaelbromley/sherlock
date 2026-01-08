@@ -12,9 +12,35 @@ function getCacheKey(service: string, account: string): string {
 }
 
 /**
+ * SECURITY: Validate that a string is safe for use in shell commands
+ * Only allows alphanumeric, hyphens, underscores, and dots
+ */
+function validateShellSafeString(value: string, fieldName: string): void {
+    if (!/^[a-zA-Z0-9_.-]+$/.test(value)) {
+        throw new Error(
+            `Invalid ${fieldName}: "${value}". ` +
+            `Only letters, numbers, hyphens, underscores, and dots are allowed.`
+        );
+    }
+}
+
+/**
+ * SECURITY: Escape a string for use in shell single quotes
+ * Single quotes are safest - only need to handle the quote itself
+ */
+function shellEscape(value: string): string {
+    // Replace single quotes with '\'' (end quote, escaped quote, start quote)
+    return `'${value.replace(/'/g, "'\\''")}'`;
+}
+
+/**
  * Get password using macOS security command (single prompt)
  */
 function getPasswordViaSecurity(service: string, account: string): string | null {
+    // SECURITY: Validate inputs before using in shell command
+    validateShellSafeString(service, 'service');
+    validateShellSafeString(account, 'account');
+
     if (process.platform !== 'darwin') {
         // Fall back to @napi-rs/keyring for non-macOS
         const { Entry } = require('@napi-rs/keyring');
@@ -25,7 +51,7 @@ function getPasswordViaSecurity(service: string, account: string): string | null
     try {
         // Use -w flag to only output the password
         const result = execSync(
-            `security find-generic-password -s "${service}" -a "${account}" -w`,
+            `security find-generic-password -s ${shellEscape(service)} -a ${shellEscape(account)} -w`,
             { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] }
         );
         return result.trim();
@@ -38,6 +64,10 @@ function getPasswordViaSecurity(service: string, account: string): string | null
  * Set password using macOS security command
  */
 function setPasswordViaSecurity(service: string, account: string, password: string): void {
+    // SECURITY: Validate inputs before using in shell command
+    validateShellSafeString(service, 'service');
+    validateShellSafeString(account, 'account');
+
     if (process.platform !== 'darwin') {
         const { Entry } = require('@napi-rs/keyring');
         const entry = new Entry(service, account);
@@ -48,7 +78,7 @@ function setPasswordViaSecurity(service: string, account: string, password: stri
     // Delete existing entry first (ignore errors if it doesn't exist)
     try {
         execSync(
-            `security delete-generic-password -s "${service}" -a "${account}"`,
+            `security delete-generic-password -s ${shellEscape(service)} -a ${shellEscape(account)}`,
             { stdio: ['pipe', 'pipe', 'pipe'] }
         );
     } catch {
@@ -56,8 +86,9 @@ function setPasswordViaSecurity(service: string, account: string, password: stri
     }
 
     // Add new entry with -A flag to allow any app access (avoids repeated prompts)
+    // Password is properly escaped with single quotes
     execSync(
-        `security add-generic-password -s "${service}" -a "${account}" -w "${password.replace(/"/g, '\\"')}" -A`,
+        `security add-generic-password -s ${shellEscape(service)} -a ${shellEscape(account)} -w ${shellEscape(password)} -A`,
         { stdio: ['pipe', 'pipe', 'pipe'] }
     );
 }
@@ -66,6 +97,10 @@ function setPasswordViaSecurity(service: string, account: string, password: stri
  * Delete password using macOS security command
  */
 function deletePasswordViaSecurity(service: string, account: string): void {
+    // SECURITY: Validate inputs before using in shell command
+    validateShellSafeString(service, 'service');
+    validateShellSafeString(account, 'account');
+
     if (process.platform !== 'darwin') {
         const { Entry } = require('@napi-rs/keyring');
         const entry = new Entry(service, account);
@@ -75,7 +110,7 @@ function deletePasswordViaSecurity(service: string, account: string): void {
 
     try {
         execSync(
-            `security delete-generic-password -s "${service}" -a "${account}"`,
+            `security delete-generic-password -s ${shellEscape(service)} -a ${shellEscape(account)}`,
             { stdio: ['pipe', 'pipe', 'pipe'] }
         );
     } catch {

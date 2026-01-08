@@ -333,14 +333,10 @@ function setupCLI() {
     keychain
         .command('set <account>')
         .description('Store a password in the keychain')
-        .option('-p, --password <password>', 'password (will prompt if not provided)')
-        .action(async (account: string, cmdOpts) => {
-            let password = cmdOpts.password;
-
-            if (!password) {
-                // Prompt for password securely
-                password = await promptPassword(`Enter password for "${account}": `);
-            }
+        .action(async (account: string) => {
+            // SECURITY: Always prompt for password - never accept via CLI args
+            // This prevents passwords from appearing in shell history
+            const password = await promptPassword(`Enter password for "${account}": `);
 
             if (!password) {
                 console.error('No password provided');
@@ -428,9 +424,16 @@ async function describeTable(
     dbType: string,
     tableName: string
 ): Promise<any> {
+    // SECURITY: Validate table name against actual tables to prevent SQL injection
+    const validTables = await getTables(sql, dbType);
+    if (!validTables.includes(tableName)) {
+        throw new Error(`Table "${tableName}" not found. Use 'sherlock tables' to list available tables.`);
+    }
+
     let query: string;
 
     if (dbType === 'postgres') {
+        // Table name is now validated - safe to interpolate
         query = `
             SELECT
                 column_name,
@@ -445,7 +448,7 @@ async function describeTable(
     } else if (dbType === 'sqlite') {
         query = `PRAGMA table_info(\`${tableName}\`)`;
     } else {
-        // MySQL - needs backticks for reserved keywords
+        // MySQL
         query = `DESCRIBE \`${tableName}\``;
     }
 
