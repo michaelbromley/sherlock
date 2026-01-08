@@ -218,6 +218,23 @@ bun build ./src/query-db.ts --compile --target=bun-darwin-arm64 --outfile sherlo
 bun build ./src/query-db.ts --compile --target=bun-linux-x64 --outfile sherlock-linux-x64
 ```
 
+## Releasing a New Version
+
+1. Update the version in `package.json`
+2. Add release notes to `CHANGELOG.md`
+3. Commit the changes:
+   ```bash
+   git add package.json CHANGELOG.md
+   git commit -m "Bump version to X.Y.Z"
+   ```
+4. Tag and push:
+   ```bash
+   git tag vX.Y.Z
+   git push origin main --tags
+   ```
+
+The GitHub Actions workflow will automatically build binaries for all platforms and create a release.
+
 ## License
 
 MIT

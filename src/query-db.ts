@@ -22,6 +22,7 @@ import {
     connectionManagerMenu,
 } from './tui';
 import { validateReadOnlyQuery } from './query-validation';
+import pkg from '../package.json';
 
 /** Maximum rows to include in query logs (truncate larger results) */
 const MAX_LOG_ROWS = 10;
@@ -159,7 +160,7 @@ function setupCLI() {
     program
         .name('sherlock')
         .description('Database query tool with read-only access')
-        .version('2.0.0');
+        .version(pkg.version);
 
     // Global options
     program
