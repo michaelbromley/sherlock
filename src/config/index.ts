@@ -118,7 +118,7 @@ function loadLegacyConfig(configPath: string): SherlockConfig {
  * Get a specific connection configuration
  */
 export function getConnectionConfig(
-    connectionName: string = 'default',
+    connectionName: string,
     configPath?: string
 ): ConnectionConfig {
     const config = loadConfigFile(configPath);
@@ -161,7 +161,7 @@ function buildConnectionUrl(
  * Resolve a connection config to a fully resolved config with connection URL
  */
 export async function resolveConnection(
-    connectionName: string = 'default',
+    connectionName: string,
     configPath?: string
 ): Promise<ResolvedConnectionConfig> {
     const config = getConnectionConfig(connectionName, configPath);

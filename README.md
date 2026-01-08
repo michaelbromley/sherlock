@@ -1,235 +1,207 @@
-# Database Explorer Tool
+# Sherlock
 
-A database introspection and query tool designed to help AI assistants like Claude Code interact with SQL databases 
-using natural language. This tool provides read-only access to databases, enabling schema exploration, 
-data analysis, and complex SQL query generation.
+A read-only database query tool for AI assistants. Single binary, secure credential management, works with PostgreSQL, MySQL, and SQLite.
 
 ## Features
 
-- **Read-only access**: Safe database exploration with enforced read-only operations
-- **Multiple database support**: MySQL/MariaDB, PostgreSQL, and SQLite
-- **Named connections**: Define and switch between multiple database connections
-- **Schema introspection**: Explore database structure and relationships
-- **Natural language queries**: AI assistants can convert natural language to SQL
-- **Claude Code skill**: Integrated as a skill for seamless AI interaction
+- **Single binary** - 57MB standalone executable, no runtime dependencies
+- **Secure credentials** - OS keychain or environment variables, never plaintext in config
+- **Read-only enforced** - Only SELECT, SHOW, DESCRIBE, EXPLAIN queries allowed
+- **Explicit connections** - Must specify which database to query (no accidental production queries)
+- **Multiple databases** - PostgreSQL, MySQL/MariaDB, SQLite
+- **Claude Code integration** - Works as a skill for AI-assisted database exploration
+
+## Installation
+
+### From Binary
+
+Download the latest release for your platform and add to your PATH:
+
+```bash
+# macOS / Linux
+chmod +x sherlock
+sudo mv sherlock /usr/local/bin/
+```
+
+### From Source (requires Bun 1.3+)
+
+```bash
+git clone <repo>
+cd db-tool
+bun install
+bun build ./src/query-db.ts --compile --outfile sherlock
+```
 
 ## Quick Start
 
-Install dependencies
+### 1. Set up your first connection
 
 ```bash
-npm install
+sherlock setup
 ```
 
-Add your database details to `config.ts` as the default connection:
+This interactive wizard will:
+- Create config at `~/.config/sherlock/config.json`
+- Store your password securely in the OS keychain
+- Test the connection
 
-```ts
-import { DataSourceOptions } from 'typeorm';
-
-export const connections: Record<string, DataSourceOptions> = {
-    // Default connection (used when --connection is not specified)
-    default: {
-        type: 'mysql',
-        host: 'localhost',
-        port: 3306,
-        username: 'root',
-        password: 'password',
-        database: 'my_database',
-    },
-    // ...
-}
-```
-
-Run Claude Code and use the `database-explorer` skill:
-
-```
-Create a report of sales from the past month
-```
-
-## Testing with Demo Database
-
-To try out the db-tool with some sample data, use the included Docker setup and Chinook sample database:
+### 2. Query your database
 
 ```bash
-# 1. Install dependencies
-npm install
+# List tables
+sherlock -c mydb tables
 
-# 2. Download Chinook sample database
-npm run setup:demo
+# Describe a table
+sherlock -c mydb describe users
 
-# 3. Start Docker databases
-docker-compose up -d
+# Run a query
+sherlock -c mydb query "SELECT * FROM users LIMIT 10"
 
-# 5. Try some queries!
-tsx src/query-db.ts tables
-tsx src/query-db.ts query "SELECT * FROM Artist LIMIT 5"
+# Full schema introspection
+sherlock -c mydb introspect
 ```
-
-The [Chinook database](https://github.com/lerocha/chinook-database) represents a digital media store with artists, albums, tracks, customers, invoices, and more.
 
 ## Configuration
 
-The tool uses a `config.ts` file in the project root to define named database connections. Each connection has a unique name and TypeORM DataSourceOptions.
+Config lives at `~/.config/sherlock/config.json`:
 
-### Example Configuration
-
-```typescript
-import { DataSourceOptions } from 'typeorm';
-
-export const connections: Record<string, DataSourceOptions> = {
-    // Default connection (used when --connection is not specified)
-    default: {
-        type: 'mysql',
-        host: 'localhost',
-        port: 3306,
-        username: 'root',
-        password: 'password',
-        database: 'my_database',
+```json
+{
+  "version": "2.0",
+  "connections": {
+    "prod-db": {
+      "type": "postgres",
+      "host": "prod.example.com",
+      "port": 5432,
+      "database": "myapp",
+      "username": { "$env": "PROD_DB_USER" },
+      "password": { "$keychain": "prod-db" }
     },
-
-    // Production database
-    production: {
-        type: 'postgres',
-        host: 'prod.example.com',
-        port: 5432,
-        username: 'readonly_user',
-        password: 'secure_password',
-        database: 'prod_db',
-    },
-};
+    "local-mysql": {
+      "type": "mysql",
+      "host": "localhost",
+      "port": 3306,
+      "database": "myapp",
+      "username": { "$env": "LOCAL_DB_USER" },
+      "password": { "$env": "LOCAL_DB_PASS" }
+    }
+  }
+}
 ```
 
-### Connection Names
+### Credential Sources
 
-- A connection named `default` will be used when the `--connection` flag is not specified
-- Use any naming convention you prefer (e.g., 'production', 'staging', 'my-db')
-- Switch between connections using the `--connection` or `-c` flag
+Credentials can come from:
 
-## Usage
+| Source | Config syntax | Notes |
+|--------|--------------|-------|
+| Environment variable | `{ "$env": "VAR_NAME" }` | Also reads from `~/.config/sherlock/.env` |
+| OS Keychain | `{ "$keychain": "account-name" }` | macOS Keychain, Windows Credential Manager, Linux Secret Service |
 
-All commands are executed via the `query-db.ts` script using tsx:
+### Managing Keychain Credentials
 
 ```bash
-# list all tables
-tsx src/query-db.ts --connection production tables
+# Store a password
+sherlock keychain set prod-db
 
-# introspect entire schema
-tsx src/query-db.ts introspect
+# Check which connections have keychain passwords
+sherlock keychain list
 
-# introspect single table
-tsx src/query-db.ts describe users
-
-# run SQL query
-tsx src/query-db.ts query "SELECT * FROM users LIMIT 10"
+# Delete a password
+sherlock keychain delete prod-db
 ```
 
-### Command-Line Flags
+## Commands
 
-All commands support the following optional flags:
-
-- **`--connection <name>`** or **`-c <name>`**: Specify which database connection to use (from `config.ts`)
-  - If not specified, the `default` connection is used
-  - Example: `tsx src/query-db.ts --connection production tables`
-
-- **`--no-log`**: Disable query logging to the `output/logs` directory
-  - By default, all queries and their results are logged to `output/logs/<connection_name>.md`
-  - Use this flag to prevent logging (useful for tests or sensitive queries)
-  - Example: `tsx src/query-db.ts --no-log query "SELECT * FROM users"`
-
-### Query Logging
-
-By default, all executed queries and their results are automatically logged to connection-specific markdown files in the `output/logs` directory:
-
-- **Log location**: `output/logs/<connection_name>.md`
-- **Log format**: Markdown with timestamp, SQL query, and JSON results
-- **Disable logging**: Use the `--no-log` flag
-
-## Supported Databases
-
-- **MySQL / MariaDB**: Full support with proper table and column introspection
-- **PostgreSQL**: Full support including schema-aware queries
-- **SQLite**: Full support via better-sqlite3
-
-## Demo Databases (Docker)
-
-This project includes a Docker Compose setup with MySQL and PostgreSQL databases pre-populated with the [Chinook sample database](https://github.com/lerocha/chinook-database).
-
-This makes it perfect for testing queries like:
-- "Show me the top 10 best-selling tracks"
-- "What are the total sales by country?"
-- "Which artists have the most albums?"
-
-See [CHINOOK.md](./CHINOOK.md) for a complete schema reference with example queries.
-
-### Setting Up Demo Databases
+### Database Commands (require `-c <connection>`)
 
 ```bash
-# 1. Download the Chinook SQL files
-npm run setup:demo
-
-# 2. Start the Docker containers
-docker-compose up -d
-
-# 3. Verify databases are running
-docker-compose ps
-
-# 4. Test the connection
-tsx src/query-db.ts tables
-tsx src/query-db.ts --connection chinook-postgres tables
-
-# Or run the verification script
-npm run verify:docker
+sherlock -c <conn> tables              # List all tables
+sherlock -c <conn> describe <table>    # Show table schema
+sherlock -c <conn> introspect          # Full schema dump (JSON)
+sherlock -c <conn> query "SELECT ..."  # Execute read-only query
 ```
+
+### Management Commands
+
+```bash
+sherlock connections          # List configured connections
+sherlock test <connection>    # Test a connection
+sherlock setup                # Interactive setup wizard
+sherlock add                  # Add a new connection (interactive)
+sherlock edit                 # Edit/delete connections (interactive)
+sherlock manage               # Connection manager menu
+```
+
+### Options
+
+```bash
+-c, --connection <name>    # Required for DB commands
+--config <path>            # Override config file location
+--no-log                   # Disable query logging
+```
+
+## Query Logging
+
+By default, queries are logged to `~/.config/sherlock/logs/<connection>.md`. Disable with `--no-log`.
 
 ## Claude Code Skill
 
-This tool includes a Claude Code skill for seamless AI interaction. The skill enables Claude to:
-- Convert natural language questions into SQL queries
-- Explore database schemas automatically
-- Generate reports and insights from data
-- Suggest optimizations and explain query results
+Sherlock integrates with Claude Code as the `database-explorer` skill. Once configured, ask questions like:
 
-### Using the Skill
+- "Show me the top 10 customers by order value"
+- "What's the schema of the users table?"
+- "How many orders were placed last month?"
 
-Once configured, Claude Code can automatically use this skill when you ask database-related questions:
+Claude will use Sherlock to introspect schemas and run queries.
 
-```
-"How many users signed up last month?"
-"Show me the top 10 products by revenue"
-"What's the average order value for customers in California?"
-```
+## Demo Database
 
-Claude will automatically introspect the schema, formulate appropriate SQL queries, and present the results in a user-friendly format.
-
-## Tests
+Test with the included Chinook sample database:
 
 ```bash
-docker compose up -d # start the demo database containers
-tsx src/db-query.spec.ts # run the tests
+# Download sample data and start Docker containers
+bun run setup:demo
+docker-compose up -d
+
+# Add the demo connection
+sherlock setup  # or manually add to config
+
+# Try some queries
+sherlock -c chinook tables
+sherlock -c chinook query "SELECT Name FROM Artist LIMIT 5"
 ```
 
-## Security Considerations
+## Security
 
-- **Credentials**: The `config.ts` file is excluded from git (via `.gitignore`) to prevent committing credentials
-- **Read-only access**: Use database users with read-only permissions
-- **Query validation**: All queries are validated before execution
-- **Connection strings**: Never commit connection strings with real credentials
-- **Production access**: Consider using read-only replicas for production database access
+- **Read-only enforced** - INSERT, UPDATE, DELETE, DROP etc. are blocked
+- **No default connection** - Must explicitly specify `-c` to prevent accidents
+- **Secure credential storage** - Keychain or env vars, never plaintext
+- **Config permissions** - Files created with 0600 (owner read/write only)
+- **Query validation** - Dangerous keywords blocked even in subqueries
 
-For safety, the tool enforces read-only operations. Only the following query types are allowed:
+### Allowed Query Types
+
 - `SELECT`
 - `SHOW`
 - `DESCRIBE`
 - `EXPLAIN`
+- `WITH` (CTEs)
 
-Any attempt to execute `INSERT`, `UPDATE`, `DELETE`, or DDL statements will be rejected with an error.
+## Building
 
-## Contributing
+```bash
+# Development
+bun run src/query-db.ts -c mydb tables
 
-Contributions are welcome! Please feel free to submit issues or pull requests.
+# Build binary
+bun build ./src/query-db.ts --compile --outfile sherlock
+
+# Cross-platform builds
+bun build ./src/query-db.ts --compile --target=bun-darwin-arm64 --outfile sherlock-macos-arm64
+bun build ./src/query-db.ts --compile --target=bun-linux-x64 --outfile sherlock-linux-x64
+```
 
 ## License
 
 MIT
-
-

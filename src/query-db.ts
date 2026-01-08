@@ -151,7 +151,7 @@ function setupCLI() {
 
     // Global options
     program
-        .option('-c, --connection <name>', 'database connection name from config', 'default')
+        .option('-c, --connection <name>', 'database connection name from config (required for DB commands)')
         .option('--config <path>', 'path to config file')
         .option('--no-log', 'disable query logging');
 
@@ -161,6 +161,10 @@ function setupCLI() {
         .description('List all tables in the database')
         .action(async () => {
             const opts = program.opts();
+            if (!opts.connection) {
+                console.error('Error: --connection (-c) is required. Specify which database to use.');
+                process.exit(1);
+            }
             await withConnection(opts.connection, opts.config, async (sql, dbType) => {
                 const tables = await getTables(sql, dbType);
                 console.log(JSON.stringify({ tables }, null, 2));
@@ -173,6 +177,10 @@ function setupCLI() {
         .description('Get schema information for all tables')
         .action(async () => {
             const opts = program.opts();
+            if (!opts.connection) {
+                console.error('Error: --connection (-c) is required. Specify which database to use.');
+                process.exit(1);
+            }
             await withConnection(opts.connection, opts.config, async (sql, dbType) => {
                 const result = await introspectSchema(sql, dbType);
                 console.log(JSON.stringify(result, null, 2));
@@ -185,6 +193,10 @@ function setupCLI() {
         .description('Describe a specific table schema')
         .action(async (tableName: string) => {
             const opts = program.opts();
+            if (!opts.connection) {
+                console.error('Error: --connection (-c) is required. Specify which database to use.');
+                process.exit(1);
+            }
             await withConnection(opts.connection, opts.config, async (sql, dbType) => {
                 const result = await describeTable(sql, dbType, tableName);
                 console.log(JSON.stringify(result, null, 2));
@@ -197,6 +209,11 @@ function setupCLI() {
         .description('Execute a read-only SQL query')
         .action(async (sqlQuery: string) => {
             const opts = program.opts();
+
+            if (!opts.connection) {
+                console.error('Error: --connection (-c) is required. Specify which database to use.');
+                process.exit(1);
+            }
 
             // Enforce read-only with comprehensive validation
             const validationError = validateReadOnlyQuery(sqlQuery);
@@ -274,16 +291,15 @@ function setupCLI() {
 
     // Test connection command
     program
-        .command('test [connectionName]')
+        .command('test <connectionName>')
         .description('Test a database connection')
-        .action(async (connectionName?: string) => {
+        .action(async (connectionName: string) => {
             const opts = program.opts();
-            const connName = connectionName || opts.connection;
 
-            console.log(`Testing connection: ${connName}...`);
+            console.log(`Testing connection: ${connectionName}...`);
 
             try {
-                const config = await resolveConnection(connName, opts.config);
+                const config = await resolveConnection(connectionName, opts.config);
                 const sql = createConnection(config);
 
                 // Simple query to test connection
@@ -291,10 +307,10 @@ function setupCLI() {
                 await sql.unsafe(testQuery);
                 sql.close();
 
-                console.log(`\x1b[32m✓ Connection "${connName}" successful!\x1b[0m`);
+                console.log(`\x1b[32m✓ Connection "${connectionName}" successful!\x1b[0m`);
                 console.log(`  Type: ${config.type}`);
             } catch (error: any) {
-                console.error(`\x1b[31m✗ Connection "${connName}" failed\x1b[0m`);
+                console.error(`\x1b[31m✗ Connection "${connectionName}" failed\x1b[0m`);
                 console.error(`  Error: ${error.message}`);
                 process.exit(1);
             }
@@ -574,21 +590,21 @@ async function initConfig(): Promise<void> {
     const exampleConfig = {
         version: '2.0',
         connections: {
-            default: {
+            'myapp-prod': {
                 type: 'postgres',
                 host: 'localhost',
                 port: 5432,
-                database: 'mydb',
-                username: { $env: 'SHERLOCK_DEFAULT_USERNAME' },
-                password: { $env: 'SHERLOCK_DEFAULT_PASSWORD' },
+                database: 'myapp',
+                username: { $env: 'SHERLOCK_MYAPP_PROD_USERNAME' },
+                password: { $env: 'SHERLOCK_MYAPP_PROD_PASSWORD' },
             },
-            example_mysql: {
-                type: 'mysql',
+            'myapp-staging': {
+                type: 'postgres',
                 host: 'localhost',
-                port: 3306,
-                database: 'mydb',
-                username: { $env: 'SHERLOCK_EXAMPLE_MYSQL_USERNAME' },
-                password: { $env: 'SHERLOCK_EXAMPLE_MYSQL_PASSWORD' },
+                port: 5432,
+                database: 'myapp_staging',
+                username: { $env: 'SHERLOCK_MYAPP_STAGING_USERNAME' },
+                password: { $env: 'SHERLOCK_MYAPP_STAGING_PASSWORD' },
             },
         },
     };
@@ -600,13 +616,13 @@ async function initConfig(): Promise<void> {
     const exampleEnv = `# Sherlock Database Credentials
 # Set your database credentials here
 
-# Default connection
-SHERLOCK_DEFAULT_USERNAME=your_username
-SHERLOCK_DEFAULT_PASSWORD=your_password
+# Production database
+SHERLOCK_MYAPP_PROD_USERNAME=your_username
+SHERLOCK_MYAPP_PROD_PASSWORD=your_password
 
-# Example MySQL connection
-SHERLOCK_EXAMPLE_MYSQL_USERNAME=your_username
-SHERLOCK_EXAMPLE_MYSQL_PASSWORD=your_password
+# Staging database
+SHERLOCK_MYAPP_STAGING_USERNAME=your_username
+SHERLOCK_MYAPP_STAGING_PASSWORD=your_password
 `;
 
     fs.writeFileSync(envPath, exampleEnv, 'utf-8');
@@ -619,9 +635,10 @@ Env file created at: ${envPath}
 
 Next steps:
 1. Edit ${configPath} to add your database connections
-2. Set your credentials in ${envPath} or as environment variables
-3. Run 'sherlock connections' to verify your setup
-4. Run 'sherlock tables' to list tables in your database
+2. Set your credentials in ${envPath} or use 'sherlock keychain set <name>'
+3. Run 'sherlock connections' to list configured connections
+4. Run 'sherlock test <connection>' to verify a connection
+5. Run 'sherlock -c <connection> tables' to list tables
 `);
 }
 
