@@ -4,10 +4,11 @@ import { SQL } from 'bun';
 import { Command } from 'commander';
 import * as fs from 'fs';
 import * as path from 'path';
-import * as readline from 'readline';
+import * as p from '@clack/prompts';
 import { resolveConnection, listConnections, getConnectionConfig } from './config';
 import { getLogsDir, ensureLogsDir, getConfigDir, ensureConfigDir } from './config/paths';
-import type { ResolvedConnectionConfig } from './config/types';
+import type { ResolvedConnectionConfig, ConnectionConfig } from './config/types';
+import { DB_TYPES, TEST_QUERIES, type DbType } from './db-types';
 import {
     setKeychainPassword,
     getKeychainPassword,
@@ -20,70 +21,89 @@ import {
     editConnectionWizard,
     connectionManagerMenu,
 } from './tui';
+import { validateReadOnlyQuery } from './query-validation';
+
+/** Maximum rows to include in query logs (truncate larger results) */
+const MAX_LOG_ROWS = 10;
+
+/** File permissions for sensitive config files (owner read/write only) */
+const SECURE_FILE_MODE = 0o600;
+
+/** Set secure permissions on a file (no-op on Windows) */
+function setSecurePermissions(filePath: string): void {
+    if (process.platform !== 'win32') {
+        fs.chmodSync(filePath, SECURE_FILE_MODE);
+    }
+}
+
+/** Result from executing a query */
+interface QueryResult {
+    rowCount?: number;
+    rows?: unknown[];
+    error?: string;
+}
+
+/** Schema introspection result */
+interface SchemaInfo {
+    [tableName: string]: {
+        columns: unknown[];
+    };
+}
+
+/** Narrowed error type with message */
+interface ErrorWithMessage {
+    message: string;
+    stack?: string;
+}
+
+function isErrorWithMessage(error: unknown): error is ErrorWithMessage {
+    return (
+        typeof error === 'object' &&
+        error !== null &&
+        'message' in error &&
+        typeof (error as ErrorWithMessage).message === 'string'
+    );
+}
+
+function getErrorMessage(error: unknown): string {
+    if (isErrorWithMessage(error)) {
+        return error.message;
+    }
+    return String(error);
+}
 
 /**
  * Prompt for password input (hidden)
  */
-async function promptPassword(prompt: string): Promise<string> {
-    return new Promise((resolve) => {
-        const rl = readline.createInterface({
-            input: process.stdin,
-            output: process.stdout,
-        });
-
-        // Hide input
-        process.stdout.write(prompt);
-        process.stdin.setRawMode?.(true);
-
-        let password = '';
-        const onData = (char: Buffer) => {
-            const c = char.toString();
-            if (c === '\n' || c === '\r') {
-                process.stdin.setRawMode?.(false);
-                process.stdin.removeListener('data', onData);
-                process.stdout.write('\n');
-                rl.close();
-                resolve(password);
-            } else if (c === '\u0003') {
-                // Ctrl+C
-                process.exit(0);
-            } else if (c === '\u007F' || c === '\b') {
-                // Backspace
-                if (password.length > 0) {
-                    password = password.slice(0, -1);
-                }
-            } else {
-                password += c;
-            }
-        };
-
-        process.stdin.on('data', onData);
-        process.stdin.resume();
-    });
+async function promptPassword(message: string): Promise<string> {
+    const result = await p.password({ message });
+    if (p.isCancel(result)) {
+        process.exit(0);
+    }
+    return result;
 }
 
 /**
  * Logs a query and its result to a connection-specific log file
  */
-function logQuery(connectionName: string, query: string, result: any): void {
+function logQuery(connectionName: string, query: string, result: QueryResult): void {
     ensureLogsDir();
     const logFile = path.join(getLogsDir(), `${connectionName}.md`);
     const timestamp = new Date().toISOString();
 
     // Truncate large result sets for logging
     let logResult = result;
-    if (result && Array.isArray(result.rows) && result.rows.length > 10) {
-        const omittedCount = result.rows.length - 10;
+    if (result && Array.isArray(result.rows) && result.rows.length > MAX_LOG_ROWS) {
+        const omittedCount = result.rows.length - MAX_LOG_ROWS;
         logResult = {
             ...result,
             rows: [
-                ...result.rows.slice(0, 10),
+                ...result.rows.slice(0, MAX_LOG_ROWS),
                 `... ${omittedCount.toLocaleString()} ${omittedCount === 1 ? 'result' : 'results'} omitted ...`,
             ],
         };
     }
 
-    // Format as markdown
     const logEntry = `${timestamp}
 
 \`\`\`sql
@@ -98,7 +118,6 @@ ${JSON.stringify(logResult, null, 2)}
 
 `;
 
-    // Append to log file
     fs.appendFileSync(logFile, logEntry, 'utf-8');
 }
 
@@ -111,6 +130,7 @@ function createConnection(config: ResolvedConnectionConfig): ReturnType<typeof S
 
 /**
  * Execute a command with a database connection
+ * Errors are propagated to the caller - handle them at the CLI layer
  */
 async function withConnection<T>(
     connectionName: string,
@@ -123,14 +143,6 @@ async function withConnection<T>(
         const config = await resolveConnection(connectionName, configPath);
         sql = createConnection(config);
         return await handler(sql, config.type);
-    } catch (error: any) {
-        console.error(
-            JSON.stringify({
-                error: error.message,
-                stack: error.stack,
-            })
-        );
-        process.exit(1);
     } finally {
         if (sql) {
             sql.close();
@@ -216,9 +228,9 @@ function setupCLI() {
             }
 
             // Enforce read-only with comprehensive validation
-            const validationError = validateReadOnlyQuery(sqlQuery);
-            if (validationError) {
-                console.error(JSON.stringify({ error: validationError }));
+            const validation = validateReadOnlyQuery(sqlQuery);
+            if (!validation.valid) {
+                console.error(JSON.stringify({ error: validation.error }));
                 process.exit(1);
             }
 
@@ -243,8 +255,8 @@ function setupCLI() {
             try {
                 const connections = listConnections(opts.config);
                 console.log(JSON.stringify({ connections }, null, 2));
-            } catch (error: any) {
-                console.error(JSON.stringify({ error: error.message }));
+            } catch (error: unknown) {
+                console.error(JSON.stringify({ error: getErrorMessage(error) }));
                 process.exit(1);
             }
         });
@@ -303,15 +315,14 @@ function setupCLI() {
                 const sql = createConnection(config);
 
                 // Simple query to test connection
-                const testQuery = config.type === 'mysql' ? 'SELECT 1' : 'SELECT 1 as test';
-                await sql.unsafe(testQuery);
+                await sql.unsafe(TEST_QUERIES[config.type]);
                 sql.close();
 
                 console.log(`\x1b[32m✓ Connection "${connectionName}" successful!\x1b[0m`);
                 console.log(`  Type: ${config.type}`);
-            } catch (error: any) {
+            } catch (error: unknown) {
                 console.error(`\x1b[31m✗ Connection "${connectionName}" failed\x1b[0m`);
-                console.error(`  Error: ${error.message}`);
+                console.error(`  Error: ${getErrorMessage(error)}`);
                 process.exit(1);
             }
         });
@@ -387,8 +398,8 @@ function setupCLI() {
                     const status = hasPassword ? '\x1b[32m✓\x1b[0m' : '\x1b[31m✗\x1b[0m';
                     console.log(`  ${status} ${conn}`);
                 }
-            } catch (error: any) {
-                console.error(`Error: ${error.message}`);
+            } catch (error: unknown) {
+                console.error(`Error: ${getErrorMessage(error)}`);
                 process.exit(1);
             }
         });
@@ -396,12 +407,12 @@ function setupCLI() {
     return program;
 }
 
-async function getTables(sql: ReturnType<typeof SQL>, dbType: string): Promise<string[]> {
+async function getTables(sql: ReturnType<typeof SQL>, dbType: DbType): Promise<string[]> {
     let query: string;
 
-    if (dbType === 'postgres') {
+    if (dbType === DB_TYPES.POSTGRES) {
         query = "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' ORDER BY table_name";
-    } else if (dbType === 'sqlite') {
+    } else if (dbType === DB_TYPES.SQLITE) {
         query = "SELECT name as table_name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name";
     } else {
         // MySQL
@@ -410,20 +421,27 @@ async function getTables(sql: ReturnType<typeof SQL>, dbType: string): Promise<s
 
     const result = await sql.unsafe(query);
 
-    if (dbType === 'postgres' || dbType === 'sqlite') {
-        return result.map((row: any) => row.table_name || row.name);
+    if (dbType === DB_TYPES.POSTGRES || dbType === DB_TYPES.SQLITE) {
+        return result.map((row: Record<string, unknown>) =>
+            String(row.table_name || row.name)
+        );
     } else {
-        // MySQL
-        const key = Object.keys(result[0])[0];
-        return result.map((row: any) => row[key]);
+        // MySQL returns { Tables_in_<dbname>: 'tablename' }
+        const key = Object.keys(result[0] as object)[0];
+        return result.map((row: Record<string, unknown>) => String(row[key]));
     }
+}
+
+interface TableDescription {
+    table: string;
+    columns: unknown[];
 }
 
 async function describeTable(
     sql: ReturnType<typeof SQL>,
-    dbType: string,
+    dbType: DbType,
     tableName: string
-): Promise<any> {
+): Promise<TableDescription> {
     // SECURITY: Validate table name against actual tables to prevent SQL injection
     const validTables = await getTables(sql, dbType);
     if (!validTables.includes(tableName)) {
@@ -432,7 +450,7 @@ async function describeTable(
 
     let query: string;
 
-    if (dbType === 'postgres') {
+    if (dbType === DB_TYPES.POSTGRES) {
         // Table name is now validated - safe to interpolate
         query = `
             SELECT
@@ -445,7 +463,7 @@ async function describeTable(
             WHERE table_name = '${tableName}'
             ORDER BY ordinal_position
         `;
-    } else if (dbType === 'sqlite') {
+    } else if (dbType === DB_TYPES.SQLITE) {
         query = `PRAGMA table_info(\`${tableName}\`)`;
     } else {
         // MySQL
@@ -456,111 +474,23 @@ async function describeTable(
     return { table: tableName, columns: result };
 }
 
-async function introspectSchema(sql: ReturnType<typeof SQL>, dbType: string): Promise<any> {
+async function introspectSchema(sql: ReturnType<typeof SQL>, dbType: DbType): Promise<SchemaInfo> {
     const tables = await getTables(sql, dbType);
-    const schema: any = {};
+    const schema: SchemaInfo = {};
 
     for (const table of tables) {
         const tableInfo = await describeTable(sql, dbType, table);
-        schema[table] = tableInfo.columns;
+        schema[table] = tableInfo;
     }
 
     return schema;
 }
 
-/**
- * Validates that a query is read-only and safe to execute.
- * Checks for dangerous keywords anywhere in the query, not just at the start.
- */
-function validateReadOnlyQuery(query: string): string | null {
-    const normalizedQuery = query.trim().toUpperCase();
-
-    // Check if query starts with allowed commands
-    const allowedStarts = ['SELECT', 'SHOW', 'DESCRIBE', 'EXPLAIN', 'WITH'];
-    const startsWithAllowed = allowedStarts.some((cmd) => normalizedQuery.startsWith(cmd));
-
-    if (!startsWithAllowed) {
-        return 'Only SELECT, SHOW, DESCRIBE, EXPLAIN, and WITH queries are allowed (read-only mode)';
-    }
-
-    // Check for multiple statements (prevent SQL injection via chained queries)
-    const semicolonCount = (query.match(/;/g) || []).length;
-    if (semicolonCount > 1 || (semicolonCount === 1 && !query.trim().endsWith(';'))) {
-        return 'Multiple statements are not allowed (read-only mode)';
-    }
-
-    // Dangerous keywords that should never appear in read-only queries
-    const dangerousKeywords = [
-        'INSERT',
-        'UPDATE',
-        'DELETE',
-        'DROP',
-        'CREATE',
-        'ALTER',
-        'TRUNCATE',
-        'GRANT',
-        'REVOKE',
-        'EXEC',
-        'EXECUTE',
-        'CALL',
-        'MERGE',
-        'REPLACE',
-        'RENAME',
-        'COMMENT',
-        'LOCK',
-        'UNLOCK',
-        'SET',
-        'BEGIN',
-        'COMMIT',
-        'ROLLBACK',
-        'SAVEPOINT',
-        'PREPARE',
-        'DEALLOCATE',
-        // Dangerous functions
-        'INTO OUTFILE',
-        'INTO DUMPFILE',
-        'LOAD DATA',
-        'LOAD XML',
-        // PostgreSQL specific
-        'COPY',
-        'VACUUM',
-        'REINDEX',
-        'CLUSTER',
-    ];
-
-    for (const keyword of dangerousKeywords) {
-        // Use word boundaries to avoid false positives (e.g., "INSERTED" column name)
-        const regex = new RegExp(`\\b${keyword}\\b`, 'i');
-        if (regex.test(query)) {
-            return `Dangerous keyword detected: ${keyword}. Only read-only queries are allowed.`;
-        }
-    }
-
-    // Check for comments that might hide malicious code
-    if (query.includes('/*') || query.includes('--') || query.includes('#')) {
-        // Allow comments but verify they don't contain dangerous keywords
-        const withoutComments = query
-            .replace(/\/\*[\s\S]*?\*\//g, ' ') // Remove /* */ comments
-            .replace(/--[^\n]*/g, ' ') // Remove -- comments
-            .replace(/#[^\n]*/g, ' '); // Remove # comments
-
-        // Re-validate without comments
-        for (const keyword of dangerousKeywords) {
-            const regex = new RegExp(`\\b${keyword}\\b`, 'i');
-            if (regex.test(withoutComments)) {
-                return `Dangerous keyword detected: ${keyword}. Only read-only queries are allowed.`;
-            }
-        }
-    }
-
-    return null; // Query is safe
-}
-
 async function executeQuery(
     sql: ReturnType<typeof SQL>,
-    dbType: string,
+    _dbType: DbType,
     query: string
-): Promise<any> {
+): Promise<QueryResult> {
     try {
         const result = await sql.unsafe(query);
 
@@ -568,9 +498,9 @@ async function executeQuery(
             rowCount: Array.isArray(result) ? result.length : 0,
             rows: result,
         };
-    } catch (error: any) {
+    } catch (error: unknown) {
         return {
-            error: error.message,
+            error: getErrorMessage(error),
         };
     }
 }
@@ -594,7 +524,7 @@ async function initConfig(): Promise<void> {
         version: '2.0',
         connections: {
             'myapp-prod': {
-                type: 'postgres',
+                type: DB_TYPES.POSTGRES,
                 host: 'localhost',
                 port: 5432,
                 database: 'myapp',
@@ -602,7 +532,7 @@ async function initConfig(): Promise<void> {
                 password: { $env: 'SHERLOCK_MYAPP_PROD_PASSWORD' },
             },
             'myapp-staging': {
-                type: 'postgres',
+                type: DB_TYPES.POSTGRES,
                 host: 'localhost',
                 port: 5432,
                 database: 'myapp_staging',
@@ -613,7 +543,7 @@ async function initConfig(): Promise<void> {
     };
 
     fs.writeFileSync(configPath, JSON.stringify(exampleConfig, null, 2), 'utf-8');
-    fs.chmodSync(configPath, 0o600);
+    setSecurePermissions(configPath);
 
     // Create example .env
     const exampleEnv = `# Sherlock Database Credentials
@@ -629,7 +559,7 @@ SHERLOCK_MYAPP_STAGING_PASSWORD=your_password
 `;
 
     fs.writeFileSync(envPath, exampleEnv, 'utf-8');
-    fs.chmodSync(envPath, 0o600);
+    setSecurePermissions(envPath);
 
     console.log(`Sherlock initialized!
 
@@ -667,18 +597,28 @@ async function migrateConfig(fromPath: string): Promise<void> {
         process.exit(1);
     }
 
+    // Legacy TypeORM config format
+    interface LegacyConnectionOpts {
+        type: string;
+        host?: string;
+        port?: number;
+        username?: string;
+        password?: string;
+        database?: string;
+    }
+
     // Convert to new format
-    const newConnections: Record<string, any> = {};
+    const newConnections: Record<string, ConnectionConfig> = {};
     const envVars: string[] = [];
 
-    for (const [name, opts] of Object.entries(legacyConfig.connections as Record<string, any>)) {
+    for (const [name, opts] of Object.entries(legacyConfig.connections as Record<string, LegacyConnectionOpts>)) {
         const envPrefix = `SHERLOCK_${name.toUpperCase().replace(/-/g, '_')}`;
 
-        const newConn: any = {
-            type: opts.type === 'better-sqlite3' ? 'sqlite' : opts.type,
+        const newConn: ConnectionConfig = {
+            type: opts.type === 'better-sqlite3' ? DB_TYPES.SQLITE : opts.type as DbType,
         };
 
-        if (opts.type === 'better-sqlite3' || opts.type === 'sqlite') {
+        if (opts.type === 'better-sqlite3' || opts.type === DB_TYPES.SQLITE) {
             newConn.filename = opts.database;
         } else {
             newConn.host = opts.host;
@@ -716,7 +656,7 @@ async function migrateConfig(fromPath: string): Promise<void> {
 
     // Write new config
     fs.writeFileSync(configPath, JSON.stringify(newConfig, null, 2), 'utf-8');
-    fs.chmodSync(configPath, 0o600);
+    setSecurePermissions(configPath);
     console.log(`\x1b[32m✓\x1b[0m Created: ${configPath}`);
 
     // Write .env file
@@ -728,7 +668,7 @@ ${envVars.join('\n')}
 `;
 
     fs.writeFileSync(envPath, envContent, 'utf-8');
-    fs.chmodSync(envPath, 0o600);
+    setSecurePermissions(envPath);
     console.log(`\x1b[32m✓\x1b[0m Created: ${envPath}`);
 
     console.log(`
@@ -742,6 +682,12 @@ Migration complete!
 `);
 }
 
-// Set up and parse CLI
+// Set up and parse CLI with top-level error handling
 const program = setupCLI();
-program.parse(process.argv);
+program.parseAsync(process.argv).catch((error: Error) => {
+    console.error(JSON.stringify({
+        error: error.message,
+        ...(process.env.DEBUG && { stack: error.stack }),
+    }));
+    process.exit(1);
+});

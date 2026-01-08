@@ -1,3 +1,5 @@
+import type { DbType } from '../db-types';
+
 /**
  * Credential reference types for secure credential resolution
  */
@@ -11,7 +13,7 @@ export type CredentialRef =
  */
 export interface ConnectionConfig {
     /** Database type - auto-detected from connection string if using url */
-    type?: 'postgres' | 'mysql' | 'sqlite';
+    type?: DbType;
 
     /** Connection URL (preferred) - e.g., postgres://user:pass@host:port/db */
     url?: string | CredentialRef;
@@ -39,6 +41,6 @@ export interface SherlockConfig {
  * Resolved connection config with all credentials resolved to actual values
  */
 export interface ResolvedConnectionConfig {
-    type: 'postgres' | 'mysql' | 'sqlite';
+    type: DbType;
     url: string;
 }

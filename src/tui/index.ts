@@ -8,6 +8,7 @@ import * as path from 'path';
 import { getConfigDir, ensureConfigDir } from '../config/paths';
 import { loadConfigFile, listConnections } from '../config';
 import type { SherlockConfig, ConnectionConfig } from '../config/types';
+import { DB_TYPES, DEFAULT_PORTS, TEST_QUERIES, type DbType } from '../db-types';
 import {
     setKeychainPassword,
     hasKeychainPassword,
@@ -312,11 +313,11 @@ async function promptForConnection(
             type: () =>
                 p.select({
                     message: 'Database type',
-                    initialValue: existingConfig?.type || 'postgres',
+                    initialValue: existingConfig?.type || DB_TYPES.POSTGRES,
                     options: [
-                        { value: 'postgres', label: 'PostgreSQL' },
-                        { value: 'mysql', label: 'MySQL / MariaDB' },
-                        { value: 'sqlite', label: 'SQLite' },
+                        { value: DB_TYPES.POSTGRES, label: 'PostgreSQL' },
+                        { value: DB_TYPES.MYSQL, label: 'MySQL / MariaDB' },
+                        { value: DB_TYPES.SQLITE, label: 'SQLite' },
                     ],
                 }),
         },
@@ -328,7 +329,7 @@ async function promptForConnection(
         }
     );
 
-    if (result.type === 'sqlite') {
+    if (result.type === DB_TYPES.SQLITE) {
         const sqliteResult = await p.group({
             filename: () =>
                 p.text({
@@ -344,7 +345,7 @@ async function promptForConnection(
         return {
             name: result.name as string,
             config: {
-                type: 'sqlite',
+                type: DB_TYPES.SQLITE,
                 filename: sqliteResult.filename as string,
             },
             password: '',
@@ -363,8 +364,8 @@ async function promptForConnection(
             port: () =>
                 p.text({
                     message: 'Port',
-                    placeholder: result.type === 'postgres' ? '5432' : '3306',
-                    initialValue: existingConfig?.port?.toString() || (result.type === 'postgres' ? '5432' : '3306'),
+                    placeholder: String(DEFAULT_PORTS[result.type as DbType]),
+                    initialValue: existingConfig?.port?.toString() || String(DEFAULT_PORTS[result.type as DbType]),
                     validate: (value) => {
                         if (value && isNaN(parseInt(value))) return 'Port must be a number';
                     },
@@ -414,7 +415,7 @@ async function promptForConnection(
     return {
         name: result.name as string,
         config: {
-            type: result.type as 'postgres' | 'mysql',
+            type: result.type as DbType,
             host: connResult.host as string,
             port: parseInt(connResult.port as string),
             database: connResult.database as string,
@@ -540,12 +541,12 @@ export async function connectionManagerMenu(): Promise<void> {
                 try {
                     const config = await resolveConnection(selected as string);
                     const sql = new SQL(config.url);
-                    const testQuery = config.type === 'mysql' ? 'SELECT 1' : 'SELECT 1 as test';
-                    await sql.unsafe(testQuery);
+                    await sql.unsafe(TEST_QUERIES[config.type]);
                     sql.close();
                     p.log.success(`Connection "${selected}" successful!`);
-                } catch (error: any) {
-                    p.log.error(`Connection failed: ${error.message}`);
+                } catch (error: unknown) {
+                    const message = error instanceof Error ? error.message : String(error);
+                    p.log.error(`Connection failed: ${message}`);
                 }
             }
         }

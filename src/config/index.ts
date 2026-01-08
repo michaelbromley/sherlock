@@ -4,6 +4,7 @@ import { findConfigFile, getConfigDir, getEnvFilePath } from './paths';
 import { getCredentialResolver } from '../credentials';
 import type { SherlockConfig, ConnectionConfig, ResolvedConnectionConfig, CredentialRef } from './types';
 import { getEnvVarForConnection } from '../credentials/providers/env';
+import { DB_TYPES, DEFAULT_PORTS, type DbType } from '../db-types';
 
 let cachedConfig: SherlockConfig | null = null;
 let cachedConfigPath: string | null = null;
@@ -101,7 +102,7 @@ function loadLegacyConfig(configPath: string): SherlockConfig {
 
     for (const [name, opts] of Object.entries(legacyConfig.connections as Record<string, any>)) {
         connections[name] = {
-            type: opts.type === 'better-sqlite3' ? 'sqlite' : opts.type,
+            type: opts.type === 'better-sqlite3' ? DB_TYPES.SQLITE : opts.type,
             host: opts.host,
             port: opts.port,
             username: opts.username,
@@ -138,7 +139,7 @@ export function getConnectionConfig(
  * Build a connection URL from individual config parameters
  */
 function buildConnectionUrl(
-    type: string,
+    type: DbType,
     host: string,
     port: number | undefined,
     username: string,
@@ -147,11 +148,12 @@ function buildConnectionUrl(
 ): string {
     const encodedPassword = encodeURIComponent(password);
     const encodedUsername = encodeURIComponent(username);
+    const defaultPort = DEFAULT_PORTS[type];
 
-    if (type === 'postgres') {
-        return `postgres://${encodedUsername}:${encodedPassword}@${host}:${port || 5432}/${database}`;
-    } else if (type === 'mysql') {
-        return `mysql://${encodedUsername}:${encodedPassword}@${host}:${port || 3306}/${database}`;
+    if (type === DB_TYPES.POSTGRES) {
+        return `postgres://${encodedUsername}:${encodedPassword}@${host}:${port || defaultPort}/${database}`;
+    } else if (type === DB_TYPES.MYSQL) {
+        return `mysql://${encodedUsername}:${encodedPassword}@${host}:${port || defaultPort}/${database}`;
     }
 
     throw new Error(`Unsupported database type: ${type}`);
@@ -175,31 +177,31 @@ export async function resolveConnection(
         }
 
         // Auto-detect type from URL
-        let type: 'postgres' | 'mysql' | 'sqlite';
+        let type: DbType;
         if (url.startsWith('postgres://') || url.startsWith('postgresql://')) {
-            type = 'postgres';
+            type = DB_TYPES.POSTGRES;
         } else if (url.startsWith('mysql://')) {
-            type = 'mysql';
+            type = DB_TYPES.MYSQL;
         } else if (url.startsWith('sqlite://') || url.startsWith('file://') || url === ':memory:') {
-            type = 'sqlite';
+            type = DB_TYPES.SQLITE;
         } else {
-            type = config.type || 'postgres';
+            type = config.type || DB_TYPES.POSTGRES;
         }
 
         return { type, url };
     }
 
     // Handle SQLite
-    if (config.type === 'sqlite') {
+    if (config.type === DB_TYPES.SQLITE) {
         const filename = config.filename || config.database || ':memory:';
         return {
-            type: 'sqlite',
+            type: DB_TYPES.SQLITE,
             url: filename,
         };
     }
 
     // Build URL from individual parameters
-    const type = config.type || 'postgres';
+    const type = config.type || DB_TYPES.POSTGRES;
 
     // Warn if password is stored as plaintext in config
     if (config.password && typeof config.password === 'string') {
@@ -239,10 +241,7 @@ export async function resolveConnection(
 
     const url = buildConnectionUrl(type, host, port, username, password, database);
 
-    return {
-        type: type as 'postgres' | 'mysql' | 'sqlite',
-        url,
-    };
+    return { type, url };
 }
 
 /**

@@ -63,11 +63,12 @@ class TestRunner {
                 stdio: 'pipe',
             });
             return { stdout, success: true };
-        } catch (error: any) {
+        } catch (error: unknown) {
+            const err = error as { stdout?: string; stderr?: string; message?: string };
             return {
-                stdout: error.stdout || '',
+                stdout: err.stdout || '',
                 success: false,
-                error: error.stderr || error.message,
+                error: err.stderr || err.message || String(error),
             };
         }
     }
