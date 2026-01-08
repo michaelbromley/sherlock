@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.5] - 2025-01-08
+
+### Added
+
+- Per-connection `logging` option in config (default: `false`)
+- "Toggle query logging" option in edit wizard (`sherlock edit`)
+
+### Changed
+
+- Query logging now disabled by default (security: protects sensitive prod data)
+- Logging must be explicitly enabled per-connection with `"logging": true`
+- SKILL.md condensed from 162 to 41 lines (removed redundant instructions for LLM)
+
 ## [0.0.4] - 2025-01-08
 
 ### Added
