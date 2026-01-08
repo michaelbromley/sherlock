@@ -3,7 +3,7 @@
  */
 export type CredentialRef =
     | { $env: string }
-    | { $keychain: { service: string; account: string } }
+    | { $keychain: string | { service?: string; account: string } }
     | string; // Literal value (will warn user)
 
 /**

@@ -4,9 +4,57 @@ import { SQL } from 'bun';
 import { Command } from 'commander';
 import * as fs from 'fs';
 import * as path from 'path';
+import * as readline from 'readline';
 import { resolveConnection, listConnections, getConnectionConfig } from './config';
 import { getLogsDir, ensureLogsDir, getConfigDir, ensureConfigDir } from './config/paths';
 import type { ResolvedConnectionConfig } from './config/types';
+import {
+    setKeychainPassword,
+    getKeychainPassword,
+    deleteKeychainPassword,
+    hasKeychainPassword,
+} from './credentials/providers/keychain';
+
+/**
+ * Prompt for password input (hidden)
+ */
+async function promptPassword(prompt: string): Promise<string> {
+    return new Promise((resolve) => {
+        const rl = readline.createInterface({
+            input: process.stdin,
+            output: process.stdout,
+        });
+
+        // Hide input
+        process.stdout.write(prompt);
+        process.stdin.setRawMode?.(true);
+
+        let password = '';
+        const onData = (char: Buffer) => {
+            const c = char.toString();
+            if (c === '\n' || c === '\r') {
+                process.stdin.setRawMode?.(false);
+                process.stdin.removeListener('data', onData);
+                process.stdout.write('\n');
+                rl.close();
+                resolve(password);
+            } else if (c === '\u0003') {
+                // Ctrl+C
+                process.exit(0);
+            } else if (c === '\u007F' || c === '\b') {
+                // Backspace
+                if (password.length > 0) {
+                    password = password.slice(0, -1);
+                }
+            } else {
+                password += c;
+            }
+        };
+
+        process.stdin.on('data', onData);
+        process.stdin.resume();
+    });
+}
 
 /**
  * Logs a query and its result to a connection-specific log file
@@ -221,6 +269,78 @@ function setupCLI() {
         .option('--from <path>', 'path to legacy config.ts', 'config.ts')
         .action(async (cmdOpts) => {
             await migrateConfig(cmdOpts.from);
+        });
+
+    // Keychain command group
+    const keychain = program
+        .command('keychain')
+        .description('Manage credentials in OS keychain');
+
+    keychain
+        .command('set <account>')
+        .description('Store a password in the keychain')
+        .option('-p, --password <password>', 'password (will prompt if not provided)')
+        .action(async (account: string, cmdOpts) => {
+            let password = cmdOpts.password;
+
+            if (!password) {
+                // Prompt for password securely
+                password = await promptPassword(`Enter password for "${account}": `);
+            }
+
+            if (!password) {
+                console.error('No password provided');
+                process.exit(1);
+            }
+
+            setKeychainPassword(account, password);
+            console.log(`\x1b[32m✓\x1b[0m Password stored for account "${account}"`);
+            console.log(`\nUse in config.json:`);
+            console.log(`  "password": { "$keychain": "${account}" }`);
+        });
+
+    keychain
+        .command('get <account>')
+        .description('Retrieve a password from the keychain (for testing)')
+        .action((account: string) => {
+            const password = getKeychainPassword(account);
+            if (password === null) {
+                console.error(`No password found for account "${account}"`);
+                process.exit(1);
+            }
+            console.log(`Password for "${account}": ${password}`);
+        });
+
+    keychain
+        .command('delete <account>')
+        .description('Delete a password from the keychain')
+        .action((account: string) => {
+            if (!hasKeychainPassword(account)) {
+                console.error(`No password found for account "${account}"`);
+                process.exit(1);
+            }
+            deleteKeychainPassword(account);
+            console.log(`\x1b[32m✓\x1b[0m Password deleted for account "${account}"`);
+        });
+
+    keychain
+        .command('list')
+        .description('Check which connection passwords are in keychain')
+        .action(() => {
+            const opts = program.opts();
+            try {
+                const connections = listConnections(opts.config);
+                console.log('Keychain status for connections:\n');
+
+                for (const conn of connections) {
+                    const hasPassword = hasKeychainPassword(conn);
+                    const status = hasPassword ? '\x1b[32m✓\x1b[0m' : '\x1b[31m✗\x1b[0m';
+                    console.log(`  ${status} ${conn}`);
+                }
+            } catch (error: any) {
+                console.error(`Error: ${error.message}`);
+                process.exit(1);
+            }
         });
 
     return program;

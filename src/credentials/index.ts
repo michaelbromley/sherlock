@@ -2,6 +2,7 @@ import type { CredentialProvider } from './types';
 import type { CredentialRef } from '../config/types';
 import { EnvProvider } from './providers/env';
 import { LiteralProvider } from './providers/literal';
+import { KeychainProvider } from './providers/keychain';
 
 /**
  * Credential resolver that orchestrates multiple providers
@@ -12,8 +13,9 @@ export class CredentialResolver {
     constructor() {
         // Initialize built-in providers sorted by priority (highest first)
         this.providers = [
-            new EnvProvider(),
-            new LiteralProvider(),
+            new EnvProvider(),      // priority: 100
+            new KeychainProvider(), // priority: 80
+            new LiteralProvider(),  // priority: 0
         ].sort((a, b) => b.priority - a.priority);
     }
 
