@@ -121,6 +121,13 @@ main() {
         warn "Failed to download skill file. You can manually copy it later."
     fi
 
+    # Create empty config to enable portable mode
+    if [ ! -f "$SKILL_DIR/config.json" ]; then
+        echo '{"version":"2.0","connections":{}}' > "$SKILL_DIR/config.json"
+        chmod 600 "$SKILL_DIR/config.json"
+        success "Created config.json (portable mode enabled)"
+    fi
+
     echo ""
     success "Installation complete!"
     echo ""
@@ -130,6 +137,15 @@ main() {
     echo "  -----------"
     echo "  1. Run '$SKILL_DIR/sherlock setup' to configure your database connections"
     echo "  2. Use '/sherlock' in Claude Code to query your databases"
+    echo ""
+    echo "  Tip: Add sherlock to your PATH for easier access:"
+    echo ""
+    echo "    # Add to ~/.zshrc or ~/.bashrc:"
+    echo "    export PATH=\"\$HOME/.claude/skills/sherlock:\$PATH\""
+    echo ""
+    echo "    # Then you can just run:"
+    echo "    sherlock setup"
+    echo "    sherlock -c mydb tables"
     echo ""
     echo "  To uninstall:"
     echo "    rm -rf $SKILL_DIR"

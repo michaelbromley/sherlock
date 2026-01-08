@@ -58,7 +58,7 @@ Use the sherlock binary at `~/.claude/skills/sherlock/sherlock`. **All database 
 - **Read-only mode**: Only SELECT, SHOW, DESCRIBE, EXPLAIN, and WITH queries are allowed. Any attempt to execute INSERT, UPDATE, DELETE, or DDL statements will be rejected.
 - **Connection required**: You must always specify `-c <connection>` for database commands. There is no default connection (this prevents accidental queries to production).
 - **JSON output**: All results are returned as JSON for easy parsing.
-- **Configuration**: Connections are defined in `~/.config/sherlock/config.json`. Credentials use `$env` or `$keychain` references - never plaintext.
+- **Configuration**: Connections are defined in `~/.claude/skills/sherlock/config.json` (same directory as the binary). Credentials use `$env` or `$keychain` references - never plaintext.
 
 ### Configuration Example
 
