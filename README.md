@@ -89,7 +89,12 @@ bun build ./src/query-db.ts --compile --outfile sherlock
 sherlock -c mydb tables                         # List tables
 sherlock -c mydb describe users                 # Show table schema
 sherlock -c mydb query "SELECT * FROM users LIMIT 10"
-sherlock -c mydb introspect                     # Full schema dump (JSON)
+sherlock -c mydb introspect                     # Full schema dump (cached)
+sherlock -c mydb introspect --refresh           # Refresh cached schema
+sherlock -c mydb sample users -n 10             # Random sample rows
+sherlock -c mydb stats users                    # Data profiling (nulls, distinct)
+sherlock -c mydb indexes users                  # Show table indexes
+sherlock -c mydb fk users                       # Foreign key relationships
 ```
 
 ## Configuration
@@ -150,8 +155,13 @@ sherlock keychain delete prod-db
 ```bash
 sherlock -c <conn> tables              # List all tables
 sherlock -c <conn> describe <table>    # Show table schema
-sherlock -c <conn> introspect          # Full schema dump (JSON)
+sherlock -c <conn> introspect          # Full schema dump (cached)
+sherlock -c <conn> introspect --refresh # Refresh cached schema
 sherlock -c <conn> query "SELECT ..."  # Execute read-only query
+sherlock -c <conn> sample <table>      # Random sample rows (-n <limit>)
+sherlock -c <conn> stats <table>       # Data profiling (row count, nulls, distinct)
+sherlock -c <conn> indexes <table>     # Show table indexes
+sherlock -c <conn> fk <table>          # Foreign key relationships
 ```
 
 ### Management Commands
@@ -171,6 +181,7 @@ sherlock manage               # Connection manager menu
 -c, --connection <name>    # Required for DB commands
 --config <path>            # Override config file location
 --no-log                   # Disable query logging (overrides config)
+-f, --format <format>      # Output format: json (default) or markdown
 ```
 
 ## Query Logging
