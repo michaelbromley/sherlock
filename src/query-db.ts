@@ -36,6 +36,9 @@ const MAX_SAMPLE_LIMIT = 1000;
 /** Valid SQL identifier pattern (prevents injection via malicious table/column names) */
 const SAFE_IDENTIFIER = /^[a-zA-Z_][a-zA-Z0-9_]*$/;
 
+/** Default output format */
+const DEFAULT_OUTPUT_FORMAT = 'json' as const;
+
 /** File permissions for sensitive config files (owner read/write only) */
 const SECURE_FILE_MODE = 0o600;
 
@@ -90,6 +93,75 @@ function validateIdentifier(name: string, type: 'table' | 'column'): void {
     if (!SAFE_IDENTIFIER.test(name)) {
         throw new Error(`Invalid ${type} name: "${name}". Names must start with a letter or underscore and contain only alphanumeric characters and underscores.`);
     }
+}
+
+/** Supported output formats */
+type OutputFormat = 'json' | 'markdown';
+
+/**
+ * Escape a value for safe inclusion in a markdown table cell
+ */
+function escapeMarkdownCell(val: unknown): string {
+    if (val === null) return '_null_';
+    if (val === undefined) return '_undefined_';
+    if (val === '') return '_empty_';
+
+    // Handle objects/arrays (e.g., JSONB columns) - stringify them
+    const strVal = typeof val === 'object' ? JSON.stringify(val) : String(val);
+
+    // Escape pipes and normalize whitespace (newlines, carriage returns, tabs)
+    return strVal.replace(/\|/g, '\\|').replace(/[\r\n\t]+/g, ' ');
+}
+
+/**
+ * Format query results as a markdown table
+ */
+function formatAsMarkdown(rows: unknown[]): string {
+    if (!Array.isArray(rows) || rows.length === 0) {
+        return '_No rows returned_';
+    }
+
+    const firstRow = rows[0] as Record<string, unknown>;
+    const columns = Object.keys(firstRow);
+
+    if (columns.length === 0) {
+        return '_No columns_';
+    }
+
+    // Header row - escape column names too (they come from the database)
+    const escapedColumns = columns.map((col) => col.replace(/\|/g, '\\|'));
+    const header = '| ' + escapedColumns.join(' | ') + ' |';
+    const separator = '| ' + columns.map(() => '---').join(' | ') + ' |';
+
+    // Data rows
+    const dataRows = rows.map((row) => {
+        const r = row as Record<string, unknown>;
+        const values = columns.map((col) => escapeMarkdownCell(r[col]));
+        return '| ' + values.join(' | ') + ' |';
+    });
+
+    return [header, separator, ...dataRows].join('\n');
+}
+
+/**
+ * Format output based on format option
+ */
+function formatOutput(data: unknown, format: OutputFormat): string {
+    if (format === 'markdown') {
+        // If data has a 'rows' property, format those as a table
+        if (typeof data === 'object' && data !== null && 'rows' in data) {
+            const d = data as { rows: unknown[]; rowCount?: number };
+            const table = formatAsMarkdown(d.rows);
+            return d.rowCount !== undefined ? `${d.rowCount} rows\n\n${table}` : table;
+        }
+        // If it's an array, format as table directly
+        if (Array.isArray(data)) {
+            return formatAsMarkdown(data);
+        }
+        // Otherwise fall back to JSON
+        return JSON.stringify(data, null, 2);
+    }
+    return JSON.stringify(data, null, 2);
 }
 
 /**
@@ -185,7 +257,15 @@ function setupCLI() {
     program
         .option('-c, --connection <name>', 'database connection name from config (required for DB commands)')
         .option('--config <path>', 'path to config file')
-        .option('--no-log', 'disable query logging');
+        .option('--no-log', 'disable query logging')
+        .option('-f, --format <format>', 'output format: json or markdown', DEFAULT_OUTPUT_FORMAT)
+        .hook('preAction', (thisCommand) => {
+            const format = thisCommand.opts().format;
+            if (format && !['json', 'markdown'].includes(format)) {
+                console.error(`Error: Invalid format "${format}". Must be 'json' or 'markdown'.`);
+                process.exit(1);
+            }
+        });
 
     // Tables command
     program
@@ -262,7 +342,8 @@ function setupCLI() {
                     logQuery(opts.connection, syntheticQuery, { rowCount: result.rowCount, rows: result.rows });
                 }
 
-                console.log(JSON.stringify(result, null, 2));
+                const format = opts.format as OutputFormat;
+                console.log(formatOutput(result, format));
             });
         });
 
@@ -278,7 +359,13 @@ function setupCLI() {
             }
             await withConnection(opts.connection, opts.config, async (sql, dbType) => {
                 const result = await getIndexes(sql, dbType, tableName);
-                console.log(JSON.stringify(result, null, 2));
+                const format = opts.format as OutputFormat;
+                // For indexes, format the indexes array as table if markdown
+                if (format === 'markdown') {
+                    console.log(`## Indexes for \`${tableName}\`\n\n${result.indexCount} indexes\n\n${formatAsMarkdown(result.indexes)}`);
+                } else {
+                    console.log(JSON.stringify(result, null, 2));
+                }
             });
         });
 
@@ -313,7 +400,8 @@ function setupCLI() {
                     logQuery(opts.connection, sqlQuery, result);
                 }
 
-                console.log(JSON.stringify(result, null, 2));
+                const format = opts.format as OutputFormat;
+                console.log(formatOutput(result, format));
             });
         });
 
