@@ -208,8 +208,8 @@ export async function resolveConnection(
     // Build URL from individual parameters
     const type = config.type || DB_TYPES.POSTGRES;
 
-    // Warn if password is stored as plaintext in config
-    if (config.password && typeof config.password === 'string') {
+    // Warn if password is stored as plaintext in config (but not for empty passwords)
+    if (config.password && typeof config.password === 'string' && config.password.length > 0) {
         console.warn(
             '\x1b[33m[sherlock] Warning: Password for connection "' + connectionName + '" is stored as plaintext.\n' +
             '  Consider using { "$env": "SHERLOCK_' + connectionName.toUpperCase() + '_PASSWORD" } for better security.\x1b[0m'
@@ -217,25 +217,27 @@ export async function resolveConnection(
     }
 
     // Try environment variable auto-detection first
+    // Use ?? instead of || to allow empty string values (e.g., empty passwords)
     const host =
-        (await resolver.resolveValue(config.host)) ||
+        (await resolver.resolveValue(config.host)) ??
         getEnvVarForConnection(connectionName, 'HOST');
     const username =
-        (await resolver.resolveValue(config.username)) ||
-        getEnvVarForConnection(connectionName, 'USERNAME') ||
+        (await resolver.resolveValue(config.username)) ??
+        getEnvVarForConnection(connectionName, 'USERNAME') ??
         getEnvVarForConnection(connectionName, 'USER');
     const password =
-        (await resolver.resolveValue(config.password)) ||
+        (await resolver.resolveValue(config.password)) ??
         getEnvVarForConnection(connectionName, 'PASSWORD');
-    const database = config.database || getEnvVarForConnection(connectionName, 'DATABASE');
+    const database = config.database ?? getEnvVarForConnection(connectionName, 'DATABASE');
     const port = config.port;
 
-    if (!host || !username || !password || !database) {
+    // Check for missing required params - use == null to allow empty strings (e.g., empty passwords)
+    if (host == null || username == null || password == null || database == null) {
         const missing: string[] = [];
-        if (!host) missing.push('host');
-        if (!username) missing.push('username');
-        if (!password) missing.push('password');
-        if (!database) missing.push('database');
+        if (host == null) missing.push('host');
+        if (username == null) missing.push('username');
+        if (password == null) missing.push('password');
+        if (database == null) missing.push('database');
 
         throw new Error(
             `Missing required connection parameters for "${connectionName}": ${missing.join(', ')}\n\n` +
