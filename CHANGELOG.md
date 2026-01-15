@@ -16,6 +16,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `stats` command: data profiling (row count, null counts, distinct counts per column)
 - `fk` command: show foreign key relationships (outgoing and incoming)
 
+### Changed
+
+- Major refactor: split query-db.ts (1362→695 lines) into focused modules:
+  - `src/db/operations.ts` - database introspection operations
+  - `src/db/connection.ts` - connection lifecycle management
+  - `src/output/formatters.ts` - JSON/markdown formatting
+  - `src/cache/schema.ts` - schema caching logic
+  - `src/logging/query-log.ts` - query logging
+- Extracted `validateTableExists()` helper (was duplicated 6x)
+- Extracted `requireConnection()` helper (was duplicated 8x)
+
 ### Security
 
 - Table name validation prevents SQL injection via maliciously-named database objects

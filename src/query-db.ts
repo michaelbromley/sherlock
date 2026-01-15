@@ -1,31 +1,80 @@
 #!/usr/bin/env bun
 /* eslint-disable no-console */
-import { SQL } from 'bun';
+/**
+ * Sherlock CLI - Database query tool with read-only access
+ *
+ * This is the main CLI entry point. Database operations, formatting,
+ * caching, and logging are handled by separate modules.
+ */
+
 import { Command } from 'commander';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as p from '@clack/prompts';
-import { resolveConnection, listConnections, getConnectionConfig } from './config';
-import { getLogsDir, ensureLogsDir, getConfigDir, ensureConfigDir, getCacheDir, ensureCacheDir } from './config/paths';
-import type { ResolvedConnectionConfig, ConnectionConfig } from './config/types';
+
+// Config
+import { listConnections, getConnectionConfig } from './config';
+import { getConfigDir, ensureConfigDir } from './config/paths';
+import type { ConnectionConfig } from './config/types';
 import { DB_TYPES, TEST_QUERIES, type DbType } from './db-types';
+
+// Credentials
 import {
     setKeychainPassword,
     getKeychainPassword,
     deleteKeychainPassword,
     hasKeychainPassword,
 } from './credentials/providers/keychain';
+
+// TUI
 import {
     runSetupWizard,
     addConnectionWizard,
     editConnectionWizard,
     connectionManagerMenu,
 } from './tui';
+
+// Query validation
 import { validateReadOnlyQuery } from './query-validation';
+
+// Database
+import { withConnection } from './db/connection';
+import {
+    getTables,
+    describeTable,
+    sampleTable,
+    getIndexes,
+    getForeignKeys,
+    getTableStats,
+    introspectSchema,
+    executeQuery,
+} from './db/operations';
+
+// Output formatting
+import {
+    formatOutput,
+    formatAsMarkdown,
+    type OutputFormat,
+    DEFAULT_OUTPUT_FORMAT,
+} from './output/formatters';
+
+// Caching
+import {
+    readSchemaCache,
+    writeSchemaCache,
+    getCacheAge,
+    type SchemaInfo,
+} from './cache/schema';
+
+// Logging
+import { logQuery } from './logging/query-log';
+
+// Package info
 import pkg from '../package.json';
 
-/** Maximum rows to include in query logs (truncate larger results) */
-const MAX_LOG_ROWS = 10;
+// ============================================================================
+// Constants
+// ============================================================================
 
 /** Default number of rows to sample */
 const DEFAULT_SAMPLE_LIMIT = 5;
@@ -33,14 +82,12 @@ const DEFAULT_SAMPLE_LIMIT = 5;
 /** Maximum rows allowed for sample command (prevents DoS via ORDER BY RANDOM) */
 const MAX_SAMPLE_LIMIT = 1000;
 
-/** Valid SQL identifier pattern (prevents injection via malicious table/column names) */
-const SAFE_IDENTIFIER = /^[a-zA-Z_][a-zA-Z0-9_]*$/;
-
-/** Default output format */
-const DEFAULT_OUTPUT_FORMAT = 'json' as const;
-
 /** File permissions for sensitive config files (owner read/write only) */
 const SECURE_FILE_MODE = 0o600;
+
+// ============================================================================
+// Helpers
+// ============================================================================
 
 /** Set secure permissions on a file (no-op on Windows) */
 function setSecurePermissions(filePath: string): void {
@@ -49,132 +96,15 @@ function setSecurePermissions(filePath: string): void {
     }
 }
 
-/** Result from executing a query */
-interface QueryResult {
-    rowCount?: number;
-    rows?: unknown[];
-    error?: string;
-}
-
-/** Schema introspection result */
-interface SchemaInfo {
-    [tableName: string]: {
-        columns: unknown[];
-    };
-}
-
-/** Narrowed error type with message */
-interface ErrorWithMessage {
-    message: string;
-    stack?: string;
-}
-
-function isErrorWithMessage(error: unknown): error is ErrorWithMessage {
-    return (
-        typeof error === 'object' &&
-        error !== null &&
-        'message' in error &&
-        typeof (error as ErrorWithMessage).message === 'string'
-    );
-}
-
+/** Get error message from unknown error */
 function getErrorMessage(error: unknown): string {
-    if (isErrorWithMessage(error)) {
+    if (error instanceof Error) {
         return error.message;
     }
     return String(error);
 }
 
-/**
- * Validates that an identifier (table/column name) is safe to interpolate into SQL.
- * Prevents SQL injection via maliciously-named database objects.
- */
-function validateIdentifier(name: string, type: 'table' | 'column'): void {
-    if (!SAFE_IDENTIFIER.test(name)) {
-        throw new Error(`Invalid ${type} name: "${name}". Names must start with a letter or underscore and contain only alphanumeric characters and underscores.`);
-    }
-}
-
-/**
- * Quote an identifier for safe use in SQL queries.
- * PostgreSQL uses double quotes, MySQL/SQLite use backticks.
- */
-function quoteIdentifier(name: string, dbType: DbType): string {
-    return dbType === DB_TYPES.POSTGRES ? `"${name}"` : `\`${name}\``;
-}
-
-/** Supported output formats */
-type OutputFormat = 'json' | 'markdown';
-
-/**
- * Escape a value for safe inclusion in a markdown table cell
- */
-function escapeMarkdownCell(val: unknown): string {
-    if (val === null) return '_null_';
-    if (val === undefined) return '_undefined_';
-    if (val === '') return '_empty_';
-
-    // Handle objects/arrays (e.g., JSONB columns) - stringify them
-    const strVal = typeof val === 'object' ? JSON.stringify(val) : String(val);
-
-    // Escape pipes and normalize whitespace (newlines, carriage returns, tabs)
-    return strVal.replace(/\|/g, '\\|').replace(/[\r\n\t]+/g, ' ');
-}
-
-/**
- * Format query results as a markdown table
- */
-function formatAsMarkdown(rows: unknown[]): string {
-    if (!Array.isArray(rows) || rows.length === 0) {
-        return '_No rows returned_';
-    }
-
-    const firstRow = rows[0] as Record<string, unknown>;
-    const columns = Object.keys(firstRow);
-
-    if (columns.length === 0) {
-        return '_No columns_';
-    }
-
-    // Header row - escape column names too (they come from the database)
-    const escapedColumns = columns.map((col) => col.replace(/\|/g, '\\|'));
-    const header = '| ' + escapedColumns.join(' | ') + ' |';
-    const separator = '| ' + columns.map(() => '---').join(' | ') + ' |';
-
-    // Data rows
-    const dataRows = rows.map((row) => {
-        const r = row as Record<string, unknown>;
-        const values = columns.map((col) => escapeMarkdownCell(r[col]));
-        return '| ' + values.join(' | ') + ' |';
-    });
-
-    return [header, separator, ...dataRows].join('\n');
-}
-
-/**
- * Format output based on format option
- */
-function formatOutput(data: unknown, format: OutputFormat): string {
-    if (format === 'markdown') {
-        // If data has a 'rows' property, format those as a table
-        if (typeof data === 'object' && data !== null && 'rows' in data) {
-            const d = data as { rows: unknown[]; rowCount?: number };
-            const table = formatAsMarkdown(d.rows);
-            return d.rowCount !== undefined ? `${d.rowCount} rows\n\n${table}` : table;
-        }
-        // If it's an array, format as table directly
-        if (Array.isArray(data)) {
-            return formatAsMarkdown(data);
-        }
-        // Otherwise fall back to JSON
-        return JSON.stringify(data, null, 2);
-    }
-    return JSON.stringify(data, null, 2);
-}
-
-/**
- * Prompt for password input (hidden)
- */
+/** Prompt for password input (hidden) */
 async function promptPassword(message: string): Promise<string> {
     const result = await p.password({ message });
     if (p.isCancel(result)) {
@@ -183,167 +113,18 @@ async function promptPassword(message: string): Promise<string> {
     return result;
 }
 
-/**
- * Logs a query and its result to a connection-specific log file
- */
-function logQuery(connectionName: string, query: string, result: QueryResult): void {
-    ensureLogsDir();
-    const logFile = path.join(getLogsDir(), `${connectionName}.md`);
-    const timestamp = new Date().toISOString();
-
-    // Truncate large result sets for logging
-    let logResult = result;
-    if (result && Array.isArray(result.rows) && result.rows.length > MAX_LOG_ROWS) {
-        const omittedCount = result.rows.length - MAX_LOG_ROWS;
-        logResult = {
-            ...result,
-            rows: [
-                ...result.rows.slice(0, MAX_LOG_ROWS),
-                `... ${omittedCount.toLocaleString()} ${omittedCount === 1 ? 'result' : 'results'} omitted ...`,
-            ],
-        };
-    }
-
-    const logEntry = `${timestamp}
-
-\`\`\`sql
-${query}
-\`\`\`
-
-\`\`\`json
-${JSON.stringify(logResult, null, 2)}
-\`\`\`
-
----
-
-`;
-
-    fs.appendFileSync(logFile, logEntry, 'utf-8');
-}
-
-/** Cached schema data with metadata */
-interface CachedSchema {
-    cachedAt: string;
-    connectionName: string;
-    schema: SchemaInfo;
-}
-
-/**
- * Get the cache file path for a connection's schema
- */
-function getSchemaCachePath(connectionName: string): string {
-    // SECURITY: Validate connection name to prevent path traversal
-    if (!SAFE_IDENTIFIER.test(connectionName)) {
-        throw new Error(`Invalid connection name for caching: "${connectionName}"`);
-    }
-    return path.join(getCacheDir(), `${connectionName}.schema.json`);
-}
-
-/**
- * Basic validation that parsed data matches CachedSchema structure
- */
-function isValidCachedSchema(data: unknown): data is CachedSchema {
-    return (
-        typeof data === 'object' &&
-        data !== null &&
-        typeof (data as CachedSchema).cachedAt === 'string' &&
-        typeof (data as CachedSchema).connectionName === 'string' &&
-        typeof (data as CachedSchema).schema === 'object'
-    );
-}
-
-/**
- * Get human-readable cache age
- */
-function getCacheAge(cachedAt: string): string {
-    const cached = new Date(cachedAt);
-    const now = new Date();
-    const diffMs = now.getTime() - cached.getTime();
-    const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
-    const diffDays = Math.floor(diffHours / 24);
-
-    if (diffDays > 0) return `${diffDays} day${diffDays > 1 ? 's' : ''} ago`;
-    if (diffHours > 0) return `${diffHours} hour${diffHours > 1 ? 's' : ''} ago`;
-    const diffMins = Math.floor(diffMs / (1000 * 60));
-    if (diffMins > 0) return `${diffMins} minute${diffMins > 1 ? 's' : ''} ago`;
-    return 'just now';
-}
-
-/**
- * Read cached schema for a connection (if it exists and is valid)
- */
-function readSchemaCache(connectionName: string): CachedSchema | null {
-    const cachePath = getSchemaCachePath(connectionName);
-    if (!fs.existsSync(cachePath)) {
-        return null;
-    }
-    try {
-        const content = fs.readFileSync(cachePath, 'utf-8');
-        const parsed = JSON.parse(content);
-
-        // Validate structure
-        if (!isValidCachedSchema(parsed)) {
-            return null;
-        }
-
-        // Verify connection name matches (prevents using wrong cache)
-        if (parsed.connectionName !== connectionName) {
-            return null;
-        }
-
-        return parsed;
-    } catch {
-        return null;
+/** Require connection option or exit */
+function requireConnection(opts: { connection?: string }): asserts opts is { connection: string } {
+    if (!opts.connection) {
+        console.error('Error: --connection (-c) is required. Specify which database to use.');
+        process.exit(1);
     }
 }
 
-/**
- * Write schema to cache
- */
-function writeSchemaCache(connectionName: string, schema: SchemaInfo): void {
-    ensureCacheDir();
-    const cachePath = getSchemaCachePath(connectionName);
-    const cacheData: CachedSchema = {
-        cachedAt: new Date().toISOString(),
-        connectionName,
-        schema,
-    };
-    fs.writeFileSync(cachePath, JSON.stringify(cacheData, null, 2), 'utf-8');
-    setSecurePermissions(cachePath);
-}
+// ============================================================================
+// CLI Setup
+// ============================================================================
 
-/**
- * Create a Bun.SQL connection from resolved config
- */
-function createConnection(config: ResolvedConnectionConfig): ReturnType<typeof SQL> {
-    return new SQL(config.url);
-}
-
-/**
- * Execute a command with a database connection
- * Errors are propagated to the caller - handle them at the CLI layer
- */
-async function withConnection<T>(
-    connectionName: string,
-    configPath: string | undefined,
-    handler: (sql: ReturnType<typeof SQL>, dbType: string) => Promise<T>
-): Promise<T> {
-    let sql: ReturnType<typeof SQL> | null = null;
-
-    try {
-        const config = await resolveConnection(connectionName, configPath);
-        sql = createConnection(config);
-        return await handler(sql, config.type);
-    } finally {
-        if (sql) {
-            sql.close();
-        }
-    }
-}
-
-/**
- * Set up CLI with Commander
- */
 function setupCLI() {
     const program = new Command();
 
@@ -366,33 +147,31 @@ function setupCLI() {
             }
         });
 
+    // ========================================================================
+    // Database Commands
+    // ========================================================================
+
     // Tables command
     program
         .command('tables')
         .description('List all tables in the database')
         .action(async () => {
             const opts = program.opts();
-            if (!opts.connection) {
-                console.error('Error: --connection (-c) is required. Specify which database to use.');
-                process.exit(1);
-            }
+            requireConnection(opts);
             await withConnection(opts.connection, opts.config, async (sql, dbType) => {
-                const tables = await getTables(sql, dbType);
+                const tables = await getTables(sql, dbType as DbType);
                 console.log(JSON.stringify({ tables }, null, 2));
             });
         });
 
-    // Introspect command
+    // Introspect command (with caching)
     program
         .command('introspect')
         .description('Get schema information for all tables (cached)')
         .option('--refresh', 'force refresh the cached schema')
         .action(async (cmdOpts: { refresh?: boolean }) => {
             const opts = program.opts();
-            if (!opts.connection) {
-                console.error('Error: --connection (-c) is required. Specify which database to use.');
-                process.exit(1);
-            }
+            requireConnection(opts);
 
             // Check cache first (unless --refresh)
             if (!cmdOpts.refresh) {
@@ -421,10 +200,10 @@ function setupCLI() {
 
             // Fetch fresh schema
             await withConnection(opts.connection, opts.config, async (sql, dbType) => {
-                const result = await introspectSchema(sql, dbType);
+                const result = await introspectSchema(sql, dbType as DbType);
 
                 // Cache the result
-                writeSchemaCache(opts.connection, result);
+                writeSchemaCache(opts.connection, result as SchemaInfo);
 
                 const output = {
                     ...result,
@@ -443,12 +222,9 @@ function setupCLI() {
         .description('Describe a specific table schema')
         .action(async (tableName: string) => {
             const opts = program.opts();
-            if (!opts.connection) {
-                console.error('Error: --connection (-c) is required. Specify which database to use.');
-                process.exit(1);
-            }
+            requireConnection(opts);
             await withConnection(opts.connection, opts.config, async (sql, dbType) => {
-                const result = await describeTable(sql, dbType, tableName);
+                const result = await describeTable(sql, dbType as DbType, tableName);
                 console.log(JSON.stringify(result, null, 2));
             });
         });
@@ -460,24 +236,25 @@ function setupCLI() {
         .option('-n, --limit <number>', 'number of rows to sample', String(DEFAULT_SAMPLE_LIMIT))
         .action(async (tableName: string, cmdOpts: { limit: string }) => {
             const opts = program.opts();
-            if (!opts.connection) {
-                console.error('Error: --connection (-c) is required. Specify which database to use.');
-                process.exit(1);
-            }
+            requireConnection(opts);
+
             const limit = parseInt(cmdOpts.limit, 10);
             if (isNaN(limit) || limit < 1 || limit > MAX_SAMPLE_LIMIT) {
                 console.error(`Error: --limit must be between 1 and ${MAX_SAMPLE_LIMIT}`);
                 process.exit(1);
             }
-            await withConnection(opts.connection, opts.config, async (sql, dbType) => {
-                const result = await sampleTable(sql, dbType, tableName, limit);
 
-                // Log the sample if enabled (consistent with query command)
+            await withConnection(opts.connection, opts.config, async (sql, dbType) => {
+                const result = await sampleTable(sql, dbType as DbType, tableName, limit);
+
+                // Log if enabled
                 const connConfig = getConnectionConfig(opts.connection, opts.config);
                 const loggingEnabled = connConfig.logging === true && opts.log !== false;
                 if (loggingEnabled) {
-                    const syntheticQuery = `-- sherlock sample ${tableName} --limit ${limit}`;
-                    logQuery(opts.connection, syntheticQuery, { rowCount: result.rowCount, rows: result.rows });
+                    logQuery(opts.connection, `-- sherlock sample ${tableName} --limit ${limit}`, {
+                        rowCount: result.rowCount,
+                        rows: result.rows,
+                    });
                 }
 
                 const format = opts.format as OutputFormat;
@@ -491,12 +268,9 @@ function setupCLI() {
         .description('Get data profiling stats for a table (row count, nulls, distinct values)')
         .action(async (tableName: string) => {
             const opts = program.opts();
-            if (!opts.connection) {
-                console.error('Error: --connection (-c) is required. Specify which database to use.');
-                process.exit(1);
-            }
+            requireConnection(opts);
             await withConnection(opts.connection, opts.config, async (sql, dbType) => {
-                const result = await getTableStats(sql, dbType, tableName);
+                const result = await getTableStats(sql, dbType as DbType, tableName);
                 const format = opts.format as OutputFormat;
                 if (format === 'markdown') {
                     console.log(`## Stats for \`${tableName}\`\n\n**Row count:** ${result.rowCount.toLocaleString()}\n\n### Column Stats\n\n${formatAsMarkdown(result.columns)}`);
@@ -506,18 +280,15 @@ function setupCLI() {
             });
         });
 
-    // FK (foreign keys) command
+    // FK command
     program
         .command('fk <table>')
         .description('Show foreign key relationships for a table')
         .action(async (tableName: string) => {
             const opts = program.opts();
-            if (!opts.connection) {
-                console.error('Error: --connection (-c) is required. Specify which database to use.');
-                process.exit(1);
-            }
+            requireConnection(opts);
             await withConnection(opts.connection, opts.config, async (sql, dbType) => {
-                const result = await getForeignKeys(sql, dbType, tableName);
+                const result = await getForeignKeys(sql, dbType as DbType, tableName);
                 const format = opts.format as OutputFormat;
                 if (format === 'markdown') {
                     let output = `## Foreign Keys for \`${tableName}\`\n\n`;
@@ -542,14 +313,10 @@ function setupCLI() {
         .description('Show indexes for a table')
         .action(async (tableName: string) => {
             const opts = program.opts();
-            if (!opts.connection) {
-                console.error('Error: --connection (-c) is required. Specify which database to use.');
-                process.exit(1);
-            }
+            requireConnection(opts);
             await withConnection(opts.connection, opts.config, async (sql, dbType) => {
-                const result = await getIndexes(sql, dbType, tableName);
+                const result = await getIndexes(sql, dbType as DbType, tableName);
                 const format = opts.format as OutputFormat;
-                // For indexes, format the indexes array as table if markdown
                 if (format === 'markdown') {
                     console.log(`## Indexes for \`${tableName}\`\n\n${result.indexCount} indexes\n\n${formatAsMarkdown(result.indexes)}`);
                 } else {
@@ -564,25 +331,19 @@ function setupCLI() {
         .description('Execute a read-only SQL query')
         .action(async (sqlQuery: string) => {
             const opts = program.opts();
+            requireConnection(opts);
 
-            if (!opts.connection) {
-                console.error('Error: --connection (-c) is required. Specify which database to use.');
-                process.exit(1);
-            }
-
-            // Enforce read-only with comprehensive validation
+            // Enforce read-only
             const validation = validateReadOnlyQuery(sqlQuery);
             if (!validation.valid) {
                 console.error(JSON.stringify({ error: validation.error }));
                 process.exit(1);
             }
 
-            await withConnection(opts.connection, opts.config, async (sql, dbType) => {
-                const result = await executeQuery(sql, dbType, sqlQuery);
+            await withConnection(opts.connection, opts.config, async (sql) => {
+                const result = await executeQuery(sql, sqlQuery);
 
-                // Log the query and result if enabled in connection config
-                // Logging is disabled by default for security (prod data protection)
-                // --no-log CLI flag can override to force logging off
+                // Log if enabled
                 const connConfig = getConnectionConfig(opts.connection, opts.config);
                 const loggingEnabled = connConfig.logging === true && opts.log !== false;
                 if (loggingEnabled) {
@@ -593,6 +354,10 @@ function setupCLI() {
                 console.log(formatOutput(result, format));
             });
         });
+
+    // ========================================================================
+    // Connection Management Commands
+    // ========================================================================
 
     // Connections list command
     program
@@ -608,6 +373,31 @@ function setupCLI() {
                 process.exit(1);
             }
         });
+
+    // Test connection command
+    program
+        .command('test <connectionName>')
+        .description('Test a database connection')
+        .action(async (connectionName: string) => {
+            const opts = program.opts();
+
+            console.log(`Testing connection: ${connectionName}...`);
+
+            try {
+                await withConnection(connectionName, opts.config, async (sql, dbType) => {
+                    await sql.unsafe(TEST_QUERIES[dbType as DbType]);
+                });
+                console.log(`\x1b[32m✓ Connection "${connectionName}" successful!\x1b[0m`);
+            } catch (error: unknown) {
+                console.error(`\x1b[31m✗ Connection "${connectionName}" failed\x1b[0m`);
+                console.error(`  Error: ${getErrorMessage(error)}`);
+                process.exit(1);
+            }
+        });
+
+    // ========================================================================
+    // Config Commands
+    // ========================================================================
 
     // Setup command (interactive wizard)
     program
@@ -649,32 +439,6 @@ function setupCLI() {
             await initConfig();
         });
 
-    // Test connection command
-    program
-        .command('test <connectionName>')
-        .description('Test a database connection')
-        .action(async (connectionName: string) => {
-            const opts = program.opts();
-
-            console.log(`Testing connection: ${connectionName}...`);
-
-            try {
-                const config = await resolveConnection(connectionName, opts.config);
-                const sql = createConnection(config);
-
-                // Simple query to test connection
-                await sql.unsafe(TEST_QUERIES[config.type]);
-                sql.close();
-
-                console.log(`\x1b[32m✓ Connection "${connectionName}" successful!\x1b[0m`);
-                console.log(`  Type: ${config.type}`);
-            } catch (error: unknown) {
-                console.error(`\x1b[31m✗ Connection "${connectionName}" failed\x1b[0m`);
-                console.error(`  Error: ${getErrorMessage(error)}`);
-                process.exit(1);
-            }
-        });
-
     // Migrate command
     program
         .command('migrate')
@@ -684,7 +448,10 @@ function setupCLI() {
             await migrateConfig(cmdOpts.from);
         });
 
-    // Keychain command group
+    // ========================================================================
+    // Keychain Commands
+    // ========================================================================
+
     const keychain = program
         .command('keychain')
         .description('Manage credentials in OS keychain');
@@ -693,15 +460,11 @@ function setupCLI() {
         .command('set <account>')
         .description('Store a password in the keychain')
         .action(async (account: string) => {
-            // SECURITY: Always prompt for password - never accept via CLI args
-            // This prevents passwords from appearing in shell history
             const password = await promptPassword(`Enter password for "${account}": `);
-
             if (!password) {
                 console.error('No password provided');
                 process.exit(1);
             }
-
             setKeychainPassword(account, password);
             console.log(`\x1b[32m✓\x1b[0m Password stored for account "${account}"`);
             console.log(`\nUse in config.json:`);
@@ -740,7 +503,6 @@ function setupCLI() {
             try {
                 const connections = listConnections(opts.config);
                 console.log('Keychain status for connections:\n');
-
                 for (const conn of connections) {
                     const hasPassword = hasKeychainPassword(conn);
                     const status = hasPassword ? '\x1b[32m✓\x1b[0m' : '\x1b[31m✗\x1b[0m';
@@ -755,428 +517,10 @@ function setupCLI() {
     return program;
 }
 
-async function getTables(sql: ReturnType<typeof SQL>, dbType: DbType): Promise<string[]> {
-    let query: string;
+// ============================================================================
+// Config Initialization & Migration
+// ============================================================================
 
-    if (dbType === DB_TYPES.POSTGRES) {
-        query = "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' ORDER BY table_name";
-    } else if (dbType === DB_TYPES.SQLITE) {
-        query = "SELECT name as table_name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name";
-    } else {
-        // MySQL
-        query = 'SHOW TABLES';
-    }
-
-    const result = await sql.unsafe(query);
-
-    if (dbType === DB_TYPES.POSTGRES || dbType === DB_TYPES.SQLITE) {
-        return result.map((row: Record<string, unknown>) =>
-            String(row.table_name || row.name)
-        );
-    } else {
-        // MySQL returns { Tables_in_<dbname>: 'tablename' }
-        const key = Object.keys(result[0] as object)[0];
-        return result.map((row: Record<string, unknown>) => String(row[key]));
-    }
-}
-
-interface TableDescription {
-    table: string;
-    columns: unknown[];
-}
-
-async function describeTable(
-    sql: ReturnType<typeof SQL>,
-    dbType: DbType,
-    tableName: string
-): Promise<TableDescription> {
-    // SECURITY: Validate identifier format to prevent SQL injection via malicious table names
-    validateIdentifier(tableName, 'table');
-
-    // SECURITY: Validate table name against actual tables
-    const validTables = await getTables(sql, dbType);
-    if (!validTables.includes(tableName)) {
-        throw new Error(`Table "${tableName}" not found. Use 'sherlock tables' to list available tables.`);
-    }
-
-    let query: string;
-
-    if (dbType === DB_TYPES.POSTGRES) {
-        query = `
-            SELECT
-                column_name,
-                data_type,
-                is_nullable,
-                column_default,
-                character_maximum_length
-            FROM information_schema.columns
-            WHERE table_name = '${tableName}'
-            ORDER BY ordinal_position
-        `;
-    } else if (dbType === DB_TYPES.SQLITE) {
-        query = `PRAGMA table_info(\`${tableName}\`)`;
-    } else {
-        // MySQL
-        query = `DESCRIBE \`${tableName}\``;
-    }
-
-    const result = await sql.unsafe(query);
-    return { table: tableName, columns: result };
-}
-
-/** Result from sampling a table */
-interface SampleResult {
-    table: string;
-    rowCount: number;
-    rows: unknown[];
-}
-
-async function sampleTable(
-    sql: ReturnType<typeof SQL>,
-    dbType: DbType,
-    tableName: string,
-    limit: number
-): Promise<SampleResult> {
-    // SECURITY: Validate identifier format to prevent SQL injection via malicious table names
-    validateIdentifier(tableName, 'table');
-
-    // SECURITY: Validate table name against actual tables
-    const validTables = await getTables(sql, dbType);
-    if (!validTables.includes(tableName)) {
-        throw new Error(`Table "${tableName}" not found. Use 'sherlock tables' to list available tables.`);
-    }
-
-    let query: string;
-    const quotedTable = dbType === DB_TYPES.POSTGRES ? `"${tableName}"` : `\`${tableName}\``;
-
-    if (dbType === DB_TYPES.MYSQL) {
-        query = `SELECT * FROM ${quotedTable} ORDER BY RAND() LIMIT ${limit}`;
-    } else {
-        // PostgreSQL and SQLite both use RANDOM()
-        query = `SELECT * FROM ${quotedTable} ORDER BY RANDOM() LIMIT ${limit}`;
-    }
-
-    const result = await sql.unsafe(query);
-    return {
-        table: tableName,
-        rowCount: Array.isArray(result) ? result.length : 0,
-        rows: result,
-    };
-}
-
-/** Result from getting indexes for a table */
-interface IndexesResult {
-    table: string;
-    indexCount: number;
-    indexes: unknown[];  // Shape varies by DB type: pg_indexes rows, SHOW INDEX rows, or PRAGMA results
-}
-
-async function getIndexes(
-    sql: ReturnType<typeof SQL>,
-    dbType: DbType,
-    tableName: string
-): Promise<IndexesResult> {
-    // SECURITY: Validate identifier format to prevent SQL injection via malicious table names
-    validateIdentifier(tableName, 'table');
-
-    // SECURITY: Validate table name against actual tables
-    const validTables = await getTables(sql, dbType);
-    if (!validTables.includes(tableName)) {
-        throw new Error(`Table "${tableName}" not found. Use 'sherlock tables' to list available tables.`);
-    }
-
-    let query: string;
-
-    if (dbType === DB_TYPES.POSTGRES) {
-        query = `
-            SELECT
-                indexname as index_name,
-                indexdef as index_definition
-            FROM pg_indexes
-            WHERE schemaname = 'public'
-              AND tablename = '${tableName}'
-            ORDER BY indexname
-        `;
-    } else if (dbType === DB_TYPES.SQLITE) {
-        query = `PRAGMA index_list(\`${tableName}\`)`;
-    } else {
-        // MySQL
-        query = `SHOW INDEX FROM \`${tableName}\``;
-    }
-
-    const result = await sql.unsafe(query);
-    return {
-        table: tableName,
-        indexCount: Array.isArray(result) ? result.length : 0,
-        indexes: result,
-    };
-}
-
-/** Foreign key relationship (outgoing) */
-interface FKReference {
-    column: string;
-    referencesTable: string;
-    referencesColumn: string;
-}
-
-/** Foreign key relationship (incoming) */
-interface FKReferencedBy {
-    fromTable: string;
-    fromColumn: string;
-    toColumn: string;
-}
-
-/** Foreign key result for a table */
-interface ForeignKeysResult {
-    table: string;
-    references: FKReference[];
-    referencedBy: FKReferencedBy[];
-}
-
-async function getForeignKeys(
-    sql: ReturnType<typeof SQL>,
-    dbType: DbType,
-    tableName: string
-): Promise<ForeignKeysResult> {
-    // SECURITY: Validate identifier format to prevent SQL injection via malicious table names
-    validateIdentifier(tableName, 'table');
-
-    // SECURITY: Validate table name against actual tables
-    const validTables = await getTables(sql, dbType);
-    if (!validTables.includes(tableName)) {
-        throw new Error(`Table "${tableName}" not found. Use 'sherlock tables' to list available tables.`);
-    }
-
-    let references: FKReference[] = [];
-    let referencedBy: FKReferencedBy[] = [];
-
-    if (dbType === DB_TYPES.POSTGRES) {
-        // Outgoing FKs: what this table references
-        const outgoingQuery = `
-            SELECT
-                kcu.column_name as column,
-                ccu.table_name as references_table,
-                ccu.column_name as references_column
-            FROM information_schema.table_constraints tc
-            JOIN information_schema.key_column_usage kcu
-                ON tc.constraint_name = kcu.constraint_name
-                AND tc.table_schema = kcu.table_schema
-            JOIN information_schema.constraint_column_usage ccu
-                ON tc.constraint_name = ccu.constraint_name
-            WHERE tc.constraint_type = 'FOREIGN KEY'
-                AND tc.table_schema = 'public'
-                AND tc.table_name = '${tableName}'
-        `;
-        const outgoing = await sql.unsafe(outgoingQuery);
-        references = (outgoing as Record<string, unknown>[]).map(row => ({
-            column: String(row.column),
-            referencesTable: String(row.references_table),
-            referencesColumn: String(row.references_column),
-        }));
-
-        // Incoming FKs: what references this table
-        const incomingQuery = `
-            SELECT
-                tc.table_name as from_table,
-                kcu.column_name as from_column,
-                ccu.column_name as to_column
-            FROM information_schema.table_constraints tc
-            JOIN information_schema.key_column_usage kcu
-                ON tc.constraint_name = kcu.constraint_name
-                AND tc.table_schema = kcu.table_schema
-            JOIN information_schema.constraint_column_usage ccu
-                ON tc.constraint_name = ccu.constraint_name
-            WHERE tc.constraint_type = 'FOREIGN KEY'
-                AND tc.table_schema = 'public'
-                AND ccu.table_name = '${tableName}'
-        `;
-        const incoming = await sql.unsafe(incomingQuery);
-        referencedBy = (incoming as Record<string, unknown>[]).map(row => ({
-            fromTable: String(row.from_table),
-            fromColumn: String(row.from_column),
-            toColumn: String(row.to_column),
-        }));
-
-    } else if (dbType === DB_TYPES.MYSQL) {
-        // Get current database name for MySQL
-        const dbResult = await sql.unsafe('SELECT DATABASE() as db');
-        const currentDb = String((dbResult[0] as Record<string, unknown>).db);
-
-        // SECURITY: Validate database name to prevent injection
-        // Database names can contain special characters in MySQL
-        if (!SAFE_IDENTIFIER.test(currentDb)) {
-            throw new Error(`Database name "${currentDb}" contains unsupported characters for FK lookup`);
-        }
-
-        // Outgoing FKs
-        const outgoingQuery = `
-            SELECT
-                column_name as col,
-                referenced_table_name as ref_table,
-                referenced_column_name as ref_col
-            FROM information_schema.key_column_usage
-            WHERE table_schema = '${currentDb}'
-                AND table_name = '${tableName}'
-                AND referenced_table_name IS NOT NULL
-        `;
-        const outgoing = await sql.unsafe(outgoingQuery);
-        references = (outgoing as Record<string, unknown>[]).map(row => ({
-            column: String(row.col),
-            referencesTable: String(row.ref_table),
-            referencesColumn: String(row.ref_col),
-        }));
-
-        // Incoming FKs
-        const incomingQuery = `
-            SELECT
-                table_name as from_tbl,
-                column_name as from_col,
-                referenced_column_name as to_col
-            FROM information_schema.key_column_usage
-            WHERE table_schema = '${currentDb}'
-                AND referenced_table_name = '${tableName}'
-        `;
-        const incoming = await sql.unsafe(incomingQuery);
-        referencedBy = (incoming as Record<string, unknown>[]).map(row => ({
-            fromTable: String(row.from_tbl),
-            fromColumn: String(row.from_col),
-            toColumn: String(row.to_col),
-        }));
-
-    } else if (dbType === DB_TYPES.SQLITE) {
-        // SQLite: PRAGMA foreign_key_list only gives outgoing FKs
-        const quotedTable = quoteIdentifier(tableName, dbType);
-        const outgoing = await sql.unsafe(`PRAGMA foreign_key_list(${quotedTable})`);
-        references = (outgoing as Record<string, unknown>[]).map(row => ({
-            column: String(row.from),
-            referencesTable: String(row.table),
-            referencesColumn: String(row.to),
-        }));
-
-        // SQLite doesn't easily support finding incoming FKs without scanning all tables
-        // We'd need to iterate all tables and check their PRAGMA foreign_key_list
-        // For now, return empty (documented limitation)
-        referencedBy = [];
-    } else {
-        throw new Error(`Foreign key lookup not supported for database type: ${dbType}`);
-    }
-
-    return {
-        table: tableName,
-        references,
-        referencedBy,
-    };
-}
-
-/** Stats result for a single column */
-interface ColumnStats {
-    column: string;
-    nullCount: number;
-    distinctCount: number;
-}
-
-/** Stats result for a table */
-interface TableStats {
-    table: string;
-    rowCount: number;
-    columns: ColumnStats[];
-}
-
-async function getTableStats(
-    sql: ReturnType<typeof SQL>,
-    dbType: DbType,
-    tableName: string
-): Promise<TableStats> {
-    // SECURITY: Validate identifier format to prevent SQL injection via malicious table names
-    validateIdentifier(tableName, 'table');
-
-    // SECURITY: Validate table name against actual tables
-    const validTables = await getTables(sql, dbType);
-    if (!validTables.includes(tableName)) {
-        throw new Error(`Table "${tableName}" not found. Use 'sherlock tables' to list available tables.`);
-    }
-
-    // Get column info first
-    const tableDesc = await describeTable(sql, dbType, tableName);
-    const columnNames: string[] = [];
-
-    // PostgreSQL uses column_name, SQLite uses name, MySQL uses Field
-    for (const col of tableDesc.columns) {
-        const c = col as Record<string, unknown>;
-        const name = c.column_name || c.name || c.Field;
-        if (typeof name === 'string') {
-            columnNames.push(name);
-        }
-    }
-
-    // Validate all column names upfront
-    for (const colName of columnNames) {
-        validateIdentifier(colName, 'column');
-    }
-
-    const quotedTable = quoteIdentifier(tableName, dbType);
-
-    // Build a SINGLE query that gets all stats in one table scan
-    // This avoids N+1 queries which would destroy performance on large tables
-    const columnExpressions = columnNames.map(col => {
-        const quotedCol = quoteIdentifier(col, dbType);
-        return `COUNT(*) - COUNT(${quotedCol}) as "${col}_null_count", COUNT(DISTINCT ${quotedCol}) as "${col}_distinct_count"`;
-    }).join(', ');
-
-    const statsQuery = `SELECT COUNT(*) as cnt${columnNames.length > 0 ? ', ' + columnExpressions : ''} FROM ${quotedTable}`;
-    const statsResult = await sql.unsafe(statsQuery);
-    const row = statsResult[0] as Record<string, unknown>;
-
-    const rowCount = Number(row.cnt) || 0;
-
-    // Parse results for each column
-    const columnStats: ColumnStats[] = columnNames.map(col => ({
-        column: col,
-        nullCount: Number(row[`${col}_null_count`]) || 0,
-        distinctCount: Number(row[`${col}_distinct_count`]) || 0,
-    }));
-
-    return {
-        table: tableName,
-        rowCount,
-        columns: columnStats,
-    };
-}
-
-async function introspectSchema(sql: ReturnType<typeof SQL>, dbType: DbType): Promise<SchemaInfo> {
-    const tables = await getTables(sql, dbType);
-    const schema: SchemaInfo = {};
-
-    for (const table of tables) {
-        const tableInfo = await describeTable(sql, dbType, table);
-        schema[table] = tableInfo;
-    }
-
-    return schema;
-}
-
-async function executeQuery(
-    sql: ReturnType<typeof SQL>,
-    _dbType: DbType,
-    query: string
-): Promise<QueryResult> {
-    try {
-        const result = await sql.unsafe(query);
-
-        return {
-            rowCount: Array.isArray(result) ? result.length : 0,
-            rows: result,
-        };
-    } catch (error: unknown) {
-        return {
-            error: getErrorMessage(error),
-        };
-    }
-}
-
-/**
- * Initialize Sherlock configuration
- */
 async function initConfig(): Promise<void> {
     ensureConfigDir();
     const configDir = getConfigDir();
@@ -1188,7 +532,6 @@ async function initConfig(): Promise<void> {
         return;
     }
 
-    // Create example config
     const exampleConfig = {
         version: '2.0',
         connections: {
@@ -1214,7 +557,6 @@ async function initConfig(): Promise<void> {
     fs.writeFileSync(configPath, JSON.stringify(exampleConfig, null, 2), 'utf-8');
     setSecurePermissions(configPath);
 
-    // Create example .env
     const exampleEnv = `# Sherlock Database Credentials
 # Set your database credentials here
 
@@ -1244,9 +586,6 @@ Next steps:
 `);
 }
 
-/**
- * Migrate legacy config.ts to new JSON format
- */
 async function migrateConfig(fromPath: string): Promise<void> {
     const absoluteFromPath = path.resolve(fromPath);
 
@@ -1257,7 +596,6 @@ async function migrateConfig(fromPath: string): Promise<void> {
 
     console.log(`Migrating from: ${absoluteFromPath}`);
 
-    // Load legacy config
     // eslint-disable-next-line @typescript-eslint/no-var-requires
     const legacyConfig = require(absoluteFromPath);
 
@@ -1266,7 +604,6 @@ async function migrateConfig(fromPath: string): Promise<void> {
         process.exit(1);
     }
 
-    // Legacy TypeORM config format
     interface LegacyConnectionOpts {
         type: string;
         host?: string;
@@ -1276,7 +613,6 @@ async function migrateConfig(fromPath: string): Promise<void> {
         database?: string;
     }
 
-    // Convert to new format
     const newConnections: Record<string, ConnectionConfig> = {};
     const envVars: string[] = [];
 
@@ -1295,8 +631,6 @@ async function migrateConfig(fromPath: string): Promise<void> {
             newConn.database = opts.database;
             newConn.username = { $env: `${envPrefix}_USERNAME` };
             newConn.password = { $env: `${envPrefix}_PASSWORD` };
-
-            // Track env vars for .env file
             envVars.push(`${envPrefix}_USERNAME=${opts.username || ''}`);
             envVars.push(`${envPrefix}_PASSWORD=${opts.password || ''}`);
         }
@@ -1309,13 +643,11 @@ async function migrateConfig(fromPath: string): Promise<void> {
         connections: newConnections,
     };
 
-    // Write to config directory
     ensureConfigDir();
     const configDir = getConfigDir();
     const configPath = path.join(configDir, 'config.json');
     const envPath = path.join(configDir, '.env');
 
-    // Check if files already exist
     if (fs.existsSync(configPath)) {
         console.log(`\x1b[33mWarning: ${configPath} already exists\x1b[0m`);
         const backupPath = configPath + '.backup.' + Date.now();
@@ -1323,12 +655,10 @@ async function migrateConfig(fromPath: string): Promise<void> {
         console.log(`  Backed up to: ${backupPath}`);
     }
 
-    // Write new config
     fs.writeFileSync(configPath, JSON.stringify(newConfig, null, 2), 'utf-8');
     setSecurePermissions(configPath);
     console.log(`\x1b[32m✓\x1b[0m Created: ${configPath}`);
 
-    // Write .env file
     const envContent = `# Sherlock Database Credentials
 # Generated by 'sherlock migrate' from ${fromPath}
 # IMPORTANT: Review and update these credentials!
@@ -1351,7 +681,10 @@ Migration complete!
 `);
 }
 
-// Set up and parse CLI with top-level error handling
+// ============================================================================
+// Main
+// ============================================================================
+
 const program = setupCLI();
 program.parseAsync(process.argv).catch((error: Error) => {
     console.error(JSON.stringify({
