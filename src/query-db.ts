@@ -27,6 +27,15 @@ import pkg from '../package.json';
 /** Maximum rows to include in query logs (truncate larger results) */
 const MAX_LOG_ROWS = 10;
 
+/** Default number of rows to sample */
+const DEFAULT_SAMPLE_LIMIT = 5;
+
+/** Maximum rows allowed for sample command (prevents DoS via ORDER BY RANDOM) */
+const MAX_SAMPLE_LIMIT = 1000;
+
+/** Valid SQL identifier pattern (prevents injection via malicious table/column names) */
+const SAFE_IDENTIFIER = /^[a-zA-Z_][a-zA-Z0-9_]*$/;
+
 /** File permissions for sensitive config files (owner read/write only) */
 const SECURE_FILE_MODE = 0o600;
 
@@ -71,6 +80,16 @@ function getErrorMessage(error: unknown): string {
         return error.message;
     }
     return String(error);
+}
+
+/**
+ * Validates that an identifier (table/column name) is safe to interpolate into SQL.
+ * Prevents SQL injection via maliciously-named database objects.
+ */
+function validateIdentifier(name: string, type: 'table' | 'column'): void {
+    if (!SAFE_IDENTIFIER.test(name)) {
+        throw new Error(`Invalid ${type} name: "${name}". Names must start with a letter or underscore and contain only alphanumeric characters and underscores.`);
+    }
 }
 
 /**
@@ -212,6 +231,37 @@ function setupCLI() {
             }
             await withConnection(opts.connection, opts.config, async (sql, dbType) => {
                 const result = await describeTable(sql, dbType, tableName);
+                console.log(JSON.stringify(result, null, 2));
+            });
+        });
+
+    // Sample command
+    program
+        .command('sample <table>')
+        .description('Get random sample rows from a table')
+        .option('-n, --limit <number>', 'number of rows to sample', String(DEFAULT_SAMPLE_LIMIT))
+        .action(async (tableName: string, cmdOpts: { limit: string }) => {
+            const opts = program.opts();
+            if (!opts.connection) {
+                console.error('Error: --connection (-c) is required. Specify which database to use.');
+                process.exit(1);
+            }
+            const limit = parseInt(cmdOpts.limit, 10);
+            if (isNaN(limit) || limit < 1 || limit > MAX_SAMPLE_LIMIT) {
+                console.error(`Error: --limit must be between 1 and ${MAX_SAMPLE_LIMIT}`);
+                process.exit(1);
+            }
+            await withConnection(opts.connection, opts.config, async (sql, dbType) => {
+                const result = await sampleTable(sql, dbType, tableName, limit);
+
+                // Log the sample if enabled (consistent with query command)
+                const connConfig = getConnectionConfig(opts.connection, opts.config);
+                const loggingEnabled = connConfig.logging === true && opts.log !== false;
+                if (loggingEnabled) {
+                    const syntheticQuery = `-- sherlock sample ${tableName} --limit ${limit}`;
+                    logQuery(opts.connection, syntheticQuery, { rowCount: result.rowCount, rows: result.rows });
+                }
+
                 console.log(JSON.stringify(result, null, 2));
             });
         });
@@ -447,7 +497,10 @@ async function describeTable(
     dbType: DbType,
     tableName: string
 ): Promise<TableDescription> {
-    // SECURITY: Validate table name against actual tables to prevent SQL injection
+    // SECURITY: Validate identifier format to prevent SQL injection via malicious table names
+    validateIdentifier(tableName, 'table');
+
+    // SECURITY: Validate table name against actual tables
     const validTables = await getTables(sql, dbType);
     if (!validTables.includes(tableName)) {
         throw new Error(`Table "${tableName}" not found. Use 'sherlock tables' to list available tables.`);
@@ -456,7 +509,6 @@ async function describeTable(
     let query: string;
 
     if (dbType === DB_TYPES.POSTGRES) {
-        // Table name is now validated - safe to interpolate
         query = `
             SELECT
                 column_name,
@@ -477,6 +529,46 @@ async function describeTable(
 
     const result = await sql.unsafe(query);
     return { table: tableName, columns: result };
+}
+
+/** Result from sampling a table */
+interface SampleResult {
+    table: string;
+    rowCount: number;
+    rows: unknown[];
+}
+
+async function sampleTable(
+    sql: ReturnType<typeof SQL>,
+    dbType: DbType,
+    tableName: string,
+    limit: number
+): Promise<SampleResult> {
+    // SECURITY: Validate identifier format to prevent SQL injection via malicious table names
+    validateIdentifier(tableName, 'table');
+
+    // SECURITY: Validate table name against actual tables
+    const validTables = await getTables(sql, dbType);
+    if (!validTables.includes(tableName)) {
+        throw new Error(`Table "${tableName}" not found. Use 'sherlock tables' to list available tables.`);
+    }
+
+    let query: string;
+    const quotedTable = dbType === DB_TYPES.POSTGRES ? `"${tableName}"` : `\`${tableName}\``;
+
+    if (dbType === DB_TYPES.MYSQL) {
+        query = `SELECT * FROM ${quotedTable} ORDER BY RAND() LIMIT ${limit}`;
+    } else {
+        // PostgreSQL and SQLite both use RANDOM()
+        query = `SELECT * FROM ${quotedTable} ORDER BY RANDOM() LIMIT ${limit}`;
+    }
+
+    const result = await sql.unsafe(query);
+    return {
+        table: tableName,
+        rowCount: Array.isArray(result) ? result.length : 0,
+        rows: result,
+    };
 }
 
 async function introspectSchema(sql: ReturnType<typeof SQL>, dbType: DbType): Promise<SchemaInfo> {
