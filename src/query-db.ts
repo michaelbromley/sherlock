@@ -95,6 +95,14 @@ function validateIdentifier(name: string, type: 'table' | 'column'): void {
     }
 }
 
+/**
+ * Quote an identifier for safe use in SQL queries.
+ * PostgreSQL uses double quotes, MySQL/SQLite use backticks.
+ */
+function quoteIdentifier(name: string, dbType: DbType): string {
+    return dbType === DB_TYPES.POSTGRES ? `"${name}"` : `\`${name}\``;
+}
+
 /** Supported output formats */
 type OutputFormat = 'json' | 'markdown';
 
@@ -477,6 +485,27 @@ function setupCLI() {
             });
         });
 
+    // Stats command
+    program
+        .command('stats <table>')
+        .description('Get data profiling stats for a table (row count, nulls, distinct values)')
+        .action(async (tableName: string) => {
+            const opts = program.opts();
+            if (!opts.connection) {
+                console.error('Error: --connection (-c) is required. Specify which database to use.');
+                process.exit(1);
+            }
+            await withConnection(opts.connection, opts.config, async (sql, dbType) => {
+                const result = await getTableStats(sql, dbType, tableName);
+                const format = opts.format as OutputFormat;
+                if (format === 'markdown') {
+                    console.log(`## Stats for \`${tableName}\`\n\n**Row count:** ${result.rowCount.toLocaleString()}\n\n### Column Stats\n\n${formatAsMarkdown(result.columns)}`);
+                } else {
+                    console.log(JSON.stringify(result, null, 2));
+                }
+            });
+        });
+
     // Indexes command
     program
         .command('indexes <table>')
@@ -850,6 +879,81 @@ async function getIndexes(
         table: tableName,
         indexCount: Array.isArray(result) ? result.length : 0,
         indexes: result,
+    };
+}
+
+/** Stats result for a single column */
+interface ColumnStats {
+    column: string;
+    nullCount: number;
+    distinctCount: number;
+}
+
+/** Stats result for a table */
+interface TableStats {
+    table: string;
+    rowCount: number;
+    columns: ColumnStats[];
+}
+
+async function getTableStats(
+    sql: ReturnType<typeof SQL>,
+    dbType: DbType,
+    tableName: string
+): Promise<TableStats> {
+    // SECURITY: Validate identifier format to prevent SQL injection via malicious table names
+    validateIdentifier(tableName, 'table');
+
+    // SECURITY: Validate table name against actual tables
+    const validTables = await getTables(sql, dbType);
+    if (!validTables.includes(tableName)) {
+        throw new Error(`Table "${tableName}" not found. Use 'sherlock tables' to list available tables.`);
+    }
+
+    // Get column info first
+    const tableDesc = await describeTable(sql, dbType, tableName);
+    const columnNames: string[] = [];
+
+    // PostgreSQL uses column_name, SQLite uses name, MySQL uses Field
+    for (const col of tableDesc.columns) {
+        const c = col as Record<string, unknown>;
+        const name = c.column_name || c.name || c.Field;
+        if (typeof name === 'string') {
+            columnNames.push(name);
+        }
+    }
+
+    // Validate all column names upfront
+    for (const colName of columnNames) {
+        validateIdentifier(colName, 'column');
+    }
+
+    const quotedTable = quoteIdentifier(tableName, dbType);
+
+    // Build a SINGLE query that gets all stats in one table scan
+    // This avoids N+1 queries which would destroy performance on large tables
+    const columnExpressions = columnNames.map(col => {
+        const quotedCol = quoteIdentifier(col, dbType);
+        return `COUNT(*) - COUNT(${quotedCol}) as "${col}_null_count", COUNT(DISTINCT ${quotedCol}) as "${col}_distinct_count"`;
+    }).join(', ');
+
+    const statsQuery = `SELECT COUNT(*) as cnt${columnNames.length > 0 ? ', ' + columnExpressions : ''} FROM ${quotedTable}`;
+    const statsResult = await sql.unsafe(statsQuery);
+    const row = statsResult[0] as Record<string, unknown>;
+
+    const rowCount = Number(row.cnt) || 0;
+
+    // Parse results for each column
+    const columnStats: ColumnStats[] = columnNames.map(col => ({
+        column: col,
+        nullCount: Number(row[`${col}_null_count`]) || 0,
+        distinctCount: Number(row[`${col}_distinct_count`]) || 0,
+    }));
+
+    return {
+        table: tableName,
+        rowCount,
+        columns: columnStats,
     };
 }
 
