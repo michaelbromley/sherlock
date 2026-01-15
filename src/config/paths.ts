@@ -53,6 +53,13 @@ export function getLogsDir(): string {
 }
 
 /**
+ * Get the cache directory path
+ */
+export function getCacheDir(): string {
+    return path.join(getConfigDir(), 'cache');
+}
+
+/**
  * Config file discovery order:
  * 1. CLI flag (--config)
  * 2. SHERLOCK_CONFIG environment variable
@@ -147,5 +154,15 @@ export function ensureLogsDir(): void {
     const logsDir = getLogsDir();
     if (!fs.existsSync(logsDir)) {
         fs.mkdirSync(logsDir, { recursive: true, mode: 0o700 });
+    }
+}
+
+/**
+ * Ensure the cache directory exists
+ */
+export function ensureCacheDir(): void {
+    const cacheDir = getCacheDir();
+    if (!fs.existsSync(cacheDir)) {
+        fs.mkdirSync(cacheDir, { recursive: true, mode: 0o700 });
     }
 }

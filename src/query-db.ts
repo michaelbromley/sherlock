@@ -6,7 +6,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as p from '@clack/prompts';
 import { resolveConnection, listConnections, getConnectionConfig } from './config';
-import { getLogsDir, ensureLogsDir, getConfigDir, ensureConfigDir } from './config/paths';
+import { getLogsDir, ensureLogsDir, getConfigDir, ensureConfigDir, getCacheDir, ensureCacheDir } from './config/paths';
 import type { ResolvedConnectionConfig, ConnectionConfig } from './config/types';
 import { DB_TYPES, TEST_QUERIES, type DbType } from './db-types';
 import {
@@ -213,6 +213,97 @@ ${JSON.stringify(logResult, null, 2)}
     fs.appendFileSync(logFile, logEntry, 'utf-8');
 }
 
+/** Cached schema data with metadata */
+interface CachedSchema {
+    cachedAt: string;
+    connectionName: string;
+    schema: SchemaInfo;
+}
+
+/**
+ * Get the cache file path for a connection's schema
+ */
+function getSchemaCachePath(connectionName: string): string {
+    // SECURITY: Validate connection name to prevent path traversal
+    if (!SAFE_IDENTIFIER.test(connectionName)) {
+        throw new Error(`Invalid connection name for caching: "${connectionName}"`);
+    }
+    return path.join(getCacheDir(), `${connectionName}.schema.json`);
+}
+
+/**
+ * Basic validation that parsed data matches CachedSchema structure
+ */
+function isValidCachedSchema(data: unknown): data is CachedSchema {
+    return (
+        typeof data === 'object' &&
+        data !== null &&
+        typeof (data as CachedSchema).cachedAt === 'string' &&
+        typeof (data as CachedSchema).connectionName === 'string' &&
+        typeof (data as CachedSchema).schema === 'object'
+    );
+}
+
+/**
+ * Get human-readable cache age
+ */
+function getCacheAge(cachedAt: string): string {
+    const cached = new Date(cachedAt);
+    const now = new Date();
+    const diffMs = now.getTime() - cached.getTime();
+    const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
+    const diffDays = Math.floor(diffHours / 24);
+
+    if (diffDays > 0) return `${diffDays} day${diffDays > 1 ? 's' : ''} ago`;
+    if (diffHours > 0) return `${diffHours} hour${diffHours > 1 ? 's' : ''} ago`;
+    const diffMins = Math.floor(diffMs / (1000 * 60));
+    if (diffMins > 0) return `${diffMins} minute${diffMins > 1 ? 's' : ''} ago`;
+    return 'just now';
+}
+
+/**
+ * Read cached schema for a connection (if it exists and is valid)
+ */
+function readSchemaCache(connectionName: string): CachedSchema | null {
+    const cachePath = getSchemaCachePath(connectionName);
+    if (!fs.existsSync(cachePath)) {
+        return null;
+    }
+    try {
+        const content = fs.readFileSync(cachePath, 'utf-8');
+        const parsed = JSON.parse(content);
+
+        // Validate structure
+        if (!isValidCachedSchema(parsed)) {
+            return null;
+        }
+
+        // Verify connection name matches (prevents using wrong cache)
+        if (parsed.connectionName !== connectionName) {
+            return null;
+        }
+
+        return parsed;
+    } catch {
+        return null;
+    }
+}
+
+/**
+ * Write schema to cache
+ */
+function writeSchemaCache(connectionName: string, schema: SchemaInfo): void {
+    ensureCacheDir();
+    const cachePath = getSchemaCachePath(connectionName);
+    const cacheData: CachedSchema = {
+        cachedAt: new Date().toISOString(),
+        connectionName,
+        schema,
+    };
+    fs.writeFileSync(cachePath, JSON.stringify(cacheData, null, 2), 'utf-8');
+    setSecurePermissions(cachePath);
+}
+
 /**
  * Create a Bun.SQL connection from resolved config
  */
@@ -286,16 +377,55 @@ function setupCLI() {
     // Introspect command
     program
         .command('introspect')
-        .description('Get schema information for all tables')
-        .action(async () => {
+        .description('Get schema information for all tables (cached)')
+        .option('--refresh', 'force refresh the cached schema')
+        .action(async (cmdOpts: { refresh?: boolean }) => {
             const opts = program.opts();
             if (!opts.connection) {
                 console.error('Error: --connection (-c) is required. Specify which database to use.');
                 process.exit(1);
             }
+
+            // Check cache first (unless --refresh)
+            if (!cmdOpts.refresh) {
+                const cached = readSchemaCache(opts.connection);
+                if (cached) {
+                    const age = getCacheAge(cached.cachedAt);
+                    const cachedDate = new Date(cached.cachedAt);
+                    const hoursSinceCached = (Date.now() - cachedDate.getTime()) / (1000 * 60 * 60);
+                    const isStale = hoursSinceCached > 24;
+
+                    const output = {
+                        ...cached.schema,
+                        _cache: {
+                            cachedAt: cached.cachedAt,
+                            age,
+                            stale: isStale,
+                            hint: isStale
+                                ? 'WARNING: Cache is >24h old. Use --refresh to update.'
+                                : 'Use --refresh to update cached schema',
+                        },
+                    };
+                    console.log(JSON.stringify(output, null, 2));
+                    return;
+                }
+            }
+
+            // Fetch fresh schema
             await withConnection(opts.connection, opts.config, async (sql, dbType) => {
                 const result = await introspectSchema(sql, dbType);
-                console.log(JSON.stringify(result, null, 2));
+
+                // Cache the result
+                writeSchemaCache(opts.connection, result);
+
+                const output = {
+                    ...result,
+                    _cache: {
+                        cachedAt: new Date().toISOString(),
+                        hint: 'Schema cached. Use --refresh to update.',
+                    },
+                };
+                console.log(JSON.stringify(output, null, 2));
             });
         });
 
