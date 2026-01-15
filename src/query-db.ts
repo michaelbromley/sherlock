@@ -266,6 +266,22 @@ function setupCLI() {
             });
         });
 
+    // Indexes command
+    program
+        .command('indexes <table>')
+        .description('Show indexes for a table')
+        .action(async (tableName: string) => {
+            const opts = program.opts();
+            if (!opts.connection) {
+                console.error('Error: --connection (-c) is required. Specify which database to use.');
+                process.exit(1);
+            }
+            await withConnection(opts.connection, opts.config, async (sql, dbType) => {
+                const result = await getIndexes(sql, dbType, tableName);
+                console.log(JSON.stringify(result, null, 2));
+            });
+        });
+
     // Query command
     program
         .command('query <sql>')
@@ -568,6 +584,54 @@ async function sampleTable(
         table: tableName,
         rowCount: Array.isArray(result) ? result.length : 0,
         rows: result,
+    };
+}
+
+/** Result from getting indexes for a table */
+interface IndexesResult {
+    table: string;
+    indexCount: number;
+    indexes: unknown[];  // Shape varies by DB type: pg_indexes rows, SHOW INDEX rows, or PRAGMA results
+}
+
+async function getIndexes(
+    sql: ReturnType<typeof SQL>,
+    dbType: DbType,
+    tableName: string
+): Promise<IndexesResult> {
+    // SECURITY: Validate identifier format to prevent SQL injection via malicious table names
+    validateIdentifier(tableName, 'table');
+
+    // SECURITY: Validate table name against actual tables
+    const validTables = await getTables(sql, dbType);
+    if (!validTables.includes(tableName)) {
+        throw new Error(`Table "${tableName}" not found. Use 'sherlock tables' to list available tables.`);
+    }
+
+    let query: string;
+
+    if (dbType === DB_TYPES.POSTGRES) {
+        query = `
+            SELECT
+                indexname as index_name,
+                indexdef as index_definition
+            FROM pg_indexes
+            WHERE schemaname = 'public'
+              AND tablename = '${tableName}'
+            ORDER BY indexname
+        `;
+    } else if (dbType === DB_TYPES.SQLITE) {
+        query = `PRAGMA index_list(\`${tableName}\`)`;
+    } else {
+        // MySQL
+        query = `SHOW INDEX FROM \`${tableName}\``;
+    }
+
+    const result = await sql.unsafe(query);
+    return {
+        table: tableName,
+        indexCount: Array.isArray(result) ? result.length : 0,
+        indexes: result,
     };
 }
 

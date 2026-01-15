@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - `sample` command: get random rows from a table (`sherlock -c mydb sample users -n 10`)
+- `indexes` command: show indexes for a table (`sherlock -c mydb indexes users`)
 
 ### Security
 
