@@ -83,6 +83,61 @@ download() {
 }
 
 # =============================================================================
+# PATH setup - optionally add sherlock to user's PATH
+# =============================================================================
+add_to_path() {
+    local SHELL_CONFIG=""
+    local SHELL_NAME=""
+    local PATH_LINE="export PATH=\"\$HOME/.claude/skills/sherlock:\$PATH\""
+
+    # Detect shell config file
+    case "$SHELL" in
+        */zsh)
+            SHELL_CONFIG="$HOME/.zshrc"
+            SHELL_NAME="zsh"
+            ;;
+        */bash)
+            # Prefer .bashrc, fall back to .bash_profile on macOS
+            if [ -f "$HOME/.bashrc" ]; then
+                SHELL_CONFIG="$HOME/.bashrc"
+            else
+                SHELL_CONFIG="$HOME/.bash_profile"
+            fi
+            SHELL_NAME="bash"
+            ;;
+        */fish)
+            SHELL_CONFIG="$HOME/.config/fish/config.fish"
+            SHELL_NAME="fish"
+            PATH_LINE="set -gx PATH \$HOME/.claude/skills/sherlock \$PATH"
+            ;;
+        *)
+            warn "Couldn't detect shell type from \$SHELL ($SHELL)"
+            warn "Add this to your shell config manually:"
+            echo ""
+            echo "    $PATH_LINE"
+            echo ""
+            return 0
+            ;;
+    esac
+
+    # Check if already in PATH config
+    if [ -f "$SHELL_CONFIG" ] && grep -q "\.claude/skills/sherlock" "$SHELL_CONFIG" 2>/dev/null; then
+        info "PATH already configured in $SHELL_CONFIG"
+        return 0
+    fi
+
+    # Append to shell config
+    echo "" >> "$SHELL_CONFIG"
+    echo "# Added by sherlock installer" >> "$SHELL_CONFIG"
+    echo "$PATH_LINE" >> "$SHELL_CONFIG"
+
+    success "Added sherlock to PATH in $SHELL_CONFIG"
+    echo ""
+    echo -e "  ${YELLOW}Note:${NC} Run 'source $SHELL_CONFIG' or open a new terminal to use 'sherlock' directly."
+    echo ""
+}
+
+# =============================================================================
 # WORKAROUND: Add sherlock to Claude Code allowed permissions
 # This is a workaround for: https://github.com/anthropics/claude-code/issues/14956
 # The SKILL.md allowed-tools frontmatter should handle this, but currently doesn't.
@@ -211,15 +266,18 @@ main() {
         echo "  1. Run '$SKILL_DIR/sherlock setup' to configure your database connections"
         echo "  2. Use '/sherlock' in Claude Code to query your databases"
         echo ""
-        echo "  Tip: Add sherlock to your PATH for easier access:"
-        echo ""
-        echo "    # Add to ~/.zshrc or ~/.bashrc:"
-        echo "    export PATH=\"\$HOME/.claude/skills/sherlock:\$PATH\""
-        echo ""
-        echo "    # Then you can just run:"
-        echo "    sherlock setup"
-        echo "    sherlock -c mydb tables"
-        echo ""
+
+        # Ask about PATH setup
+        echo -n "  Add sherlock to your PATH for easier command-line access? [y/N] "
+        read -r REPLY
+        if [[ "$REPLY" =~ ^[Yy]$ ]]; then
+            add_to_path
+        else
+            echo ""
+            echo "  Tip: You can add sherlock to your PATH later:"
+            echo "    export PATH=\"\$HOME/.claude/skills/sherlock:\$PATH\""
+            echo ""
+        fi
     fi
     echo "  To uninstall:"
     echo "    rm -rf $SKILL_DIR"
