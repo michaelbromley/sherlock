@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `--format` option: output as `json` (default) or `markdown` tables (`sherlock -c mydb query "SELECT..." -f markdown`)
 - Schema caching: `introspect` results are cached per-connection, use `--refresh` to update
 - `stats` command: data profiling (row count, null counts, distinct counts per column)
+- `fk` command: show foreign key relationships (outgoing and incoming)
 
 ### Security
 

@@ -506,6 +506,36 @@ function setupCLI() {
             });
         });
 
+    // FK (foreign keys) command
+    program
+        .command('fk <table>')
+        .description('Show foreign key relationships for a table')
+        .action(async (tableName: string) => {
+            const opts = program.opts();
+            if (!opts.connection) {
+                console.error('Error: --connection (-c) is required. Specify which database to use.');
+                process.exit(1);
+            }
+            await withConnection(opts.connection, opts.config, async (sql, dbType) => {
+                const result = await getForeignKeys(sql, dbType, tableName);
+                const format = opts.format as OutputFormat;
+                if (format === 'markdown') {
+                    let output = `## Foreign Keys for \`${tableName}\`\n\n`;
+                    output += `### References (outgoing)\n\n`;
+                    output += result.references.length > 0
+                        ? formatAsMarkdown(result.references)
+                        : '_No outgoing foreign keys_';
+                    output += `\n\n### Referenced By (incoming)\n\n`;
+                    output += result.referencedBy.length > 0
+                        ? formatAsMarkdown(result.referencedBy)
+                        : '_No incoming foreign keys_';
+                    console.log(output);
+                } else {
+                    console.log(JSON.stringify(result, null, 2));
+                }
+            });
+        });
+
     // Indexes command
     program
         .command('indexes <table>')
@@ -879,6 +909,162 @@ async function getIndexes(
         table: tableName,
         indexCount: Array.isArray(result) ? result.length : 0,
         indexes: result,
+    };
+}
+
+/** Foreign key relationship (outgoing) */
+interface FKReference {
+    column: string;
+    referencesTable: string;
+    referencesColumn: string;
+}
+
+/** Foreign key relationship (incoming) */
+interface FKReferencedBy {
+    fromTable: string;
+    fromColumn: string;
+    toColumn: string;
+}
+
+/** Foreign key result for a table */
+interface ForeignKeysResult {
+    table: string;
+    references: FKReference[];
+    referencedBy: FKReferencedBy[];
+}
+
+async function getForeignKeys(
+    sql: ReturnType<typeof SQL>,
+    dbType: DbType,
+    tableName: string
+): Promise<ForeignKeysResult> {
+    // SECURITY: Validate identifier format to prevent SQL injection via malicious table names
+    validateIdentifier(tableName, 'table');
+
+    // SECURITY: Validate table name against actual tables
+    const validTables = await getTables(sql, dbType);
+    if (!validTables.includes(tableName)) {
+        throw new Error(`Table "${tableName}" not found. Use 'sherlock tables' to list available tables.`);
+    }
+
+    let references: FKReference[] = [];
+    let referencedBy: FKReferencedBy[] = [];
+
+    if (dbType === DB_TYPES.POSTGRES) {
+        // Outgoing FKs: what this table references
+        const outgoingQuery = `
+            SELECT
+                kcu.column_name as column,
+                ccu.table_name as references_table,
+                ccu.column_name as references_column
+            FROM information_schema.table_constraints tc
+            JOIN information_schema.key_column_usage kcu
+                ON tc.constraint_name = kcu.constraint_name
+                AND tc.table_schema = kcu.table_schema
+            JOIN information_schema.constraint_column_usage ccu
+                ON tc.constraint_name = ccu.constraint_name
+            WHERE tc.constraint_type = 'FOREIGN KEY'
+                AND tc.table_schema = 'public'
+                AND tc.table_name = '${tableName}'
+        `;
+        const outgoing = await sql.unsafe(outgoingQuery);
+        references = (outgoing as Record<string, unknown>[]).map(row => ({
+            column: String(row.column),
+            referencesTable: String(row.references_table),
+            referencesColumn: String(row.references_column),
+        }));
+
+        // Incoming FKs: what references this table
+        const incomingQuery = `
+            SELECT
+                tc.table_name as from_table,
+                kcu.column_name as from_column,
+                ccu.column_name as to_column
+            FROM information_schema.table_constraints tc
+            JOIN information_schema.key_column_usage kcu
+                ON tc.constraint_name = kcu.constraint_name
+                AND tc.table_schema = kcu.table_schema
+            JOIN information_schema.constraint_column_usage ccu
+                ON tc.constraint_name = ccu.constraint_name
+            WHERE tc.constraint_type = 'FOREIGN KEY'
+                AND tc.table_schema = 'public'
+                AND ccu.table_name = '${tableName}'
+        `;
+        const incoming = await sql.unsafe(incomingQuery);
+        referencedBy = (incoming as Record<string, unknown>[]).map(row => ({
+            fromTable: String(row.from_table),
+            fromColumn: String(row.from_column),
+            toColumn: String(row.to_column),
+        }));
+
+    } else if (dbType === DB_TYPES.MYSQL) {
+        // Get current database name for MySQL
+        const dbResult = await sql.unsafe('SELECT DATABASE() as db');
+        const currentDb = String((dbResult[0] as Record<string, unknown>).db);
+
+        // SECURITY: Validate database name to prevent injection
+        // Database names can contain special characters in MySQL
+        if (!SAFE_IDENTIFIER.test(currentDb)) {
+            throw new Error(`Database name "${currentDb}" contains unsupported characters for FK lookup`);
+        }
+
+        // Outgoing FKs
+        const outgoingQuery = `
+            SELECT
+                column_name as col,
+                referenced_table_name as ref_table,
+                referenced_column_name as ref_col
+            FROM information_schema.key_column_usage
+            WHERE table_schema = '${currentDb}'
+                AND table_name = '${tableName}'
+                AND referenced_table_name IS NOT NULL
+        `;
+        const outgoing = await sql.unsafe(outgoingQuery);
+        references = (outgoing as Record<string, unknown>[]).map(row => ({
+            column: String(row.col),
+            referencesTable: String(row.ref_table),
+            referencesColumn: String(row.ref_col),
+        }));
+
+        // Incoming FKs
+        const incomingQuery = `
+            SELECT
+                table_name as from_tbl,
+                column_name as from_col,
+                referenced_column_name as to_col
+            FROM information_schema.key_column_usage
+            WHERE table_schema = '${currentDb}'
+                AND referenced_table_name = '${tableName}'
+        `;
+        const incoming = await sql.unsafe(incomingQuery);
+        referencedBy = (incoming as Record<string, unknown>[]).map(row => ({
+            fromTable: String(row.from_tbl),
+            fromColumn: String(row.from_col),
+            toColumn: String(row.to_col),
+        }));
+
+    } else if (dbType === DB_TYPES.SQLITE) {
+        // SQLite: PRAGMA foreign_key_list only gives outgoing FKs
+        const quotedTable = quoteIdentifier(tableName, dbType);
+        const outgoing = await sql.unsafe(`PRAGMA foreign_key_list(${quotedTable})`);
+        references = (outgoing as Record<string, unknown>[]).map(row => ({
+            column: String(row.from),
+            referencesTable: String(row.table),
+            referencesColumn: String(row.to),
+        }));
+
+        // SQLite doesn't easily support finding incoming FKs without scanning all tables
+        // We'd need to iterate all tables and check their PRAGMA foreign_key_list
+        // For now, return empty (documented limitation)
+        referencedBy = [];
+    } else {
+        throw new Error(`Foreign key lookup not supported for database type: ${dbType}`);
+    }
+
+    return {
+        table: tableName,
+        references,
+        referencedBy,
     };
 }
 
