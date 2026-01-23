@@ -6,7 +6,7 @@ seeds/**/*.sql
 
 # Data
 data
-output
+/output
 
 # Build artifacts
 dist/
