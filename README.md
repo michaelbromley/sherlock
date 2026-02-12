@@ -21,6 +21,15 @@ curl -fsSL https://raw.githubusercontent.com/michaelbromley/sherlock/main/instal
 
 This installs the `sherlock` binary and the Claude Code skill.
 
+#### Windows (PowerShell)
+
+From sourcecode:
+
+```powershell
+npm run build:windows   # build dist/sherlock-windows.exe first
+.\install.ps1           # installs from local dist/
+```
+
 ### 2. Set up a connection
 
 ```bash
@@ -50,6 +59,12 @@ Run the same install command to upgrade to the latest version:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/michaelbromley/sherlock/main/install.sh | bash
+```
+
+On Windows:
+
+```powershell
+irm https://raw.githubusercontent.com/michaelbromley/sherlock/main/install.ps1 | iex
 ```
 
 The installer will detect your existing installation, preserve your `config.json`, and show the version change:
