@@ -330,6 +330,10 @@ function setupCLI() {
         .command('query <sql>')
         .description('Execute a read-only SQL query')
         .action(async (sqlQuery: string) => {
+            // Fix shell escaping artifacts: some shells/tools escape ! to \!
+            // which is never valid SQL, so safely strip it
+            sqlQuery = sqlQuery.replace(/\\!/g, '!');
+
             const opts = program.opts();
             requireConnection(opts);
 
