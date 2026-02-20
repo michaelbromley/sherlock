@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0] - Unreleased
+
+### Changed
+
+- Consolidated all connection/config management into a single `manage` command
+- `sherlock --help` reduced from 17 commands to 9 (8 DB commands + `manage`)
+- `setup`, `add`, `edit` commands removed (fully replaced by `manage` menu)
+- `connections`, `test`, `init`, `migrate`, `keychain` commands hidden from help (still work for scripting/CI)
+- Edit connection no longer asks for password — use dedicated "Update password" option instead
+
+### Added
+
+- `manage` auto-triggers setup wizard when no config exists
+- Enhanced connection list in manage menu showing type + host/database info
+- Dedicated "Delete connection" option in manage menu (no longer buried inside edit)
+- Keychain submenu in manage menu (store, check, delete passwords)
+- Interactive migrate option in manage menu (prompts for legacy config path)
+- "Set project directory" option in edit connection menu
+
 ## [0.2.0] - 2026-02-20
 
 ### Added
