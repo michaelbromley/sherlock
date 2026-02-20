@@ -5,10 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.0.0] - Unreleased
+## [1.0.0] - 2026-02-20
 
 ### Added
 
+- **Self-update command** — `sherlock update` checks for new releases and updates in-place
+- **GitHub Pages landing page** — project website at michaelbromley.github.io/sherlock
 - **Redis support** — 6 new commands for read-only Redis inspection, zero new dependencies (uses Bun's native `RedisClient`)
   - `info` — server info, memory stats, keyspace overview (`--section` for specific sections)
   - `keys [pattern]` — scan for keys matching a glob pattern (`--limit`, `--no-types`)
