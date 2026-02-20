@@ -358,13 +358,30 @@ async function promptForConnection(
                 }),
         });
 
+        const directory = await p.text({
+            message: 'Project directory (auto-selects this connection when you are in this dir)',
+            placeholder: 'Leave empty to skip',
+            initialValue: existingConfig?.directory || process.cwd(),
+        });
+
+        if (p.isCancel(directory)) {
+            p.cancel('Cancelled');
+            process.exit(0);
+        }
+
+        const config: ConnectionConfig = {
+            type: DB_TYPES.SQLITE,
+            filename: sqliteResult.filename as string,
+            logging: sqliteResult.logging as boolean,
+        };
+
+        if (directory) {
+            config.directory = directory;
+        }
+
         return {
             name: result.name as string,
-            config: {
-                type: DB_TYPES.SQLITE,
-                filename: sqliteResult.filename as string,
-                logging: sqliteResult.logging as boolean,
-            },
+            config,
             password: '',
             storageMethod: 'env',
         };
@@ -434,17 +451,34 @@ async function promptForConnection(
         }
     );
 
+    const directory = await p.text({
+        message: 'Project directory (auto-selects this connection when you are in this dir)',
+        placeholder: 'Leave empty to skip',
+        initialValue: existingConfig?.directory || process.cwd(),
+    });
+
+    if (p.isCancel(directory)) {
+        p.cancel('Cancelled');
+        process.exit(0);
+    }
+
+    const config: ConnectionConfig = {
+        type: result.type as DbType,
+        host: connResult.host as string,
+        port: parseInt(connResult.port as string),
+        database: connResult.database as string,
+        username: connResult.username as string,
+        password: '', // Will be set based on storage method
+        logging: connResult.logging as boolean,
+    };
+
+    if (directory) {
+        config.directory = directory;
+    }
+
     return {
         name: result.name as string,
-        config: {
-            type: result.type as DbType,
-            host: connResult.host as string,
-            port: parseInt(connResult.port as string),
-            database: connResult.database as string,
-            username: connResult.username as string,
-            password: '', // Will be set based on storage method
-            logging: connResult.logging as boolean,
-        },
+        config,
         password: connResult.password as string,
         storageMethod: connResult.storageMethod as 'keychain' | 'env',
     };

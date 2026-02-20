@@ -13,7 +13,7 @@ import * as path from 'path';
 import * as p from '@clack/prompts';
 
 // Config
-import { listConnections, getConnectionConfig } from './config';
+import { listConnections, getConnectionConfig, detectConnectionFromCwd } from './config';
 import { getConfigDir, ensureConfigDir } from './config/paths';
 import type { ConnectionConfig } from './config/types';
 import { DB_TYPES, TEST_QUERIES, type DbType } from './db-types';
@@ -113,9 +113,15 @@ async function promptPassword(message: string): Promise<string> {
     return result;
 }
 
-/** Require connection option or exit */
-function requireConnection(opts: { connection?: string }): asserts opts is { connection: string } {
+/** Require connection option or exit. Auto-detects from cwd if not provided. */
+function requireConnection(opts: { connection?: string; config?: string }): asserts opts is { connection: string } {
     if (!opts.connection) {
+        const detected = detectConnectionFromCwd(opts.config);
+        if (detected) {
+            opts.connection = detected;
+            console.error(`Using connection "${detected}" (matched directory ${process.cwd()})`);
+            return;
+        }
         console.error('Error: --connection (-c) is required. Specify which database to use.');
         process.exit(1);
     }

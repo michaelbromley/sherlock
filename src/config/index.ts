@@ -252,6 +252,40 @@ export async function resolveConnection(
 }
 
 /**
+ * Auto-detect a connection based on the current working directory.
+ * If cwd is inside a connection's configured `directory`, returns that connection name.
+ * If multiple connections match, picks the most specific (longest path).
+ * Returns null if no match found.
+ */
+export function detectConnectionFromCwd(configPath?: string): string | null {
+    let config: SherlockConfig;
+    try {
+        config = loadConfigFile(configPath);
+    } catch {
+        return null;
+    }
+
+    const cwd = process.cwd();
+    let bestMatch: string | null = null;
+    let bestLength = 0;
+
+    for (const [name, conn] of Object.entries(config.connections)) {
+        if (!conn.directory) continue;
+
+        const resolved = path.resolve(conn.directory);
+        // Check if cwd is the directory itself or a subdirectory
+        if (cwd === resolved || cwd.startsWith(resolved + path.sep)) {
+            if (resolved.length > bestLength) {
+                bestMatch = name;
+                bestLength = resolved.length;
+            }
+        }
+    }
+
+    return bestMatch;
+}
+
+/**
  * List all available connections
  */
 export function listConnections(configPath?: string): string[] {

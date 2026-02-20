@@ -30,6 +30,9 @@ export interface ConnectionConfig {
     /** Alias for filename (for sqlite type) */
     path?: string;
 
+    /** Project directory - auto-selects this connection when cwd is inside this path */
+    directory?: string;
+
     /** Enable query logging for this connection (default: false) */
     logging?: boolean;
 }
