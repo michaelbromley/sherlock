@@ -287,7 +287,7 @@ bun build ./src/query-db.ts --compile --target=bun-linux-x64 --outfile sherlock-
 ## Releasing a New Version
 
 1. Update the version in `package.json`
-2. Add release notes to `CHANGELOG.md`
+2. Update `CHANGELOG.md` with all changes since the last release (check `git log` since the last version tag)
 3. Commit the changes:
    ```bash
    git add package.json CHANGELOG.md
