@@ -5,7 +5,7 @@
 import * as p from '@clack/prompts';
 import * as fs from 'fs';
 import * as path from 'path';
-import { getConfigDir, ensureConfigDir } from '../config/paths';
+import { findConfigFile, getConfigDir, ensureConfigDir } from '../config/paths';
 import { loadConfigFile, listConnections } from '../config';
 import type { SherlockConfig, ConnectionConfig } from '../config/types';
 import { DB_TYPES, DEFAULT_PORTS, TEST_QUERIES, type DbType } from '../db-types';
@@ -14,29 +14,329 @@ import {
     hasKeychainPassword,
     deleteKeychainPassword,
 } from '../credentials/providers/keychain';
+import { initConfig, migrateConfig } from '../config/init';
+
+// ============================================================================
+// Connection Manager Menu (main entry point)
+// ============================================================================
+
+/**
+ * Interactive menu for managing connections — the single hub for all
+ * connection/config management. Auto-triggers setup if no config exists.
+ */
+export async function connectionManagerMenu(): Promise<void> {
+    p.intro('Sherlock Connection Manager');
+
+    // Auto-setup: if no config exists, offer to run the setup wizard
+    const configExists = findConfigFile() !== null;
+    if (!configExists) {
+        const runSetup = await p.confirm({
+            message: 'No configuration found. Would you like to set up Sherlock now?',
+            initialValue: true,
+        });
+
+        if (p.isCancel(runSetup)) {
+            p.outro('Goodbye!');
+            return;
+        }
+
+        if (runSetup) {
+            await runSetupWizard();
+        } else {
+            p.outro('Run `sherlock manage` again when you\'re ready.');
+            return;
+        }
+    }
+
+    // Main menu loop
+    while (true) {
+        let connections: string[] = [];
+        try {
+            connections = listConnections();
+        } catch {
+            // No config yet
+        }
+
+        const hasConnections = connections.length > 0;
+
+        type MenuOption = { value: string; label: string; hint?: string };
+        const options: MenuOption[] = [
+            { value: 'add', label: 'Add connection' },
+        ];
+
+        if (hasConnections) {
+            options.push(
+                { value: 'edit', label: 'Edit connection' },
+                { value: 'delete', label: 'Delete connection' },
+                { value: 'test', label: 'Test connection' },
+                { value: 'list', label: 'List connections' },
+                { value: 'keychain', label: 'Manage keychain passwords' },
+            );
+        }
+
+        options.push(
+            { value: 'init', label: 'Initialize config template' },
+            { value: 'migrate', label: 'Migrate legacy config' },
+            { value: 'exit', label: 'Exit' },
+        );
+
+        const action = await p.select({
+            message: 'What would you like to do?',
+            options,
+        });
+
+        if (p.isCancel(action) || action === 'exit') {
+            p.outro('Goodbye!');
+            return;
+        }
+
+        if (action === 'add') {
+            await addConnectionWizard();
+        } else if (action === 'edit') {
+            await editConnectionWizard();
+        } else if (action === 'delete') {
+            await deleteConnectionWizard();
+        } else if (action === 'test') {
+            await testConnectionMenu(connections);
+        } else if (action === 'list') {
+            await listConnectionsDisplay();
+        } else if (action === 'keychain') {
+            await keychainMenu();
+        } else if (action === 'init') {
+            await initConfig();
+        } else if (action === 'migrate') {
+            await migrateInteractive();
+        }
+
+        // Add spacing between iterations
+        console.log('');
+    }
+}
+
+// ============================================================================
+// Menu Actions
+// ============================================================================
+
+/**
+ * Test a connection from the manage menu
+ */
+async function testConnectionMenu(connections: string[]): Promise<void> {
+    const selected = await p.select({
+        message: 'Select connection to test',
+        options: connections.map(name => ({ value: name, label: name })),
+    });
+
+    if (p.isCancel(selected)) return;
+
+    p.log.info(`Testing ${selected}...`);
+    const { resolveConnection } = await import('../config');
+    const { SQL } = await import('bun');
+
+    try {
+        const config = await resolveConnection(selected as string);
+        const sql = new SQL(config.url);
+        await sql.unsafe(TEST_QUERIES[config.type]);
+        sql.close();
+        p.log.success(`Connection "${selected}" successful!`);
+    } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : String(error);
+        p.log.error(`Connection failed: ${message}`);
+    }
+}
+
+/**
+ * Enhanced connection list showing type + host/database info
+ */
+async function listConnectionsDisplay(): Promise<void> {
+    let config: SherlockConfig;
+    try {
+        config = loadConfigFile();
+    } catch {
+        p.log.warn('No config found.');
+        return;
+    }
+
+    const entries = Object.entries(config.connections);
+    if (entries.length === 0) {
+        p.log.warn('No connections configured.');
+        return;
+    }
+
+    const lines = entries.map(([name, conn]) => {
+        const type = conn.type || 'unknown';
+        if (type === DB_TYPES.SQLITE) {
+            const filename = conn.filename || conn.path || conn.database || '';
+            return `${name} (${type}) ${filename}`;
+        }
+        const host = typeof conn.host === 'string' ? conn.host : '';
+        const database = conn.database || '';
+        return `${name} (${type}) ${host}${database ? ' - ' + database : ''}`;
+    });
+
+    p.note(lines.join('\n'), 'Configured Connections');
+}
+
+/**
+ * Dedicated delete connection wizard
+ */
+async function deleteConnectionWizard(): Promise<void> {
+    let config: SherlockConfig;
+    try {
+        config = loadConfigFile();
+    } catch {
+        p.log.warn('No config found.');
+        return;
+    }
+
+    const connectionNames = Object.keys(config.connections);
+    if (connectionNames.length === 0) {
+        p.log.warn('No connections to delete.');
+        return;
+    }
+
+    const selected = await p.select({
+        message: 'Select connection to delete',
+        options: connectionNames.map(name => ({
+            value: name,
+            label: name,
+            hint: config.connections[name].type,
+        })),
+    });
+
+    if (p.isCancel(selected)) return;
+
+    const connName = selected as string;
+    const confirmDelete = await p.confirm({
+        message: `Are you sure you want to delete "${connName}"?`,
+        initialValue: false,
+    });
+
+    if (p.isCancel(confirmDelete) || !confirmDelete) return;
+
+    delete config.connections[connName];
+    if (hasKeychainPassword(connName)) {
+        deleteKeychainPassword(connName);
+    }
+    saveConfig(config);
+    p.log.success(`Connection "${connName}" deleted.`);
+}
+
+/**
+ * Keychain management submenu
+ */
+async function keychainMenu(): Promise<void> {
+    while (true) {
+        const action = await p.select({
+            message: 'Keychain management',
+            options: [
+                { value: 'store', label: 'Store password' },
+                { value: 'check', label: 'Check stored passwords' },
+                { value: 'delete', label: 'Delete password' },
+                { value: 'back', label: 'Back' },
+            ],
+        });
+
+        if (p.isCancel(action) || action === 'back') return;
+
+        if (action === 'store') {
+            const account = await p.text({
+                message: 'Account name (usually the connection name)',
+                validate: (v) => { if (!v) return 'Account name is required'; },
+            });
+            if (p.isCancel(account)) continue;
+
+            const password = await p.password({
+                message: `Enter password for "${account}"`,
+            });
+            if (p.isCancel(password)) continue;
+
+            setKeychainPassword(account as string, password as string);
+            p.log.success(`Password stored for "${account}"`);
+        } else if (action === 'check') {
+            let connections: string[] = [];
+            try {
+                connections = listConnections();
+            } catch {
+                p.log.warn('No config found.');
+                continue;
+            }
+
+            if (connections.length === 0) {
+                p.log.warn('No connections configured.');
+                continue;
+            }
+
+            const lines = connections.map(name => {
+                const has = hasKeychainPassword(name);
+                const status = has ? '\x1b[32m✓\x1b[0m' : '\x1b[31m✗\x1b[0m';
+                return `  ${status} ${name}`;
+            });
+            p.note(lines.join('\n'), 'Keychain Status');
+        } else if (action === 'delete') {
+            const account = await p.text({
+                message: 'Account name to delete',
+                validate: (v) => { if (!v) return 'Account name is required'; },
+            });
+            if (p.isCancel(account)) continue;
+
+            if (!hasKeychainPassword(account as string)) {
+                p.log.warn(`No password found for "${account}"`);
+                continue;
+            }
+
+            const confirm = await p.confirm({
+                message: `Delete password for "${account}"?`,
+                initialValue: false,
+            });
+            if (p.isCancel(confirm) || !confirm) continue;
+
+            deleteKeychainPassword(account as string);
+            p.log.success(`Password deleted for "${account}"`);
+        }
+
+        console.log('');
+    }
+}
+
+/**
+ * Interactive migrate handler — prompts for legacy config path
+ */
+async function migrateInteractive(): Promise<void> {
+    const fromPath = await p.text({
+        message: 'Path to legacy config.ts',
+        placeholder: 'config.ts',
+        initialValue: 'config.ts',
+    });
+
+    if (p.isCancel(fromPath)) return;
+
+    await migrateConfig(fromPath as string);
+}
+
+// ============================================================================
+// Setup & Connection Wizards
+// ============================================================================
 
 /**
  * Interactive setup wizard for first-time users
  */
-export async function runSetupWizard(): Promise<void> {
-    p.intro('🔍 Sherlock Setup Wizard');
-
+async function runSetupWizard(): Promise<void> {
     const configDir = getConfigDir();
     const configPath = path.join(configDir, 'config.json');
 
     // Check if config already exists
     if (fs.existsSync(configPath)) {
-        const overwrite = await p.confirm({
+        const addNew = await p.confirm({
             message: `Config already exists at ${configPath}. Do you want to add a new connection?`,
             initialValue: true,
         });
 
-        if (p.isCancel(overwrite)) {
+        if (p.isCancel(addNew)) {
             p.cancel('Setup cancelled');
             process.exit(0);
         }
 
-        if (overwrite) {
+        if (addNew) {
             await addConnectionWizard();
         }
         return;
@@ -74,7 +374,7 @@ export async function runSetupWizard(): Promise<void> {
             // Handle password storage
             await handlePasswordStorage(connection.name, connection.password);
 
-            // Remove password from config if using keychain
+            // Set password reference based on storage method
             if (connection.storageMethod === 'keychain') {
                 connection.config.password = { $keychain: connection.name };
             } else if (connection.storageMethod === 'env') {
@@ -84,7 +384,7 @@ export async function runSetupWizard(): Promise<void> {
             }
 
             saveConfig(config);
-            p.outro('🎉 Setup complete! Run `sherlock test` to verify your connection.');
+            p.log.success('Setup complete! Use `sherlock manage` to test your connection.');
         }
     } else {
         // Create empty config
@@ -93,16 +393,14 @@ export async function runSetupWizard(): Promise<void> {
             connections: {},
         };
         saveConfig(config);
-        p.outro('Config created. Run `sherlock setup` again to add connections.');
+        p.log.info('Empty config created. Use `sherlock manage` to add connections.');
     }
 }
 
 /**
  * Interactive wizard to add a new connection
  */
-export async function addConnectionWizard(): Promise<void> {
-    p.intro('🔍 Add New Connection');
-
+async function addConnectionWizard(): Promise<void> {
     const connection = await promptForConnection();
     if (!connection) {
         return;
@@ -144,26 +442,24 @@ export async function addConnectionWizard(): Promise<void> {
     config.connections[connection.name] = connection.config;
     saveConfig(config);
 
-    p.outro(`✓ Connection "${connection.name}" added! Run \`sherlock test ${connection.name}\` to verify.`);
+    p.log.success(`Connection "${connection.name}" added!`);
 }
 
 /**
  * Interactive wizard to edit an existing connection
  */
-export async function editConnectionWizard(): Promise<void> {
-    p.intro('🔍 Edit Connection');
-
+async function editConnectionWizard(): Promise<void> {
     let config: SherlockConfig;
     try {
         config = loadConfigFile();
     } catch {
-        p.cancel('No config found. Run `sherlock setup` first.');
+        p.log.warn('No config found.');
         return;
     }
 
     const connectionNames = Object.keys(config.connections);
     if (connectionNames.length === 0) {
-        p.cancel('No connections configured. Run `sherlock setup` to add one.');
+        p.log.warn('No connections configured.');
         return;
     }
 
@@ -176,10 +472,7 @@ export async function editConnectionWizard(): Promise<void> {
         })),
     });
 
-    if (p.isCancel(selected)) {
-        p.cancel('Cancelled');
-        return;
-    }
+    if (p.isCancel(selected)) return;
 
     const connName = selected as string;
     const existingConn = config.connections[connName];
@@ -195,10 +488,7 @@ export async function editConnectionWizard(): Promise<void> {
         ],
     });
 
-    if (p.isCancel(action)) {
-        p.cancel('Cancelled');
-        return;
-    }
+    if (p.isCancel(action)) return;
 
     if (action === 'delete') {
         const confirmDelete = await p.confirm({
@@ -208,12 +498,11 @@ export async function editConnectionWizard(): Promise<void> {
 
         if (confirmDelete && !p.isCancel(confirmDelete)) {
             delete config.connections[connName];
-            // Also remove from keychain if exists
             if (hasKeychainPassword(connName)) {
                 deleteKeychainPassword(connName);
             }
             saveConfig(config);
-            p.outro(`✓ Connection "${connName}" deleted.`);
+            p.log.success(`Connection "${connName}" deleted.`);
         }
         return;
     }
@@ -223,7 +512,7 @@ export async function editConnectionWizard(): Promise<void> {
         config.connections[connName].logging = newLogging;
         saveConfig(config);
         const status = newLogging ? 'enabled' : 'disabled';
-        p.outro(`✓ Query logging ${status} for "${connName}".`);
+        p.log.success(`Query logging ${status} for "${connName}".`);
         return;
     }
 
@@ -232,10 +521,7 @@ export async function editConnectionWizard(): Promise<void> {
             message: 'Enter new password',
         });
 
-        if (p.isCancel(newPassword)) {
-            p.cancel('Cancelled');
-            return;
-        }
+        if (p.isCancel(newPassword)) return;
 
         const storageMethod = await p.select({
             message: 'Where should the password be stored?',
@@ -245,10 +531,7 @@ export async function editConnectionWizard(): Promise<void> {
             ],
         });
 
-        if (p.isCancel(storageMethod)) {
-            p.cancel('Cancelled');
-            return;
-        }
+        if (p.isCancel(storageMethod)) return;
 
         await handlePasswordStorage(connName, newPassword as string, storageMethod as 'keychain' | 'env');
 
@@ -261,15 +544,13 @@ export async function editConnectionWizard(): Promise<void> {
         }
 
         saveConfig(config);
-        p.outro(`✓ Password updated for "${connName}".`);
+        p.log.success(`Password updated for "${connName}".`);
         return;
     }
 
     // Edit connection details
     const connection = await promptForConnection(connName, existingConn);
-    if (!connection) {
-        return;
-    }
+    if (!connection) return;
 
     await handlePasswordStorage(connection.name, connection.password);
 
@@ -292,8 +573,12 @@ export async function editConnectionWizard(): Promise<void> {
     config.connections[connection.name] = connection.config;
     saveConfig(config);
 
-    p.outro(`✓ Connection "${connection.name}" updated!`);
+    p.log.success(`Connection "${connection.name}" updated!`);
 }
+
+// ============================================================================
+// Shared Helpers
+// ============================================================================
 
 /**
  * Prompt user for connection details
@@ -495,7 +780,6 @@ async function handlePasswordStorage(
     if (!password) return;
 
     if (method === 'keychain' || method === undefined) {
-        // Store in keychain
         setKeychainPassword(connectionName, password);
         p.log.success(`Password stored in OS keychain`);
     }
@@ -537,78 +821,4 @@ function saveConfig(config: SherlockConfig): void {
     const configPath = path.join(getConfigDir(), 'config.json');
     fs.writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf-8');
     fs.chmodSync(configPath, 0o600);
-}
-
-/**
- * Interactive menu for managing connections
- */
-export async function connectionManagerMenu(): Promise<void> {
-    p.intro('🔍 Sherlock Connection Manager');
-
-    while (true) {
-        let connections: string[] = [];
-        try {
-            connections = listConnections();
-        } catch {
-            // No config yet
-        }
-
-        const options = [
-            { value: 'add', label: 'Add new connection' },
-        ];
-
-        if (connections.length > 0) {
-            options.push(
-                { value: 'edit', label: 'Edit connection' },
-                { value: 'test', label: 'Test connection' },
-                { value: 'list', label: 'List all connections' }
-            );
-        }
-
-        options.push({ value: 'exit', label: 'Exit' });
-
-        const action = await p.select({
-            message: 'What would you like to do?',
-            options,
-        });
-
-        if (p.isCancel(action) || action === 'exit') {
-            p.outro('Goodbye!');
-            return;
-        }
-
-        if (action === 'add') {
-            await addConnectionWizard();
-        } else if (action === 'edit') {
-            await editConnectionWizard();
-        } else if (action === 'list') {
-            p.note(connections.join('\n'), 'Configured Connections');
-        } else if (action === 'test') {
-            const selected = await p.select({
-                message: 'Select connection to test',
-                options: connections.map(name => ({ value: name, label: name })),
-            });
-
-            if (!p.isCancel(selected)) {
-                p.log.info(`Testing ${selected}...`);
-                // We'll call the test function from the main CLI
-                const { resolveConnection } = await import('../config');
-                const { SQL } = await import('bun');
-
-                try {
-                    const config = await resolveConnection(selected as string);
-                    const sql = new SQL(config.url);
-                    await sql.unsafe(TEST_QUERIES[config.type]);
-                    sql.close();
-                    p.log.success(`Connection "${selected}" successful!`);
-                } catch (error: unknown) {
-                    const message = error instanceof Error ? error.message : String(error);
-                    p.log.error(`Connection failed: ${message}`);
-                }
-            }
-        }
-
-        // Add spacing between iterations
-        console.log('');
-    }
 }
