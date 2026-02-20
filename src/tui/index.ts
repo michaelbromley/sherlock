@@ -8,7 +8,7 @@ import * as path from 'path';
 import { findConfigFile, getConfigDir, ensureConfigDir } from '../config/paths';
 import { loadConfigFile, listConnections } from '../config';
 import type { SherlockConfig, ConnectionConfig } from '../config/types';
-import { DB_TYPES, DEFAULT_PORTS, TEST_QUERIES, type DbType } from '../db-types';
+import { DB_TYPES, DEFAULT_PORTS, TEST_QUERIES, isRedisConfig, type DbType } from '../db-types';
 import {
     setKeychainPassword,
     hasKeychainPassword,
@@ -134,7 +134,7 @@ async function testConnectionMenu(connections: string[]): Promise<void> {
     try {
         const config = await resolveConnection(selected as string);
 
-        if (config.type === DB_TYPES.REDIS) {
+        if (isRedisConfig(config)) {
             const { RedisClient } = await import('bun');
             const client = new RedisClient(config.url);
             await client.send(['PING']);
@@ -680,6 +680,7 @@ async function promptForConnection(
                         if (value && isNaN(parseInt(value))) return 'Port must be a number';
                     },
                 }),
+            // Redis defaults to 16 databases (0-15), configurable via `databases` in redis.conf
             database: () =>
                 p.text({
                     message: 'Database number (0-15)',

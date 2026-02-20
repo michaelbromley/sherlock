@@ -12,7 +12,7 @@ import * as p from '@clack/prompts';
 
 // Config
 import { listConnections, getConnectionConfig, detectConnectionFromCwd } from './config';
-import { DB_TYPES, TEST_QUERIES, type DbType } from './db-types';
+import { DB_TYPES, TEST_QUERIES, isRedisConfig, type DbType } from './db-types';
 
 // Credentials
 import {
@@ -122,19 +122,10 @@ function requireConnection(opts: { connection?: string; config?: string }): asse
     }
 }
 
-/** Detect if a connection config is Redis (by type or URL) */
-function isRedisConnection(config: { type?: string; url?: unknown }): boolean {
-    if (config.type === DB_TYPES.REDIS) return true;
-    if (typeof config.url === 'string') {
-        return config.url.startsWith('redis://') || config.url.startsWith('rediss://');
-    }
-    return false;
-}
-
 /** Check that the active connection is a Redis connection */
 function requireRedisConnection(opts: { connection: string; config?: string }): void {
     const config = getConnectionConfig(opts.connection, opts.config);
-    if (!isRedisConnection(config)) {
+    if (!isRedisConfig(config)) {
         const type = config.type || 'SQL';
         console.error(`Error: "${opts.connection}" is a ${type} connection. This command only works with Redis connections.`);
         process.exit(1);
@@ -144,10 +135,20 @@ function requireRedisConnection(opts: { connection: string; config?: string }): 
 /** Check that the active connection is a SQL connection */
 function requireSqlConnection(opts: { connection: string; config?: string }): void {
     const config = getConnectionConfig(opts.connection, opts.config);
-    if (isRedisConnection(config)) {
+    if (isRedisConfig(config)) {
         console.error(`Error: "${opts.connection}" is a Redis connection. Use Redis commands (info, keys, get, inspect, slowlog, command) instead.`);
         process.exit(1);
     }
+}
+
+/** Parse a CLI option as a positive integer, exit with error if invalid */
+function parsePositiveInt(value: string, name: string, max?: number): number {
+    const n = parseInt(value, 10);
+    if (isNaN(n) || n < 1 || (max !== undefined && n > max)) {
+        console.error(`Error: --${name} must be a positive number${max ? ` (max ${max})` : ''}`);
+        process.exit(1);
+    }
+    return n;
 }
 
 // ============================================================================
@@ -272,11 +273,7 @@ function setupCLI() {
             requireConnection(opts);
             requireSqlConnection(opts);
 
-            const limit = parseInt(cmdOpts.limit, 10);
-            if (isNaN(limit) || limit < 1 || limit > MAX_SAMPLE_LIMIT) {
-                console.error(`Error: --limit must be between 1 and ${MAX_SAMPLE_LIMIT}`);
-                process.exit(1);
-            }
+            const limit = parsePositiveInt(cmdOpts.limit, 'limit', MAX_SAMPLE_LIMIT);
 
             await withConnection(opts.connection, opts.config, async (sql, dbType) => {
                 const result = await sampleTable(sql, dbType as DbType, tableName, limit);
@@ -427,11 +424,7 @@ function setupCLI() {
             requireConnection(opts);
             requireRedisConnection(opts);
 
-            const limit = parseInt(cmdOpts.limit, 10);
-            if (isNaN(limit) || limit < 1) {
-                console.error('Error: --limit must be a positive number');
-                process.exit(1);
-            }
+            const limit = parsePositiveInt(cmdOpts.limit, 'limit');
 
             await withRedisConnection(opts.connection, opts.config, async (client) => {
                 const result = await scanKeys(client, pattern || '*', limit, cmdOpts.types);
@@ -449,11 +442,7 @@ function setupCLI() {
             requireConnection(opts);
             requireRedisConnection(opts);
 
-            const limit = parseInt(cmdOpts.limit, 10);
-            if (isNaN(limit) || limit < 1) {
-                console.error('Error: --limit must be a positive number');
-                process.exit(1);
-            }
+            const limit = parsePositiveInt(cmdOpts.limit, 'limit');
 
             await withRedisConnection(opts.connection, opts.config, async (client) => {
                 const result = await getKeyValue(client, key, limit);
@@ -485,11 +474,7 @@ function setupCLI() {
             requireConnection(opts);
             requireRedisConnection(opts);
 
-            const count = parseInt(cmdOpts.count, 10);
-            if (isNaN(count) || count < 1) {
-                console.error('Error: --count must be a positive number');
-                process.exit(1);
-            }
+            const count = parsePositiveInt(cmdOpts.count, 'count');
 
             await withRedisConnection(opts.connection, opts.config, async (client) => {
                 const result = await getSlowlog(client, count);
@@ -541,7 +526,7 @@ function setupCLI() {
 
             try {
                 const connConfig = getConnectionConfig(connectionName, opts.config);
-                if (connConfig.type === DB_TYPES.REDIS) {
+                if (isRedisConfig(connConfig)) {
                     await withRedisConnection(connectionName, opts.config, async (client) => {
                         await client.send(['PING']);
                     });

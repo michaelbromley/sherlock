@@ -36,3 +36,12 @@ export const TEST_QUERIES: Record<DbType, string> = {
     [DB_TYPES.SQLITE]: 'SELECT 1',
     [DB_TYPES.REDIS]: 'PING',
 };
+
+/** Check if a connection config looks like Redis (by type field or URL prefix) */
+export function isRedisConfig(config: { type?: string; url?: unknown }): boolean {
+    if (config.type === DB_TYPES.REDIS) return true;
+    if (typeof config.url === 'string') {
+        return config.url.startsWith('redis://') || config.url.startsWith('rediss://');
+    }
+    return false;
+}

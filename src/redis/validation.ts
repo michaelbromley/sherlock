@@ -18,7 +18,7 @@ const ALLOWED_REDIS_COMMANDS = new Set([
     // Sorted sets
     'ZRANGE', 'ZCARD', 'ZSCORE', 'ZRANK', 'ZREVRANK', 'ZCOUNT', 'ZSCAN', 'ZRANGEBYSCORE', 'ZRANGEBYLEX',
     // Keys
-    'TYPE', 'TTL', 'PTTL', 'EXISTS', 'SCAN', 'KEYS', 'RANDOMKEY', 'OBJECT', 'DUMP',
+    'TYPE', 'TTL', 'PTTL', 'EXISTS', 'SCAN', 'RANDOMKEY', 'OBJECT',
     // Server
     'INFO', 'DBSIZE', 'CONFIG', 'CLIENT', 'SLOWLOG', 'MEMORY', 'TIME', 'COMMAND',
     // Streams
@@ -27,11 +27,14 @@ const ALLOWED_REDIS_COMMANDS = new Set([
     'PING', 'ECHO',
 ]);
 
-/** Subcommands that must be read-only for multi-word commands */
+/**
+ * Subcommands that must be read-only for multi-word commands.
+ * Commands listed here REQUIRE a subcommand — bare invocations are rejected.
+ */
 const ALLOWED_SUBCOMMANDS: Record<string, Set<string>> = {
     'CONFIG': new Set(['GET']),
     'CLIENT': new Set(['LIST', 'GETNAME', 'ID', 'INFO']),
-    'SLOWLOG': new Set(['GET', 'LEN', 'RESET']),
+    'SLOWLOG': new Set(['GET', 'LEN']),
     'OBJECT': new Set(['ENCODING', 'REFCOUNT', 'IDLETIME', 'HELP', 'FREQ']),
     'MEMORY': new Set(['USAGE', 'DOCTOR', 'STATS', 'HELP']),
     'COMMAND': new Set(['COUNT', 'DOCS', 'GETKEYS', 'INFO', 'LIST']),
@@ -53,7 +56,13 @@ export function validateRedisCommand(cmd: string, args: string[] = []): Validati
 
     // Check subcommands for multi-word commands
     const allowedSubs = ALLOWED_SUBCOMMANDS[upperCmd];
-    if (allowedSubs && args.length > 0) {
+    if (allowedSubs) {
+        if (args.length === 0) {
+            return {
+                valid: false,
+                error: `"${cmd}" requires a subcommand. Allowed: ${cmd} ${[...allowedSubs].join('|')}`,
+            };
+        }
         const subCmd = args[0].toUpperCase();
         if (!allowedSubs.has(subCmd)) {
             return {

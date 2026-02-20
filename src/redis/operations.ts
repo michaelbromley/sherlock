@@ -6,8 +6,77 @@
 import type { RedisClient } from 'bun';
 import { validateRedisCommand } from './validation';
 
+// ============================================================================
+// Types
+// ============================================================================
+
+export interface ServerInfoResult {
+    server?: Record<string, string>;
+    memory?: Record<string, string>;
+    keyspace: Record<string, Record<string, number>>;
+    dbsize: number;
+    [section: string]: unknown;
+}
+
+export interface KeyInfo {
+    key: string;
+    type?: string;
+    ttl?: number;
+}
+
+export interface ScanKeysResult {
+    pattern: string;
+    count: number;
+    keys: KeyInfo[];
+}
+
+export interface KeyValueResult {
+    key: string;
+    type: string;
+    exists?: boolean;
+    ttl?: number;
+    value?: unknown;
+    length?: number;
+    size?: number;
+}
+
+export interface InspectKeyResult {
+    key: string;
+    exists: boolean;
+    type?: string;
+    ttl?: number;
+    memoryUsage?: number | null;
+    encoding?: string | null;
+    length?: number;
+}
+
+export interface SlowlogEntry {
+    id: unknown;
+    timestamp: unknown;
+    duration: unknown;
+    command: unknown;
+    clientAddr?: unknown;
+    clientName?: unknown;
+}
+
+export interface SlowlogResult {
+    entries: SlowlogEntry[];
+}
+
+// ============================================================================
+// Constants
+// ============================================================================
+
+/** Number of keys to request per SCAN iteration */
+const SCAN_BATCH_SIZE = 100;
+
+// ============================================================================
+// Internal helpers
+// ============================================================================
+
 /**
- * Parse Redis INFO output into structured sections
+ * Parse Redis INFO output into structured sections.
+ * Redis INFO uses \r\n line endings (RESP protocol), not plain \n.
  */
 function parseInfoString(info: string): Record<string, Record<string, string>> {
     const sections: Record<string, Record<string, string>> = {};
@@ -48,12 +117,32 @@ function parseKeyspaceValue(value: string): Record<string, number> {
 }
 
 /**
+ * Collect members from a set using SSCAN (bounded, unlike SMEMBERS which returns all)
+ */
+async function sscanMembers(client: RedisClient, key: string, limit: number): Promise<string[]> {
+    const members: string[] = [];
+    let cursor = '0';
+
+    do {
+        const result = await client.send(['SSCAN', key, cursor, 'COUNT', String(SCAN_BATCH_SIZE)]) as [string, string[]];
+        cursor = String(result[0]);
+        members.push(...result[1]);
+    } while (cursor !== '0' && members.length < limit);
+
+    return members.slice(0, limit);
+}
+
+// ============================================================================
+// Operations
+// ============================================================================
+
+/**
  * Get server info, memory stats, and keyspace overview
  */
 export async function getServerInfo(
     client: RedisClient,
     section?: string
-): Promise<Record<string, unknown>> {
+): Promise<ServerInfoResult> {
     const args = section ? ['INFO', section] : ['INFO'];
     const info = await client.send(args) as string;
     const parsed = parseInfoString(info);
@@ -61,7 +150,7 @@ export async function getServerInfo(
     const dbsize = await client.send(['DBSIZE']) as number;
 
     if (section) {
-        return { [section]: parsed[section.toLowerCase()] || {}, dbsize };
+        return { [section]: parsed[section.toLowerCase()] || {}, keyspace: {}, dbsize };
     }
 
     // Build keyspace with parsed db info
@@ -88,13 +177,13 @@ export async function scanKeys(
     pattern: string,
     limit: number,
     includeTypes: boolean
-): Promise<{ pattern: string; count: number; keys: Record<string, unknown>[] }> {
+): Promise<ScanKeysResult> {
     const keys: string[] = [];
     let cursor = '0';
 
     // SCAN in batches until we have enough or cursor returns to 0
     do {
-        const result = await client.send(['SCAN', cursor, 'MATCH', pattern, 'COUNT', '100']) as [string, string[]];
+        const result = await client.send(['SCAN', cursor, 'MATCH', pattern, 'COUNT', String(SCAN_BATCH_SIZE)]) as [string, string[]];
         cursor = String(result[0]);
         keys.push(...result[1]);
     } while (cursor !== '0' && keys.length < limit);
@@ -103,7 +192,7 @@ export async function scanKeys(
     const trimmedKeys = keys.slice(0, limit);
 
     // Enrich with type and TTL if requested
-    const enrichedKeys: Record<string, unknown>[] = [];
+    const enrichedKeys: KeyInfo[] = [];
     for (const key of trimmedKeys) {
         if (includeTypes) {
             const [type, ttl] = await Promise.all([
@@ -130,7 +219,7 @@ export async function getKeyValue(
     client: RedisClient,
     key: string,
     limit = 100
-): Promise<Record<string, unknown>> {
+): Promise<KeyValueResult> {
     const type = await client.send(['TYPE', key]) as string;
     const ttl = await client.send(['TTL', key]) as number;
 
@@ -161,8 +250,8 @@ export async function getKeyValue(
 
         case 'set': {
             const size = await client.send(['SCARD', key]) as number;
-            const value = await client.send(['SMEMBERS', key]) as string[];
-            return { key, type, ttl, size, value: value.slice(0, limit) };
+            const value = await sscanMembers(client, key, limit);
+            return { key, type, ttl, size, value };
         }
 
         case 'zset': {
@@ -191,7 +280,7 @@ export async function getKeyValue(
 export async function inspectKey(
     client: RedisClient,
     key: string
-): Promise<Record<string, unknown>> {
+): Promise<InspectKeyResult> {
     const exists = await client.send(['EXISTS', key]) as number;
 
     if (!exists) {
@@ -205,7 +294,7 @@ export async function inspectKey(
         client.send(['OBJECT', 'ENCODING', key]).catch(() => null) as Promise<string | null>,
     ]);
 
-    const result: Record<string, unknown> = {
+    const result: InspectKeyResult = {
         key,
         exists: true,
         type,
@@ -245,10 +334,10 @@ export async function inspectKey(
 export async function getSlowlog(
     client: RedisClient,
     count = 10
-): Promise<{ entries: Record<string, unknown>[] }> {
+): Promise<SlowlogResult> {
     const raw = await client.send(['SLOWLOG', 'GET', String(count)]) as unknown[][];
 
-    const entries = raw.map((entry: unknown[]) => ({
+    const entries: SlowlogEntry[] = raw.map((entry: unknown[]) => ({
         id: entry[0],
         timestamp: entry[1],
         duration: entry[2],

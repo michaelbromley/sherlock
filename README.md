@@ -202,12 +202,9 @@ sherlock -c <conn> command GET mykey   # Any read-only Redis command
 ### Management Commands
 
 ```bash
-sherlock connections          # List configured connections
+sherlock manage               # Connection manager (add, edit, delete, test, keychain)
+sherlock connections          # List configured connections (JSON)
 sherlock test <connection>    # Test a connection
-sherlock setup                # Interactive setup wizard
-sherlock add                  # Add a new connection (interactive)
-sherlock edit                 # Edit/delete connections (interactive)
-sherlock manage               # Connection manager menu
 ```
 
 ### Options
