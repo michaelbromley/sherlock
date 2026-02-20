@@ -44,6 +44,17 @@ import {
     executeQuery,
 } from './db/operations';
 
+// Redis
+import { withRedisConnection } from './redis/connection';
+import {
+    getServerInfo,
+    scanKeys,
+    getKeyValue,
+    inspectKey,
+    getSlowlog,
+    executeCommand,
+} from './redis/operations';
+
 // Output formatting
 import {
     formatOutput,
@@ -111,6 +122,34 @@ function requireConnection(opts: { connection?: string; config?: string }): asse
     }
 }
 
+/** Detect if a connection config is Redis (by type or URL) */
+function isRedisConnection(config: { type?: string; url?: unknown }): boolean {
+    if (config.type === DB_TYPES.REDIS) return true;
+    if (typeof config.url === 'string') {
+        return config.url.startsWith('redis://') || config.url.startsWith('rediss://');
+    }
+    return false;
+}
+
+/** Check that the active connection is a Redis connection */
+function requireRedisConnection(opts: { connection: string; config?: string }): void {
+    const config = getConnectionConfig(opts.connection, opts.config);
+    if (!isRedisConnection(config)) {
+        const type = config.type || 'SQL';
+        console.error(`Error: "${opts.connection}" is a ${type} connection. This command only works with Redis connections.`);
+        process.exit(1);
+    }
+}
+
+/** Check that the active connection is a SQL connection */
+function requireSqlConnection(opts: { connection: string; config?: string }): void {
+    const config = getConnectionConfig(opts.connection, opts.config);
+    if (isRedisConnection(config)) {
+        console.error(`Error: "${opts.connection}" is a Redis connection. Use Redis commands (info, keys, get, inspect, slowlog, command) instead.`);
+        process.exit(1);
+    }
+}
+
 // ============================================================================
 // CLI Setup
 // ============================================================================
@@ -148,6 +187,7 @@ function setupCLI() {
         .action(async () => {
             const opts = program.opts();
             requireConnection(opts);
+            requireSqlConnection(opts);
             await withConnection(opts.connection, opts.config, async (sql, dbType) => {
                 const tables = await getTables(sql, dbType as DbType);
                 console.log(JSON.stringify({ tables }, null, 2));
@@ -162,6 +202,8 @@ function setupCLI() {
         .action(async (cmdOpts: { refresh?: boolean }) => {
             const opts = program.opts();
             requireConnection(opts);
+
+            requireSqlConnection(opts);
 
             // Check cache first (unless --refresh)
             if (!cmdOpts.refresh) {
@@ -213,6 +255,7 @@ function setupCLI() {
         .action(async (tableName: string) => {
             const opts = program.opts();
             requireConnection(opts);
+            requireSqlConnection(opts);
             await withConnection(opts.connection, opts.config, async (sql, dbType) => {
                 const result = await describeTable(sql, dbType as DbType, tableName);
                 console.log(JSON.stringify(result, null, 2));
@@ -227,6 +270,7 @@ function setupCLI() {
         .action(async (tableName: string, cmdOpts: { limit: string }) => {
             const opts = program.opts();
             requireConnection(opts);
+            requireSqlConnection(opts);
 
             const limit = parseInt(cmdOpts.limit, 10);
             if (isNaN(limit) || limit < 1 || limit > MAX_SAMPLE_LIMIT) {
@@ -259,6 +303,7 @@ function setupCLI() {
         .action(async (tableName: string) => {
             const opts = program.opts();
             requireConnection(opts);
+            requireSqlConnection(opts);
             await withConnection(opts.connection, opts.config, async (sql, dbType) => {
                 const result = await getTableStats(sql, dbType as DbType, tableName);
                 const format = opts.format as OutputFormat;
@@ -277,6 +322,7 @@ function setupCLI() {
         .action(async (tableName: string) => {
             const opts = program.opts();
             requireConnection(opts);
+            requireSqlConnection(opts);
             await withConnection(opts.connection, opts.config, async (sql, dbType) => {
                 const result = await getForeignKeys(sql, dbType as DbType, tableName);
                 const format = opts.format as OutputFormat;
@@ -304,6 +350,7 @@ function setupCLI() {
         .action(async (tableName: string) => {
             const opts = program.opts();
             requireConnection(opts);
+            requireSqlConnection(opts);
             await withConnection(opts.connection, opts.config, async (sql, dbType) => {
                 const result = await getIndexes(sql, dbType as DbType, tableName);
                 const format = opts.format as OutputFormat;
@@ -326,6 +373,7 @@ function setupCLI() {
 
             const opts = program.opts();
             requireConnection(opts);
+            requireSqlConnection(opts);
 
             // Enforce read-only
             const validation = validateReadOnlyQuery(sqlQuery);
@@ -346,6 +394,120 @@ function setupCLI() {
 
                 const format = opts.format as OutputFormat;
                 console.log(formatOutput(result, format));
+            });
+        });
+
+    // ========================================================================
+    // Redis Commands
+    // ========================================================================
+
+    // Info command
+    program
+        .command('info')
+        .description('Redis server info, memory stats, and keyspace overview')
+        .option('--section <name>', 'get a specific INFO section (e.g., memory, server, clients)')
+        .action(async (cmdOpts: { section?: string }) => {
+            const opts = program.opts();
+            requireConnection(opts);
+            requireRedisConnection(opts);
+            await withRedisConnection(opts.connection, opts.config, async (client) => {
+                const result = await getServerInfo(client, cmdOpts.section);
+                console.log(JSON.stringify(result, null, 2));
+            });
+        });
+
+    // Keys command
+    program
+        .command('keys [pattern]')
+        .description('Scan for keys matching a glob pattern (default: *)')
+        .option('--limit <n>', 'maximum number of keys to return', '100')
+        .option('--no-types', 'skip TYPE/TTL lookups for faster scanning')
+        .action(async (pattern: string | undefined, cmdOpts: { limit: string; types: boolean }) => {
+            const opts = program.opts();
+            requireConnection(opts);
+            requireRedisConnection(opts);
+
+            const limit = parseInt(cmdOpts.limit, 10);
+            if (isNaN(limit) || limit < 1) {
+                console.error('Error: --limit must be a positive number');
+                process.exit(1);
+            }
+
+            await withRedisConnection(opts.connection, opts.config, async (client) => {
+                const result = await scanKeys(client, pattern || '*', limit, cmdOpts.types);
+                console.log(JSON.stringify(result, null, 2));
+            });
+        });
+
+    // Get command (Redis)
+    program
+        .command('get <key>')
+        .description('Get value of a Redis key (auto-detects type)')
+        .option('--limit <n>', 'max items for lists/sets/zsets', '100')
+        .action(async (key: string, cmdOpts: { limit: string }) => {
+            const opts = program.opts();
+            requireConnection(opts);
+            requireRedisConnection(opts);
+
+            const limit = parseInt(cmdOpts.limit, 10);
+            if (isNaN(limit) || limit < 1) {
+                console.error('Error: --limit must be a positive number');
+                process.exit(1);
+            }
+
+            await withRedisConnection(opts.connection, opts.config, async (client) => {
+                const result = await getKeyValue(client, key, limit);
+                console.log(JSON.stringify(result, null, 2));
+            });
+        });
+
+    // Inspect command
+    program
+        .command('inspect <key>')
+        .description('Inspect Redis key metadata (type, TTL, memory usage, encoding)')
+        .action(async (key: string) => {
+            const opts = program.opts();
+            requireConnection(opts);
+            requireRedisConnection(opts);
+            await withRedisConnection(opts.connection, opts.config, async (client) => {
+                const result = await inspectKey(client, key);
+                console.log(JSON.stringify(result, null, 2));
+            });
+        });
+
+    // Slowlog command
+    program
+        .command('slowlog')
+        .description('Show recent slow queries from the Redis slow log')
+        .option('-n, --count <n>', 'number of entries to show', '10')
+        .action(async (cmdOpts: { count: string }) => {
+            const opts = program.opts();
+            requireConnection(opts);
+            requireRedisConnection(opts);
+
+            const count = parseInt(cmdOpts.count, 10);
+            if (isNaN(count) || count < 1) {
+                console.error('Error: --count must be a positive number');
+                process.exit(1);
+            }
+
+            await withRedisConnection(opts.connection, opts.config, async (client) => {
+                const result = await getSlowlog(client, count);
+                console.log(JSON.stringify(result, null, 2));
+            });
+        });
+
+    // Command command (generic read-only Redis command)
+    program
+        .command('command <cmd> [args...]')
+        .description('Execute a read-only Redis command')
+        .action(async (cmd: string, args: string[]) => {
+            const opts = program.opts();
+            requireConnection(opts);
+            requireRedisConnection(opts);
+            await withRedisConnection(opts.connection, opts.config, async (client) => {
+                const result = await executeCommand(client, cmd, args);
+                console.log(JSON.stringify(result, null, 2));
             });
         });
 
@@ -378,9 +540,16 @@ function setupCLI() {
             console.log(`Testing connection: ${connectionName}...`);
 
             try {
-                await withConnection(connectionName, opts.config, async (sql, dbType) => {
-                    await sql.unsafe(TEST_QUERIES[dbType as DbType]);
-                });
+                const connConfig = getConnectionConfig(connectionName, opts.config);
+                if (connConfig.type === DB_TYPES.REDIS) {
+                    await withRedisConnection(connectionName, opts.config, async (client) => {
+                        await client.send(['PING']);
+                    });
+                } else {
+                    await withConnection(connectionName, opts.config, async (sql, dbType) => {
+                        await sql.unsafe(TEST_QUERIES[dbType as DbType]);
+                    });
+                }
                 console.log(`\x1b[32m✓ Connection "${connectionName}" successful!\x1b[0m`);
             } catch (error: unknown) {
                 console.error(`\x1b[31m✗ Connection "${connectionName}" failed\x1b[0m`);

@@ -130,13 +130,21 @@ async function testConnectionMenu(connections: string[]): Promise<void> {
 
     p.log.info(`Testing ${selected}...`);
     const { resolveConnection } = await import('../config');
-    const { SQL } = await import('bun');
 
     try {
         const config = await resolveConnection(selected as string);
-        const sql = new SQL(config.url);
-        await sql.unsafe(TEST_QUERIES[config.type]);
-        sql.close();
+
+        if (config.type === DB_TYPES.REDIS) {
+            const { RedisClient } = await import('bun');
+            const client = new RedisClient(config.url);
+            await client.send(['PING']);
+            client.close();
+        } else {
+            const { SQL } = await import('bun');
+            const sql = new SQL(config.url);
+            await sql.unsafe(TEST_QUERIES[config.type]);
+            sql.close();
+        }
         p.log.success(`Connection "${selected}" successful!`);
     } catch (error: unknown) {
         const message = error instanceof Error ? error.message : String(error);
@@ -641,6 +649,7 @@ async function promptForConnection(
                         { value: DB_TYPES.POSTGRES, label: 'PostgreSQL' },
                         { value: DB_TYPES.MYSQL, label: 'MySQL / MariaDB' },
                         { value: DB_TYPES.SQLITE, label: 'SQLite' },
+                        { value: DB_TYPES.REDIS, label: 'Redis' },
                     ],
                 }),
         },
@@ -651,6 +660,93 @@ async function promptForConnection(
             },
         }
     );
+
+    if (result.type === DB_TYPES.REDIS) {
+        const isEditing = !!existingConfig;
+
+        const redisFields: Record<string, () => any> = {
+            host: () =>
+                p.text({
+                    message: 'Host',
+                    placeholder: 'localhost',
+                    initialValue: (existingConfig?.host as string) || 'localhost',
+                }),
+            port: () =>
+                p.text({
+                    message: 'Port',
+                    placeholder: String(DEFAULT_PORTS[DB_TYPES.REDIS]),
+                    initialValue: existingConfig?.port?.toString() || String(DEFAULT_PORTS[DB_TYPES.REDIS]),
+                    validate: (value) => {
+                        if (value && isNaN(parseInt(value))) return 'Port must be a number';
+                    },
+                }),
+            database: () =>
+                p.text({
+                    message: 'Database number (0-15)',
+                    placeholder: '0',
+                    initialValue: existingConfig?.database || '0',
+                    validate: (value) => {
+                        const num = parseInt(value);
+                        if (isNaN(num) || num < 0 || num > 15) return 'Database must be 0-15';
+                    },
+                }),
+        };
+
+        if (!isEditing) {
+            redisFields.password = () =>
+                p.password({
+                    message: 'Password (leave empty if none)',
+                });
+            redisFields.storageMethod = () =>
+                p.select({
+                    message: 'Where should the password be stored?',
+                    options: [
+                        { value: 'keychain', label: 'OS Keychain', hint: 'Recommended - encrypted by OS' },
+                        { value: 'env', label: 'Environment file', hint: '~/.config/sherlock/.env' },
+                    ],
+                });
+        }
+
+        const redisResult = await p.group(
+            redisFields,
+            {
+                onCancel: () => {
+                    p.cancel('Cancelled');
+                    process.exit(0);
+                },
+            }
+        );
+
+        const directory = await p.text({
+            message: 'Project directory (auto-selects this connection when you are in this dir)',
+            placeholder: 'Leave empty to skip',
+            initialValue: existingConfig?.directory || '',
+        });
+
+        if (p.isCancel(directory)) {
+            p.cancel('Cancelled');
+            process.exit(0);
+        }
+
+        const config: ConnectionConfig = {
+            type: DB_TYPES.REDIS,
+            host: redisResult.host as string,
+            port: parseInt(redisResult.port as string),
+            database: redisResult.database as string,
+            password: isEditing ? existingConfig!.password : '',
+        };
+
+        if (directory) {
+            config.directory = directory;
+        }
+
+        return {
+            name: result.name as string,
+            config,
+            password: isEditing ? '' : (redisResult.password as string || ''),
+            storageMethod: isEditing ? 'env' : (redisResult.storageMethod as 'keychain' | 'env' || 'env'),
+        };
+    }
 
     if (result.type === DB_TYPES.SQLITE) {
         const sqliteResult = await p.group({

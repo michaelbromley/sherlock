@@ -1,14 +1,14 @@
 # Sherlock
 
-A read-only database query tool for AI assistants. Single binary, secure credential management, works with PostgreSQL, MySQL, and SQLite.
+A read-only database query tool for AI assistants. Single binary, secure credential management, works with PostgreSQL, MySQL, SQLite, and Redis.
 
 ## Features
 
 - **Single binary** - 57MB standalone executable, no runtime dependencies
 - **Secure credentials** - OS keychain or environment variables, never plaintext in config
-- **Read-only enforced** - Only SELECT, SHOW, DESCRIBE, EXPLAIN queries allowed
+- **Read-only enforced** - SQL: only SELECT/SHOW/DESCRIBE/EXPLAIN. Redis: read-only command whitelist
 - **Explicit connections** - Must specify which database to query (no accidental production queries)
-- **Multiple databases** - PostgreSQL, MySQL/MariaDB, SQLite
+- **Multiple databases** - PostgreSQL, MySQL/MariaDB, SQLite, Redis
 - **Claude Code integration** - Works as a skill for AI-assisted database exploration
 
 ## Quick Start
@@ -37,7 +37,7 @@ sherlock setup
 ```
 
 The interactive wizard will guide you through:
-- Database type (PostgreSQL, MySQL, SQLite)
+- Database type (PostgreSQL, MySQL, SQLite, Redis)
 - Connection details (host, port, database, credentials)
 - Secure password storage (OS keychain or env file)
 
@@ -136,6 +136,13 @@ Config lives at `~/.config/sherlock/config.json`:
       "username": { "$env": "LOCAL_DB_USER" },
       "password": { "$env": "LOCAL_DB_PASS" },
       "logging": true
+    },
+    "redis-cache": {
+      "type": "redis",
+      "host": "localhost",
+      "port": 6379,
+      "password": { "$keychain": "redis-cache" },
+      "database": "0"
     }
   }
 }
@@ -165,7 +172,7 @@ sherlock keychain delete prod-db
 
 ## Commands
 
-### Database Commands (require `-c <connection>`)
+### SQL Commands (require `-c <connection>`)
 
 ```bash
 sherlock -c <conn> tables              # List all tables
@@ -177,6 +184,19 @@ sherlock -c <conn> sample <table>      # Random sample rows (-n <limit>)
 sherlock -c <conn> stats <table>       # Data profiling (row count, nulls, distinct)
 sherlock -c <conn> indexes <table>     # Show table indexes
 sherlock -c <conn> fk <table>          # Foreign key relationships
+```
+
+### Redis Commands (require `-c <connection>`)
+
+```bash
+sherlock -c <conn> info                # Server info, memory, keyspace
+sherlock -c <conn> info --section memory # Specific INFO section
+sherlock -c <conn> keys "user:*"       # Scan for keys matching pattern
+sherlock -c <conn> keys --limit 50     # Limit results (default 100)
+sherlock -c <conn> get <key>           # Get value (auto-detects type)
+sherlock -c <conn> inspect <key>       # Key metadata (type, TTL, memory, encoding)
+sherlock -c <conn> slowlog             # Recent slow queries
+sherlock -c <conn> command GET mykey   # Any read-only Redis command
 ```
 
 ### Management Commands
@@ -235,7 +255,7 @@ Sherlock integrates with Claude Code as the `sherlock` skill. Once configured, a
 - "What's the schema of the users table?"
 - "How many orders were placed last month?"
 
-Claude will use Sherlock to introspect schemas and run queries.
+Claude will use Sherlock to introspect schemas, run queries, and inspect Redis data.
 
 ## Demo Database
 
@@ -256,19 +276,23 @@ sherlock -c chinook query "SELECT Name FROM Artist LIMIT 5"
 
 ## Security
 
-- **Read-only enforced** - INSERT, UPDATE, DELETE, DROP etc. are blocked
+- **Read-only enforced** - SQL: INSERT, UPDATE, DELETE, DROP etc. are blocked. Redis: SET, DEL, FLUSHDB etc. are blocked
 - **No default connection** - Must explicitly specify `-c` to prevent accidents
 - **Secure credential storage** - Keychain or env vars, never plaintext
 - **Config permissions** - Files created with 0600 (owner read/write only)
-- **Query validation** - Dangerous keywords blocked even in subqueries
+- **Query validation** - SQL: dangerous keywords blocked even in subqueries. Redis: whitelist of allowed commands with subcommand validation
 
-### Allowed Query Types
+### Allowed SQL Query Types
 
 - `SELECT`
 - `SHOW`
 - `DESCRIBE`
 - `EXPLAIN`
 - `WITH` (CTEs)
+
+### Allowed Redis Commands
+
+Read-only commands only: `GET`, `MGET`, `HGETALL`, `LRANGE`, `SMEMBERS`, `ZRANGE`, `SCAN`, `TYPE`, `TTL`, `INFO`, `DBSIZE`, `SLOWLOG GET`, `MEMORY USAGE`, and more. Mutations (`SET`, `DEL`, `HSET`, `LPUSH`, etc.) and admin commands (`FLUSHDB`, `CONFIG SET`, `SHUTDOWN`, etc.) are blocked.
 
 ## Building
 

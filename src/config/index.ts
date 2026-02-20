@@ -184,11 +184,32 @@ export async function resolveConnection(
             type = DB_TYPES.MYSQL;
         } else if (url.startsWith('sqlite://') || url.startsWith('file://') || url === ':memory:') {
             type = DB_TYPES.SQLITE;
+        } else if (url.startsWith('redis://') || url.startsWith('rediss://')) {
+            type = DB_TYPES.REDIS;
         } else {
             type = config.type || DB_TYPES.POSTGRES;
         }
 
         return { type, url };
+    }
+
+    // Handle Redis
+    if (config.type === DB_TYPES.REDIS) {
+        const host = (await resolver.resolveValue(config.host)) ??
+            getEnvVarForConnection(connectionName, 'HOST') ?? 'localhost';
+        const password = (await resolver.resolveValue(config.password)) ??
+            getEnvVarForConnection(connectionName, 'PASSWORD');
+        const port = config.port || DEFAULT_PORTS[DB_TYPES.REDIS];
+        const database = config.database || '0';
+
+        let url: string;
+        if (password) {
+            url = `redis://:${encodeURIComponent(password)}@${host}:${port}/${database}`;
+        } else {
+            url = `redis://${host}:${port}/${database}`;
+        }
+
+        return { type: DB_TYPES.REDIS, url };
     }
 
     // Handle SQLite

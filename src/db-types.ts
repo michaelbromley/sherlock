@@ -7,6 +7,7 @@ export const DB_TYPES = {
     POSTGRES: 'postgres',
     MYSQL: 'mysql',
     SQLITE: 'sqlite',
+    REDIS: 'redis',
 } as const;
 
 /** Database type union */
@@ -25,6 +26,7 @@ export const DEFAULT_PORTS: Record<DbType, number> = {
     [DB_TYPES.POSTGRES]: 5432,
     [DB_TYPES.MYSQL]: 3306,
     [DB_TYPES.SQLITE]: 0, // SQLite doesn't use ports
+    [DB_TYPES.REDIS]: 6379,
 };
 
 /** Simple test query for each database type */
@@ -32,4 +34,5 @@ export const TEST_QUERIES: Record<DbType, string> = {
     [DB_TYPES.POSTGRES]: 'SELECT 1 as test',
     [DB_TYPES.MYSQL]: 'SELECT 1',
     [DB_TYPES.SQLITE]: 'SELECT 1',
+    [DB_TYPES.REDIS]: 'PING',
 };

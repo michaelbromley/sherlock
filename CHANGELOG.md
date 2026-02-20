@@ -7,22 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [1.0.0] - Unreleased
 
-### Changed
-
-- Consolidated all connection/config management into a single `manage` command
-- `sherlock --help` reduced from 17 commands to 9 (8 DB commands + `manage`)
-- `setup`, `add`, `edit` commands removed (fully replaced by `manage` menu)
-- `connections`, `test`, `init`, `migrate`, `keychain` commands hidden from help (still work for scripting/CI)
-- Edit connection no longer asks for password — use dedicated "Update password" option instead
-
 ### Added
 
+- **Redis support** — 6 new commands for read-only Redis inspection, zero new dependencies (uses Bun's native `RedisClient`)
+  - `info` — server info, memory stats, keyspace overview (`--section` for specific sections)
+  - `keys [pattern]` — scan for keys matching a glob pattern (`--limit`, `--no-types`)
+  - `get <key>` — get value with auto type detection (string/hash/list/set/zset/stream)
+  - `inspect <key>` — key metadata: type, TTL, memory usage, encoding, length
+  - `slowlog` — recent slow queries from Redis slow log
+  - `command <cmd> [args...]` — execute any read-only Redis command with whitelist validation
+- Redis connection setup in `manage` wizard (host, port, password, database number 0-15)
+- `redis://` and `rediss://` URL auto-detection in connection config
+- Read-only enforcement for Redis — whitelist of allowed commands, subcommand validation for multi-word commands (e.g. `CONFIG GET` allowed, `CONFIG SET` blocked)
+- Clear error messages when using SQL commands on Redis connections and vice versa
 - `manage` auto-triggers setup wizard when no config exists
 - Enhanced connection list in manage menu showing type + host/database info
 - Dedicated "Delete connection" option in manage menu (no longer buried inside edit)
 - Keychain submenu in manage menu (store, check, delete passwords)
 - Interactive migrate option in manage menu (prompts for legacy config path)
 - "Set project directory" option in edit connection menu
+
+### Changed
+
+- Consolidated all connection/config management into a single `manage` command
+- `sherlock --help` now shows 15 commands (8 SQL + 6 Redis + `manage`)
+- `setup`, `add`, `edit` commands removed (fully replaced by `manage` menu)
+- `connections`, `test`, `init`, `migrate`, `keychain` commands hidden from help (still work for scripting/CI)
+- Edit connection no longer asks for password — use dedicated "Update password" option instead
+- `test` command now handles both SQL (SELECT 1) and Redis (PING) connections
 
 ## [0.2.0] - 2026-02-20
 
