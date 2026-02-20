@@ -478,17 +478,41 @@ async function editConnectionWizard(): Promise<void> {
     const existingConn = config.connections[connName];
 
     const loggingStatus = existingConn.logging ? 'enabled' : 'disabled';
+    const directoryHint = existingConn.directory || 'not set';
     const action = await p.select({
         message: `What would you like to do with "${connName}"?`,
         options: [
             { value: 'edit', label: 'Edit connection details' },
             { value: 'password', label: 'Update password' },
+            { value: 'directory', label: 'Set project directory', hint: directoryHint },
             { value: 'logging', label: 'Toggle query logging', hint: `Currently ${loggingStatus}` },
             { value: 'delete', label: 'Delete connection', hint: 'Cannot be undone' },
         ],
     });
 
     if (p.isCancel(action)) return;
+
+    if (action === 'directory') {
+        const cwd = process.cwd();
+        const newDir = await p.text({
+            message: 'Project directory (auto-selects this connection when you are in this dir)',
+            placeholder: 'Leave empty to remove',
+            initialValue: existingConn.directory || cwd,
+        });
+
+        if (p.isCancel(newDir)) return;
+
+        if (newDir) {
+            config.connections[connName].directory = newDir;
+        } else {
+            delete config.connections[connName].directory;
+        }
+        saveConfig(config);
+        p.log.success(newDir
+            ? `Project directory set to "${newDir}" for "${connName}".`
+            : `Project directory removed for "${connName}".`);
+        return;
+    }
 
     if (action === 'delete') {
         const confirmDelete = await p.confirm({
