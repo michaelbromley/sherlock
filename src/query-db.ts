@@ -573,6 +573,18 @@ function setupCLI() {
         });
 
     // ========================================================================
+    // Update Command
+    // ========================================================================
+
+    program
+        .command('update')
+        .description('Check for updates and self-update the sherlock binary')
+        .action(async () => {
+            const { runUpdate } = await import('./update');
+            await runUpdate();
+        });
+
+    // ========================================================================
     // Keychain Commands
     // ========================================================================
 
