@@ -572,18 +572,21 @@ async function editConnectionWizard(): Promise<void> {
         return;
     }
 
-    // Edit connection details
+    // Edit connection details (password is handled separately via "Update password")
     const connection = await promptForConnection(connName, existingConn);
     if (!connection) return;
 
-    await handlePasswordStorage(connection.name, connection.password);
+    // Only handle password storage for new connections (edit skips password prompt)
+    if (connection.password) {
+        await handlePasswordStorage(connection.name, connection.password);
 
-    if (connection.storageMethod === 'keychain') {
-        connection.config.password = { $keychain: connection.name };
-    } else if (connection.storageMethod === 'env') {
-        const envVar = `SHERLOCK_${connection.name.toUpperCase().replace(/-/g, '_')}_PASSWORD`;
-        connection.config.password = { $env: envVar };
-        await saveToEnvFile(envVar, connection.password);
+        if (connection.storageMethod === 'keychain') {
+            connection.config.password = { $keychain: connection.name };
+        } else if (connection.storageMethod === 'env') {
+            const envVar = `SHERLOCK_${connection.name.toUpperCase().replace(/-/g, '_')}_PASSWORD`;
+            connection.config.password = { $env: envVar };
+            await saveToEnvFile(envVar, connection.password);
+        }
     }
 
     // If name changed, delete old connection
@@ -696,62 +699,71 @@ async function promptForConnection(
         };
     }
 
+    const isEditing = !!existingConfig;
+
+    // When editing, skip password/storage — those have their own menu item
+    const connFields: Record<string, () => any> = {
+        host: () =>
+            p.text({
+                message: 'Host',
+                placeholder: 'localhost',
+                initialValue: (existingConfig?.host as string) || 'localhost',
+            }),
+        port: () =>
+            p.text({
+                message: 'Port',
+                placeholder: String(DEFAULT_PORTS[result.type as DbType]),
+                initialValue: existingConfig?.port?.toString() || String(DEFAULT_PORTS[result.type as DbType]),
+                validate: (value) => {
+                    if (value && isNaN(parseInt(value))) return 'Port must be a number';
+                },
+            }),
+        database: () =>
+            p.text({
+                message: 'Database name',
+                placeholder: 'myapp',
+                initialValue: existingConfig?.database || '',
+                validate: (value) => {
+                    if (!value) return 'Database name is required';
+                },
+            }),
+        username: () =>
+            p.text({
+                message: 'Username',
+                placeholder: 'dbuser',
+                initialValue: typeof existingConfig?.username === 'string' ? existingConfig.username : '',
+                validate: (value) => {
+                    if (!value) return 'Username is required';
+                },
+            }),
+    };
+
+    if (!isEditing) {
+        connFields.password = () =>
+            p.password({
+                message: 'Password',
+                validate: (value) => {
+                    if (!value) return 'Password is required';
+                },
+            });
+        connFields.storageMethod = () =>
+            p.select({
+                message: 'Where should the password be stored?',
+                options: [
+                    { value: 'keychain', label: 'OS Keychain', hint: 'Recommended - encrypted by OS' },
+                    { value: 'env', label: 'Environment file', hint: '~/.config/sherlock/.env' },
+                ],
+            });
+    }
+
+    connFields.logging = () =>
+        p.confirm({
+            message: 'Enable query logging?',
+            initialValue: existingConfig?.logging ?? false,
+        });
+
     const connResult = await p.group(
-        {
-            host: () =>
-                p.text({
-                    message: 'Host',
-                    placeholder: 'localhost',
-                    initialValue: (existingConfig?.host as string) || 'localhost',
-                }),
-            port: () =>
-                p.text({
-                    message: 'Port',
-                    placeholder: String(DEFAULT_PORTS[result.type as DbType]),
-                    initialValue: existingConfig?.port?.toString() || String(DEFAULT_PORTS[result.type as DbType]),
-                    validate: (value) => {
-                        if (value && isNaN(parseInt(value))) return 'Port must be a number';
-                    },
-                }),
-            database: () =>
-                p.text({
-                    message: 'Database name',
-                    placeholder: 'myapp',
-                    initialValue: existingConfig?.database || '',
-                    validate: (value) => {
-                        if (!value) return 'Database name is required';
-                    },
-                }),
-            username: () =>
-                p.text({
-                    message: 'Username',
-                    placeholder: 'dbuser',
-                    initialValue: typeof existingConfig?.username === 'string' ? existingConfig.username : '',
-                    validate: (value) => {
-                        if (!value) return 'Username is required';
-                    },
-                }),
-            password: () =>
-                p.password({
-                    message: 'Password',
-                    validate: (value) => {
-                        if (!value) return 'Password is required';
-                    },
-                }),
-            storageMethod: () =>
-                p.select({
-                    message: 'Where should the password be stored?',
-                    options: [
-                        { value: 'keychain', label: 'OS Keychain', hint: 'Recommended - encrypted by OS' },
-                        { value: 'env', label: 'Environment file', hint: '~/.config/sherlock/.env' },
-                    ],
-                }),
-            logging: () =>
-                p.confirm({
-                    message: 'Enable query logging?',
-                    initialValue: existingConfig?.logging ?? false,
-                }),
-        },
+        connFields,
         {
             onCancel: () => {
                 p.cancel('Cancelled');
@@ -777,7 +789,8 @@ async function promptForConnection(
         port: parseInt(connResult.port as string),
         database: connResult.database as string,
         username: connResult.username as string,
-        password: '', // Will be set based on storage method
+        // When editing, preserve existing password config
+        password: isEditing ? existingConfig!.password : '',
         logging: connResult.logging as boolean,
     };
 
@@ -788,8 +801,8 @@ async function promptForConnection(
     return {
         name: result.name as string,
         config,
-        password: connResult.password as string,
-        storageMethod: connResult.storageMethod as 'keychain' | 'env',
+        password: isEditing ? '' : (connResult.password as string),
+        storageMethod: isEditing ? 'env' : (connResult.storageMethod as 'keychain' | 'env'),
     };
 }
 
