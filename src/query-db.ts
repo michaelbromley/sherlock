@@ -528,7 +528,7 @@ function setupCLI() {
                 const connConfig = getConnectionConfig(connectionName, opts.config);
                 if (isRedisConfig(connConfig)) {
                     await withRedisConnection(connectionName, opts.config, async (client) => {
-                        await client.send(['PING']);
+                        await client.send('PING', []);
                     });
                 } else {
                     await withConnection(connectionName, opts.config, async (sql, dbType) => {

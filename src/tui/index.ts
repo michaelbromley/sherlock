@@ -137,7 +137,7 @@ async function testConnectionMenu(connections: string[]): Promise<void> {
         if (isRedisConfig(config)) {
             const { RedisClient } = await import('bun');
             const client = new RedisClient(config.url);
-            await client.send(['PING']);
+            await client.send('PING', []);
             client.close();
         } else {
             const { SQL } = await import('bun');

@@ -124,7 +124,7 @@ async function sscanMembers(client: RedisClient, key: string, limit: number): Pr
     let cursor = '0';
 
     do {
-        const result = await client.send(['SSCAN', key, cursor, 'COUNT', String(SCAN_BATCH_SIZE)]) as [string, string[]];
+        const result = await client.send('SSCAN', [key, cursor, 'COUNT', String(SCAN_BATCH_SIZE)]) as [string, string[]];
         cursor = String(result[0]);
         members.push(...result[1]);
     } while (cursor !== '0' && members.length < limit);
@@ -143,11 +143,10 @@ export async function getServerInfo(
     client: RedisClient,
     section?: string
 ): Promise<ServerInfoResult> {
-    const args = section ? ['INFO', section] : ['INFO'];
-    const info = await client.send(args) as string;
+    const info = await client.send('INFO', section ? [section] : []) as string;
     const parsed = parseInfoString(info);
 
-    const dbsize = await client.send(['DBSIZE']) as number;
+    const dbsize = await client.send('DBSIZE', []) as number;
 
     if (section) {
         return { [section]: parsed[section.toLowerCase()] || {}, keyspace: {}, dbsize };
@@ -183,7 +182,7 @@ export async function scanKeys(
 
     // SCAN in batches until we have enough or cursor returns to 0
     do {
-        const result = await client.send(['SCAN', cursor, 'MATCH', pattern, 'COUNT', String(SCAN_BATCH_SIZE)]) as [string, string[]];
+        const result = await client.send('SCAN', [cursor, 'MATCH', pattern, 'COUNT', String(SCAN_BATCH_SIZE)]) as [string, string[]];
         cursor = String(result[0]);
         keys.push(...result[1]);
     } while (cursor !== '0' && keys.length < limit);
@@ -196,8 +195,8 @@ export async function scanKeys(
     for (const key of trimmedKeys) {
         if (includeTypes) {
             const [type, ttl] = await Promise.all([
-                client.send(['TYPE', key]) as Promise<string>,
-                client.send(['TTL', key]) as Promise<number>,
+                client.send('TYPE', [key]) as Promise<string>,
+                client.send('TTL', [key]) as Promise<number>,
             ]);
             enrichedKeys.push({ key, type, ttl });
         } else {
@@ -220,8 +219,8 @@ export async function getKeyValue(
     key: string,
     limit = 100
 ): Promise<KeyValueResult> {
-    const type = await client.send(['TYPE', key]) as string;
-    const ttl = await client.send(['TTL', key]) as number;
+    const type = await client.send('TYPE', [key]) as string;
+    const ttl = await client.send('TTL', [key]) as number;
 
     if (type === 'none') {
         return { key, type: 'none', exists: false };
@@ -229,43 +228,38 @@ export async function getKeyValue(
 
     switch (type) {
         case 'string': {
-            const value = await client.send(['GET', key]) as string;
+            const value = await client.send('GET', [key]) as string;
             return { key, type, ttl, value };
         }
 
         case 'hash': {
-            const raw = await client.send(['HGETALL', key]) as string[];
-            const value: Record<string, string> = {};
-            for (let i = 0; i < raw.length; i += 2) {
-                value[raw[i]] = raw[i + 1];
-            }
+            // Bun's RedisClient returns HGETALL as a plain object, not a flat array
+            const value = await client.send('HGETALL', [key]) as Record<string, string>;
             return { key, type, ttl, value };
         }
 
         case 'list': {
-            const length = await client.send(['LLEN', key]) as number;
-            const value = await client.send(['LRANGE', key, '0', String(limit - 1)]) as string[];
+            const length = await client.send('LLEN', [key]) as number;
+            const value = await client.send('LRANGE', [key, '0', String(limit - 1)]) as string[];
             return { key, type, ttl, length, value };
         }
 
         case 'set': {
-            const size = await client.send(['SCARD', key]) as number;
+            const size = await client.send('SCARD', [key]) as number;
             const value = await sscanMembers(client, key, limit);
             return { key, type, ttl, size, value };
         }
 
         case 'zset': {
-            const size = await client.send(['ZCARD', key]) as number;
-            const raw = await client.send(['ZRANGE', key, '0', String(limit - 1), 'WITHSCORES']) as string[];
-            const value: { member: string; score: number }[] = [];
-            for (let i = 0; i < raw.length; i += 2) {
-                value.push({ member: raw[i], score: parseFloat(raw[i + 1]) });
-            }
+            const size = await client.send('ZCARD', [key]) as number;
+            // Bun's RedisClient returns ZRANGE WITHSCORES as [[member, score], ...] pairs
+            const raw = await client.send('ZRANGE', [key, '0', String(limit - 1), 'WITHSCORES']) as [string, number][];
+            const value = raw.map(([member, score]) => ({ member, score }));
             return { key, type, ttl, size, value };
         }
 
         case 'stream': {
-            const length = await client.send(['XLEN', key]) as number;
+            const length = await client.send('XLEN', [key]) as number;
             return { key, type, ttl, length };
         }
 
@@ -281,17 +275,17 @@ export async function inspectKey(
     client: RedisClient,
     key: string
 ): Promise<InspectKeyResult> {
-    const exists = await client.send(['EXISTS', key]) as number;
+    const exists = await client.send('EXISTS', [key]) as number;
 
     if (!exists) {
         return { key, exists: false };
     }
 
     const [type, ttl, memoryUsage, encoding] = await Promise.all([
-        client.send(['TYPE', key]) as Promise<string>,
-        client.send(['TTL', key]) as Promise<number>,
-        client.send(['MEMORY', 'USAGE', key]).catch(() => null) as Promise<number | null>,
-        client.send(['OBJECT', 'ENCODING', key]).catch(() => null) as Promise<string | null>,
+        client.send('TYPE', [key]) as Promise<string>,
+        client.send('TTL', [key]) as Promise<number>,
+        client.send('MEMORY', ['USAGE', key]).catch(() => null) as Promise<number | null>,
+        client.send('OBJECT', ['ENCODING', key]).catch(() => null) as Promise<string | null>,
     ]);
 
     const result: InspectKeyResult = {
@@ -306,22 +300,22 @@ export async function inspectKey(
     // Get type-specific length
     switch (type) {
         case 'string':
-            result.length = await client.send(['STRLEN', key]) as number;
+            result.length = await client.send('STRLEN', [key]) as number;
             break;
         case 'hash':
-            result.length = await client.send(['HLEN', key]) as number;
+            result.length = await client.send('HLEN', [key]) as number;
             break;
         case 'list':
-            result.length = await client.send(['LLEN', key]) as number;
+            result.length = await client.send('LLEN', [key]) as number;
             break;
         case 'set':
-            result.length = await client.send(['SCARD', key]) as number;
+            result.length = await client.send('SCARD', [key]) as number;
             break;
         case 'zset':
-            result.length = await client.send(['ZCARD', key]) as number;
+            result.length = await client.send('ZCARD', [key]) as number;
             break;
         case 'stream':
-            result.length = await client.send(['XLEN', key]) as number;
+            result.length = await client.send('XLEN', [key]) as number;
             break;
     }
 
@@ -335,7 +329,7 @@ export async function getSlowlog(
     client: RedisClient,
     count = 10
 ): Promise<SlowlogResult> {
-    const raw = await client.send(['SLOWLOG', 'GET', String(count)]) as unknown[][];
+    const raw = await client.send('SLOWLOG', ['GET', String(count)]) as unknown[][];
 
     const entries: SlowlogEntry[] = raw.map((entry: unknown[]) => ({
         id: entry[0],
@@ -362,5 +356,5 @@ export async function executeCommand(
         throw new Error(validation.error);
     }
 
-    return await client.send([cmd, ...args]);
+    return await client.send(cmd, args);
 }
