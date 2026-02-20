@@ -228,6 +228,102 @@ section { padding: 6rem 0; }
   justify-content: center;
 }
 
+/* ── Commands Spotlight ────────────────────────────── */
+
+.commands-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 1.5rem;
+}
+
+.command-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  overflow: hidden;
+  transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.command-card:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.3);
+}
+
+.command-card-header {
+  background: var(--elevated);
+  padding: 0.6rem 1rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.command-card-dots {
+  display: flex;
+  gap: 0.35rem;
+}
+
+.command-card-dots span {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--border);
+}
+
+.command-card-title {
+  font-size: 0.75rem;
+  color: var(--text-dim);
+  margin-left: 0.5rem;
+}
+
+.command-card-body {
+  padding: 1.5rem;
+}
+
+.command-card-body .cmd {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 1.05rem;
+  color: var(--amber);
+  margin-bottom: 1rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.command-card-body .cmd .prompt { color: var(--text-dim); }
+
+.command-card-body h3 {
+  font-size: 1.15rem;
+  font-weight: 600;
+  margin-bottom: 0.5rem;
+}
+
+.command-card-body p {
+  color: var(--text-muted);
+  font-size: 0.95rem;
+  line-height: 1.6;
+}
+
+.command-card-body .feature-list {
+  list-style: none;
+  margin-top: 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.command-card-body .feature-list li {
+  color: var(--text-muted);
+  font-size: 0.9rem;
+}
+
+.command-card-body .feature-list li::before {
+  content: '›';
+  color: var(--amber);
+  font-weight: 700;
+  margin-right: 0.5rem;
+}
+
 /* ── Scenario Showcase ────────────────────────────── */
 
 .scenarios { background: var(--surface); padding: 6rem 0; }
@@ -561,6 +657,50 @@ footer .footer-links {
   </div>
 </section>
 
+<!-- ════════════════════ Commands Spotlight ════════════════════ -->
+<section class="scenarios">
+  <div class="container">
+    <h2 class="section-title">Two Commands, That's It</h2>
+    <p class="section-subtitle">After installing, these are the only two commands you need to know.</p>
+    <div class="commands-grid">
+      <div class="command-card">
+        <div class="command-card-header">
+          <div class="command-card-dots"><span></span><span></span><span></span></div>
+          <span class="command-card-title">Terminal</span>
+        </div>
+        <div class="command-card-body">
+          <div class="cmd"><span class="prompt">$</span> sherlock manage</div>
+          <h3>Manage your connections</h3>
+          <p>Interactive wizard that handles everything &mdash; add databases, update passwords, store credentials securely in your OS keychain.</p>
+          <ul class="feature-list">
+            <li>Add, edit, and delete connections</li>
+            <li>Store passwords in OS keychain</li>
+            <li>Set project directories for auto-detection</li>
+            <li>Test connections before saving</li>
+          </ul>
+        </div>
+      </div>
+      <div class="command-card">
+        <div class="command-card-header">
+          <div class="command-card-dots"><span></span><span></span><span></span></div>
+          <span class="command-card-title">Terminal</span>
+        </div>
+        <div class="command-card-body">
+          <div class="cmd"><span class="prompt">$</span> sherlock update</div>
+          <h3>Always up to date</h3>
+          <p>One command to check for new releases and update in-place. No package manager needed, no manual downloads.</p>
+          <ul class="feature-list">
+            <li>Checks GitHub for the latest release</li>
+            <li>Downloads the right binary for your platform</li>
+            <li>Replaces the old version automatically</li>
+            <li>Shows you what changed</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
 <!-- ════════════════════ Scenario Showcase ════════════════════ -->
 <section class="scenarios">
   <div class="container">
@@ -762,7 +902,7 @@ footer .footer-links {
         <div class="step-number">2</div>
         <h3>Configure</h3>
         <p>Interactive wizard sets up your connection and stores credentials securely.</p>
-        <code>sherlock setup</code>
+        <code>sherlock manage</code>
       </div>
       <div class="step">
         <div class="step-number">3</div>
