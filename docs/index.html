@@ -1,0 +1,823 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Sherlock — A read-only database query tool for AI assistants</title>
+<meta name="description" content="Give your AI the power to investigate your databases — without the power to destroy. PostgreSQL, MySQL, SQLite, and Redis. Single binary, zero dependencies.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg: #0a0e17;
+  --surface: #111827;
+  --elevated: #1a2234;
+  --amber: #f59e0b;
+  --amber-dim: rgba(245, 158, 11, 0.15);
+  --text: #e2e8f0;
+  --text-muted: #94a3b8;
+  --text-dim: #64748b;
+  --border: #1e293b;
+  --pg: #336791;
+  --mysql: #f29111;
+  --sqlite: #44a0d6;
+  --redis: #dc382d;
+}
+
+html { scroll-behavior: smooth; }
+
+body {
+  font-family: 'Inter', system-ui, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+}
+
+code, .mono { font-family: 'JetBrains Mono', monospace; }
+
+a { color: var(--amber); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+.container {
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: 0 1.5rem;
+}
+
+/* ── Hero ─────────────────────────────────────────── */
+
+.hero {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 2rem 1.5rem;
+}
+
+.hero-icon {
+  width: 80px;
+  height: 80px;
+  margin-bottom: 2rem;
+  filter: drop-shadow(0 0 24px rgba(245, 158, 11, 0.35));
+  animation: glow 3s ease-in-out infinite;
+}
+
+@keyframes glow {
+  0%, 100% { filter: drop-shadow(0 0 24px rgba(245, 158, 11, 0.35)); }
+  50% { filter: drop-shadow(0 0 40px rgba(245, 158, 11, 0.55)); }
+}
+
+.hero h1 {
+  font-size: clamp(3rem, 8vw, 5rem);
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  line-height: 1.1;
+  margin-bottom: 0.5rem;
+}
+
+.hero .tagline {
+  font-size: clamp(1.1rem, 2.5vw, 1.35rem);
+  color: var(--amber);
+  font-weight: 500;
+  margin-bottom: 0.75rem;
+}
+
+.hero .subtitle {
+  font-size: clamp(1rem, 2vw, 1.15rem);
+  color: var(--text-muted);
+  max-width: 540px;
+  margin-bottom: 2.5rem;
+}
+
+.install-block {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 1rem 1.25rem;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 2rem;
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.install-block code {
+  font-size: clamp(0.8rem, 1.5vw, 0.95rem);
+  white-space: nowrap;
+  color: var(--text);
+}
+
+.install-block .prompt { color: var(--amber); }
+
+.copy-btn {
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-muted);
+  padding: 0.4rem 0.6rem;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: all 0.2s;
+  display: flex;
+  align-items: center;
+}
+
+.copy-btn:hover { border-color: var(--amber); color: var(--amber); }
+.copy-btn.copied { border-color: #22c55e; color: #22c55e; }
+
+.hero-ctas {
+  display: flex;
+  gap: 1rem;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.btn-primary {
+  background: var(--amber);
+  color: var(--bg);
+  font-weight: 600;
+  padding: 0.75rem 1.75rem;
+  border-radius: 8px;
+  font-size: 1rem;
+  transition: transform 0.15s, box-shadow 0.15s;
+}
+
+.btn-primary:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 20px rgba(245, 158, 11, 0.3);
+  text-decoration: none;
+}
+
+.btn-secondary {
+  color: var(--text-muted);
+  font-weight: 500;
+  padding: 0.75rem 1rem;
+  font-size: 1rem;
+  transition: color 0.15s;
+}
+
+.btn-secondary:hover { color: var(--amber); text-decoration: none; }
+
+/* ── Section shared ───────────────────────────────── */
+
+section { padding: 6rem 0; }
+
+.section-title {
+  font-size: clamp(1.75rem, 4vw, 2.25rem);
+  font-weight: 700;
+  text-align: center;
+  margin-bottom: 0.75rem;
+  letter-spacing: -0.02em;
+}
+
+.section-subtitle {
+  text-align: center;
+  color: var(--text-muted);
+  max-width: 560px;
+  margin: 0 auto 3rem;
+  font-size: 1.05rem;
+}
+
+/* ── Three Pillars ────────────────────────────────── */
+
+.pillars {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 1.5rem;
+}
+
+.pillar {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 2rem;
+  transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.pillar:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.3);
+}
+
+.pillar h3 {
+  font-size: 1.15rem;
+  font-weight: 600;
+  margin-bottom: 0.5rem;
+}
+
+.pillar p { color: var(--text-muted); font-size: 0.95rem; }
+
+.pillar-icon {
+  font-size: 1.5rem;
+  margin-bottom: 1rem;
+  display: block;
+  width: 40px;
+  height: 40px;
+  background: var(--amber-dim);
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* ── Scenario Showcase ────────────────────────────── */
+
+.scenarios { background: var(--surface); padding: 6rem 0; }
+
+.tab-bar {
+  display: flex;
+  gap: 0.25rem;
+  overflow-x: auto;
+  scroll-snap-type: x mandatory;
+  -webkit-overflow-scrolling: touch;
+  padding-bottom: 0.5rem;
+  margin-bottom: 2rem;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
+
+.tab-bar::-webkit-scrollbar { height: 4px; }
+.tab-bar::-webkit-scrollbar-track { background: transparent; }
+.tab-bar::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+
+.tab-radio { display: none; }
+
+.tab-label {
+  flex-shrink: 0;
+  scroll-snap-align: start;
+  padding: 0.6rem 1.25rem;
+  border-radius: 6px;
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all 0.2s;
+  white-space: nowrap;
+  border: 1px solid transparent;
+}
+
+.tab-label:hover { color: var(--text); background: var(--elevated); }
+
+#tab1:checked ~ .tab-bar label[for="tab1"],
+#tab2:checked ~ .tab-bar label[for="tab2"],
+#tab3:checked ~ .tab-bar label[for="tab3"],
+#tab4:checked ~ .tab-bar label[for="tab4"],
+#tab5:checked ~ .tab-bar label[for="tab5"] {
+  color: var(--amber);
+  background: var(--amber-dim);
+  border-color: rgba(245, 158, 11, 0.25);
+}
+
+.tab-panels { position: relative; margin-top: 2rem; }
+
+.tab-panel {
+  display: none;
+  animation: fadeIn 0.35s ease;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+#tab1:checked ~ .tab-panels .panel-1,
+#tab2:checked ~ .tab-panels .panel-2,
+#tab3:checked ~ .tab-panels .panel-3,
+#tab4:checked ~ .tab-panels .panel-4,
+#tab5:checked ~ .tab-panels .panel-5 { display: block; }
+
+.conversation {
+  max-width: 720px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.msg {
+  max-width: 85%;
+  padding: 1rem 1.25rem;
+  border-radius: 12px;
+  font-size: 0.95rem;
+  line-height: 1.6;
+}
+
+.msg-user {
+  align-self: flex-end;
+  background: var(--amber);
+  color: var(--bg);
+  border-bottom-right-radius: 4px;
+  font-weight: 500;
+}
+
+.msg-ai {
+  align-self: flex-start;
+  background: var(--elevated);
+  border: 1px solid var(--border);
+  border-bottom-left-radius: 4px;
+}
+
+.msg-ai .label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 0.5rem;
+}
+
+.msg-ai code {
+  display: block;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.6rem 0.8rem;
+  margin: 0.5rem 0;
+  font-size: 0.85rem;
+  color: var(--amber);
+  overflow-x: auto;
+}
+
+.msg-ai p { margin-bottom: 0.4rem; }
+.msg-ai p:last-child { margin-bottom: 0; }
+
+/* ── Supported Databases ──────────────────────────── */
+
+.db-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 1.5rem;
+}
+
+.db-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 2rem;
+  border-top: 3px solid;
+  transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.db-card:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.3);
+}
+
+.db-card h3 { font-size: 1.1rem; margin-bottom: 0.5rem; }
+
+.db-card p { color: var(--text-muted); font-size: 0.9rem; }
+
+/* ── Features Grid ────────────────────────────────── */
+
+.features-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 1.5rem;
+}
+
+.feature-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 1.75rem;
+  transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.feature-card:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.3);
+}
+
+.feature-card h3 {
+  font-size: 1rem;
+  font-weight: 600;
+  margin-bottom: 0.4rem;
+}
+
+.feature-card p { color: var(--text-muted); font-size: 0.9rem; }
+
+.feature-icon {
+  width: 36px;
+  height: 36px;
+  background: var(--amber-dim);
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 1rem;
+  color: var(--amber);
+}
+
+/* ── Quick Start ──────────────────────────────────── */
+
+.steps {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 2rem;
+  max-width: 900px;
+  margin: 0 auto;
+}
+
+.step {
+  text-align: center;
+  padding: 2rem 1.5rem;
+  min-width: 0;
+}
+
+.step-number {
+  width: 48px;
+  height: 48px;
+  background: var(--amber);
+  color: var(--bg);
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  font-size: 1.25rem;
+  margin: 0 auto 1.25rem;
+}
+
+.step h3 {
+  font-size: 1.15rem;
+  margin-bottom: 0.75rem;
+}
+
+.step p {
+  color: var(--text-muted);
+  font-size: 0.95rem;
+  margin-bottom: 0.75rem;
+}
+
+.step code {
+  display: block;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.5rem 1rem;
+  font-size: 0.85rem;
+  color: var(--amber);
+  overflow-x: auto;
+  max-width: 100%;
+}
+
+/* ── Footer ───────────────────────────────────────── */
+
+footer {
+  border-top: 1px solid var(--border);
+  padding: 2.5rem 0;
+  text-align: center;
+  color: var(--text-dim);
+  font-size: 0.9rem;
+}
+
+footer a { color: var(--text-muted); }
+footer a:hover { color: var(--amber); }
+
+footer .footer-links {
+  display: flex;
+  gap: 1.5rem;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+/* ── Responsive ───────────────────────────────────── */
+
+@media (max-width: 768px) {
+  section { padding: 4rem 0; }
+
+  .pillars,
+  .db-grid,
+  .features-grid { grid-template-columns: 1fr; }
+
+  .steps { grid-template-columns: 1fr; gap: 1rem; }
+
+  .msg { max-width: 92%; }
+
+  .install-block { flex-direction: column; align-items: stretch; gap: 0.5rem; }
+  .install-block code { font-size: 0.8rem; }
+  .copy-btn { align-self: flex-end; }
+}
+</style>
+</head>
+<body>
+
+<!-- ════════════════════ Hero ════════════════════ -->
+<section class="hero">
+  <svg class="hero-icon" viewBox="0 0 80 80" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <circle cx="34" cy="34" r="22" stroke="#f59e0b" stroke-width="4" fill="none"/>
+    <line x1="50" y1="50" x2="70" y2="70" stroke="#f59e0b" stroke-width="5" stroke-linecap="round"/>
+    <circle cx="34" cy="34" r="12" stroke="#f59e0b" stroke-width="1.5" opacity="0.3" fill="none"/>
+  </svg>
+  <h1>Sherlock</h1>
+  <p class="tagline">A read-only database query tool for AI assistants</p>
+  <p class="subtitle">Give your AI the power to investigate &mdash; without the power to destroy.</p>
+  <div class="install-block">
+    <code><span class="prompt">$</span> curl -fsSL https://raw.githubusercontent.com/michaelbromley/sherlock/main/install.sh | bash</code>
+    <button class="copy-btn" data-copy="curl -fsSL https://raw.githubusercontent.com/michaelbromley/sherlock/main/install.sh | bash" aria-label="Copy install command">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+    </button>
+  </div>
+  <div class="hero-ctas">
+    <a href="https://github.com/michaelbromley/sherlock" class="btn-primary">View on GitHub</a>
+    <a href="#quick-start" class="btn-secondary">Quick Start &darr;</a>
+  </div>
+</section>
+
+<!-- ════════════════════ Three Pillars ════════════════════ -->
+<section>
+  <div class="container">
+    <div class="pillars">
+      <div class="pillar">
+        <div class="pillar-icon">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" stroke-width="2" stroke-linecap="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+        </div>
+        <h3>Ask, don't write SQL</h3>
+        <p>Ask your AI a question about your data. Sherlock translates it into safe, read-only queries.</p>
+      </div>
+      <div class="pillar">
+        <div class="pillar-icon">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" stroke-width="2" stroke-linecap="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/><path d="M3 12c0 1.66 4 3 9 3s9-1.34 9-3"/></svg>
+        </div>
+        <h3>Four databases, one tool</h3>
+        <p>PostgreSQL, MySQL, SQLite, and Redis. One binary, one command.</p>
+      </div>
+      <div class="pillar">
+        <div class="pillar-icon">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" stroke-width="2" stroke-linecap="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+        </div>
+        <h3>Security by default</h3>
+        <p>Read-only enforced, OS keychain credentials, no default connections.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ════════════════════ Scenario Showcase ════════════════════ -->
+<section class="scenarios">
+  <div class="container">
+    <h2 class="section-title">See It in Action</h2>
+    <p class="section-subtitle">Real-world scenarios showing how your AI assistant uses Sherlock to investigate databases.</p>
+
+    <input type="radio" name="tabs" id="tab1" class="tab-radio" checked>
+    <input type="radio" name="tabs" id="tab2" class="tab-radio">
+    <input type="radio" name="tabs" id="tab3" class="tab-radio">
+    <input type="radio" name="tabs" id="tab4" class="tab-radio">
+    <input type="radio" name="tabs" id="tab5" class="tab-radio">
+
+    <div class="tab-bar">
+      <label for="tab1" class="tab-label">Performance Detective</label>
+      <label for="tab2" class="tab-label">Report Builder</label>
+      <label for="tab3" class="tab-label">Account Inspector</label>
+      <label for="tab4" class="tab-label">Schema Mapper</label>
+      <label for="tab5" class="tab-label">Cache Inspector</label>
+    </div>
+
+    <div class="tab-panels">
+      <!-- Panel 1: Performance Detective -->
+      <div class="tab-panel panel-1">
+        <div class="conversation">
+          <div class="msg msg-user">Why is checkout so slow on prod-db?</div>
+          <div class="msg msg-ai">
+            <div class="label">AI Assistant</div>
+            <p>Let me investigate the checkout performance. I'll start by checking the indexes on order-related tables and looking at table statistics.</p>
+            <code>sherlock indexes -c prod-db -t orders</code>
+            <code>sherlock stats -c prod-db -t orders</code>
+            <p>The <strong>orders</strong> table has 2.3M rows but no index on <strong>customer_id</strong> &mdash; which is used in every checkout lookup. Sequential scans are taking ~1,200ms. Let me verify with the query plan:</p>
+            <code>sherlock query -c prod-db "EXPLAIN SELECT * FROM orders WHERE customer_id = 42"</code>
+            <p>Confirmed &mdash; it's a sequential scan. Adding an index on <strong>orders.customer_id</strong> should bring that down to under 5ms.</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Panel 2: Report Builder -->
+      <div class="tab-panel panel-2">
+        <div class="conversation">
+          <div class="msg msg-user">Generate a monthly sales comparison for Q4.</div>
+          <div class="msg msg-ai">
+            <div class="label">AI Assistant</div>
+            <p>I'll map out the schema first to understand the relationship between orders and line items, then build the report.</p>
+            <code>sherlock introspect -c prod-db</code>
+            <code>sherlock fk -c prod-db -t order_items</code>
+            <p>Got it &mdash; <strong>order_items</strong> joins to <strong>orders</strong> via <strong>order_id</strong>, and <strong>products</strong> via <strong>product_id</strong>. Now I can aggregate:</p>
+            <code>sherlock query -c prod-db "SELECT DATE_TRUNC('month', o.created_at) AS month, SUM(oi.quantity * oi.unit_price) AS revenue, COUNT(DISTINCT o.id) AS order_count FROM orders o JOIN order_items oi ON o.id = oi.order_id WHERE o.created_at >= '2025-10-01' AND o.created_at < '2026-01-01' GROUP BY month ORDER BY month"</code>
+            <p>Here's your Q4 breakdown: October did &pound;142k across 1,847 orders, November &pound;218k (Black Friday bump), and December &pound;195k. November was up 53% month-over-month.</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Panel 3: Account Inspector -->
+      <div class="tab-panel panel-3">
+        <div class="conversation">
+          <div class="msg msg-user">User jane@example.com says she can't complete checkout. What's wrong?</div>
+          <div class="msg msg-ai">
+            <div class="label">AI Assistant</div>
+            <p>Let me look up her account and check for anything that might block checkout.</p>
+            <code>sherlock query -c prod-db "SELECT id, email, status, suspended_at, suspension_reason FROM users WHERE email = 'jane@example.com'"</code>
+            <p>Found it &mdash; her account was <strong>suspended</strong> on 2026-02-14 with reason: "payment_dispute". Let me check the audit trail:</p>
+            <code>sherlock query -c prod-db "SELECT action, details, created_at, performed_by FROM audit_log WHERE user_id = 4872 ORDER BY created_at DESC LIMIT 5"</code>
+            <p>The suspension was triggered automatically by the payment dispute system. Her PayPal dispute from order #8891 was resolved in her favour 3 days ago, but the account was never reinstated. This looks like a bug in the auto-reinstatement flow.</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Panel 4: Schema Mapper -->
+      <div class="tab-panel panel-4">
+        <div class="conversation">
+          <div class="msg msg-user">I'm new on this project. Can you explain the database structure?</div>
+          <div class="msg msg-ai">
+            <div class="label">AI Assistant</div>
+            <p>Welcome aboard! Let me map out the entire schema and the relationships between tables.</p>
+            <code>sherlock introspect -c prod-db</code>
+            <code>sherlock fk -c prod-db</code>
+            <p>Here's the lay of the land. You've got <strong>23 tables</strong> organised into four domains:</p>
+            <p><strong>Users &amp; Auth:</strong> users, sessions, password_resets, roles, user_roles</p>
+            <p><strong>Products:</strong> products, categories, product_categories, inventory</p>
+            <p><strong>Orders:</strong> orders, order_items, payments, refunds, shipping</p>
+            <p><strong>System:</strong> audit_log, settings, migrations, jobs, notifications</p>
+            <p>The core flow is: <strong>users</strong> &rarr; <strong>orders</strong> &rarr; <strong>order_items</strong> &rarr; <strong>products</strong>. Payments link back to orders with a one-to-many (supporting split payments).</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Panel 5: Cache Inspector -->
+      <div class="tab-panel panel-5">
+        <div class="conversation">
+          <div class="msg msg-user">Is our Redis cache actually helping? It feels like the app is still slow.</div>
+          <div class="msg msg-ai">
+            <div class="label">AI Assistant</div>
+            <p>Let me check the Redis server stats and see what's going on in the cache.</p>
+            <code>sherlock info -c redis-prod</code>
+            <code>sherlock keys -c redis-prod "sess:*"</code>
+            <p>Hit rate is only <strong>60%</strong> &mdash; that's low. You've got 12,400 session keys with a 30-minute TTL, but product caches are expiring every 60 seconds. Let me check for slow operations:</p>
+            <code>sherlock slowlog -c redis-prod</code>
+            <code>sherlock inspect -c redis-prod "product:catalog:all"</code>
+            <p>Found it. The slow log shows <strong>KEYS *</strong> being called every 10 seconds &mdash; that's a full keyspace scan in production with 48k keys. It's coming from the health check endpoint. The product catalog key is 4.2MB of serialised JSON being re-fetched every minute. Two fixes needed: replace KEYS with SCAN in the health check, and bump the product cache TTL to at least 5 minutes.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ════════════════════ Supported Databases ════════════════════ -->
+<section>
+  <div class="container">
+    <h2 class="section-title">Supported Databases</h2>
+    <p class="section-subtitle">One binary to investigate them all.</p>
+    <div class="db-grid">
+      <div class="db-card" style="border-top-color: var(--pg)">
+        <h3>PostgreSQL</h3>
+        <p>Tables, schemas, queries, indexes, foreign keys, and data profiling.</p>
+      </div>
+      <div class="db-card" style="border-top-color: var(--mysql)">
+        <h3>MySQL / MariaDB</h3>
+        <p>Full introspection, stats, and read-only queries.</p>
+      </div>
+      <div class="db-card" style="border-top-color: var(--sqlite)">
+        <h3>SQLite</h3>
+        <p>Local file-based databases, great for development and testing.</p>
+      </div>
+      <div class="db-card" style="border-top-color: var(--redis)">
+        <h3>Redis</h3>
+        <p>Server info, key scanning, value inspection, and slow log analysis.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ════════════════════ Features ════════════════════ -->
+<section class="scenarios">
+  <div class="container">
+    <h2 class="section-title">Built Paranoid</h2>
+    <p class="section-subtitle">Security isn't an afterthought &mdash; it's the entire point.</p>
+    <div class="features-grid">
+      <div class="feature-card">
+        <div class="feature-icon">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+        </div>
+        <h3>Read-only enforced</h3>
+        <p>SQL validation blocks any mutation. Redis uses a command whitelist. No write ever gets through.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/><circle cx="12" cy="16" r="1"/></svg>
+        </div>
+        <h3>OS keychain storage</h3>
+        <p>Passwords stored in macOS Keychain, Windows Credential Manager, or Linux Secret Service.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/></svg>
+        </div>
+        <h3>No default connection</h3>
+        <p>Explicit <code class="mono">-c</code> flag required. No accidental production queries.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="2" y="3" width="20" height="18" rx="2"/><polyline points="8 10 8 16"/><polyline points="12 8 12 16"/><polyline points="16 12 16 16"/></svg>
+        </div>
+        <h3>Single binary</h3>
+        <p>~57MB standalone executable. Zero runtime dependencies. Download and run.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 9v4"/><path d="M10.363 3.591l-8.106 13.534a1.914 1.914 0 0 0 1.636 2.871h16.214a1.914 1.914 0 0 0 1.636-2.87L13.637 3.59a1.914 1.914 0 0 0-3.274 0z"/><path d="M12 17h.01"/></svg>
+        </div>
+        <h3>SQL injection prevention</h3>
+        <p>Keyword blocking in subqueries. Nested mutations can't sneak through SELECT wrappers.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+        </div>
+        <h3>Query logging opt-in</h3>
+        <p>All logging disabled by default. Opt in when you need an audit trail.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ════════════════════ Quick Start ════════════════════ -->
+<section id="quick-start">
+  <div class="container">
+    <h2 class="section-title">Get Started in 60 Seconds</h2>
+    <p class="section-subtitle">Three steps from zero to database investigation.</p>
+    <div class="steps">
+      <div class="step">
+        <div class="step-number">1</div>
+        <h3>Install</h3>
+        <p>One command, no dependencies.</p>
+        <code>curl -fsSL https://raw.githubusercontent.com/michaelbromley/sherlock/main/install.sh | bash</code>
+      </div>
+      <div class="step">
+        <div class="step-number">2</div>
+        <h3>Configure</h3>
+        <p>Interactive wizard sets up your connection and stores credentials securely.</p>
+        <code>sherlock setup</code>
+      </div>
+      <div class="step">
+        <div class="step-number">3</div>
+        <h3>Investigate</h3>
+        <p>Ask Claude Code questions about your data.</p>
+        <code>"Show me the top customers by order value from prod-db"</code>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ════════════════════ Footer ════════════════════ -->
+<footer>
+  <div class="container">
+    <div class="footer-links">
+      <span>Sherlock by Michael Bromley</span>
+      <span>&middot;</span>
+      <span>MIT License</span>
+      <span>&middot;</span>
+      <a href="https://github.com/michaelbromley/sherlock">GitHub</a>
+      <span>&middot;</span>
+      <span>Built with Bun + TypeScript</span>
+    </div>
+  </div>
+</footer>
+
+<script>
+document.querySelectorAll('.copy-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    navigator.clipboard.writeText(btn.dataset.copy).then(() => {
+      btn.classList.add('copied');
+      btn.querySelector('svg').style.display = 'none';
+      btn.textContent = '✓';
+      setTimeout(() => {
+        btn.textContent = '';
+        btn.classList.remove('copied');
+        const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+        svg.setAttribute('width', '18'); svg.setAttribute('height', '18');
+        svg.setAttribute('viewBox', '0 0 24 24'); svg.setAttribute('fill', 'none');
+        svg.setAttribute('stroke', 'currentColor'); svg.setAttribute('stroke-width', '2');
+        svg.setAttribute('stroke-linecap', 'round');
+        svg.innerHTML = '<rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>';
+        btn.appendChild(svg);
+      }, 2000);
+    });
+  });
+});
+
+document.querySelectorAll('a[href^="#"]').forEach(a => {
+  a.addEventListener('click', e => {
+    const target = document.querySelector(a.getAttribute('href'));
+    if (target) { e.preventDefault(); target.scrollIntoView({ behavior: 'smooth' }); }
+  });
+});
+</script>
+
+</body>
+</html>
