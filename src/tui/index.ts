@@ -728,13 +728,8 @@ async function promptForConnection(
             }
         }
 
-        const directory = await p.text({
-            message: 'Project directory (auto-selects this connection when you are in this dir)',
-            placeholder: 'Leave empty to skip',
-            initialValue: existingConfig?.directory || '',
-        });
-
-        if (p.isCancel(directory)) {
+        const directory = await promptForDirectory(existingConfig?.directory);
+        if (directory === null) {
             p.cancel('Cancelled');
             process.exit(0);
         }
@@ -777,13 +772,8 @@ async function promptForConnection(
                 }),
         });
 
-        const directory = await p.text({
-            message: 'Project directory (auto-selects this connection when you are in this dir)',
-            placeholder: 'Leave empty to skip',
-            initialValue: existingConfig?.directory || process.cwd(),
-        });
-
-        if (p.isCancel(directory)) {
+        const directory = await promptForDirectory(existingConfig?.directory);
+        if (directory === null) {
             p.cancel('Cancelled');
             process.exit(0);
         }
@@ -884,13 +874,8 @@ async function promptForConnection(
         }
     }
 
-    const directory = await p.text({
-        message: 'Project directory (auto-selects this connection when you are in this dir)',
-        placeholder: 'Leave empty to skip',
-        initialValue: existingConfig?.directory || process.cwd(),
-    });
-
-    if (p.isCancel(directory)) {
+    const directory = await promptForDirectory(existingConfig?.directory);
+    if (directory === null) {
         p.cancel('Cancelled');
         process.exit(0);
     }
@@ -916,6 +901,46 @@ async function promptForConnection(
         password: connPassword,
         storageMethod: connStorageMethod,
     };
+}
+
+/**
+ * Prompt for a project directory with clear options.
+ * Returns the directory string, empty string if skipped, or null if cancelled.
+ */
+async function promptForDirectory(existingDirectory?: string): Promise<string | null> {
+    const cwd = process.cwd();
+
+    if (existingDirectory) {
+        // Editing: use a text field pre-filled with the existing value
+        const directory = await p.text({
+            message: 'Project directory (auto-selects this connection when you are in this dir)',
+            placeholder: 'Leave empty to remove',
+            initialValue: existingDirectory,
+        });
+        if (p.isCancel(directory)) return null;
+        return directory;
+    }
+
+    const choice = await p.select({
+        message: 'Project directory (auto-selects this connection when you are in this dir)',
+        options: [
+            { value: 'cwd', label: `Use current directory`, hint: cwd },
+            { value: 'custom', label: 'Enter a custom path' },
+            { value: 'skip', label: 'Skip' },
+        ],
+    });
+
+    if (p.isCancel(choice)) return null;
+
+    if (choice === 'cwd') return cwd;
+    if (choice === 'skip') return '';
+
+    const directory = await p.text({
+        message: 'Project directory',
+        placeholder: '/path/to/project',
+    });
+    if (p.isCancel(directory)) return null;
+    return directory;
 }
 
 /**
