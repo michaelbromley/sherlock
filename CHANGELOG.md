@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.0] - 2026-02-25
+
+### Added
+
+- Directory selection prompt when setting up connections — choose between current directory, custom path, or skip (replaces free-text input)
+- `manage` and `update` commands spotlight on landing page
+
+### Fixed
+
+- Password-less database connections now work correctly — password is optional in both the setup wizard and config resolution (supports trust/peer auth for local dev databases)
+- Storage method prompt no longer shown when no password is entered
+
 ## [1.0.0] - 2026-02-20
 
 ### Added
