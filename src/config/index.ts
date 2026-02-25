@@ -246,18 +246,19 @@ export async function resolveConnection(
         (await resolver.resolveValue(config.username)) ??
         getEnvVarForConnection(connectionName, 'USERNAME') ??
         getEnvVarForConnection(connectionName, 'USER');
+    // Password defaults to empty string - many local DBs use trust/peer auth
     const password =
         (await resolver.resolveValue(config.password)) ??
-        getEnvVarForConnection(connectionName, 'PASSWORD');
+        getEnvVarForConnection(connectionName, 'PASSWORD') ??
+        '';
     const database = config.database ?? getEnvVarForConnection(connectionName, 'DATABASE');
     const port = config.port;
 
-    // Check for missing required params - use == null to allow empty strings (e.g., empty passwords)
-    if (host == null || username == null || password == null || database == null) {
+    // Check for missing required params - use == null to allow empty strings
+    if (host == null || username == null || database == null) {
         const missing: string[] = [];
         if (host == null) missing.push('host');
         if (username == null) missing.push('username');
-        if (password == null) missing.push('password');
         if (database == null) missing.push('database');
 
         throw new Error(

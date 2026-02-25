@@ -379,16 +379,17 @@ async function runSetupWizard(): Promise<void> {
                 },
             };
 
-            // Handle password storage
-            await handlePasswordStorage(connection.name, connection.password);
+            // Handle password storage (only if a password was provided)
+            if (connection.password) {
+                await handlePasswordStorage(connection.name, connection.password);
 
-            // Set password reference based on storage method
-            if (connection.storageMethod === 'keychain') {
-                connection.config.password = { $keychain: connection.name };
-            } else if (connection.storageMethod === 'env') {
-                const envVar = `SHERLOCK_${connection.name.toUpperCase().replace(/-/g, '_')}_PASSWORD`;
-                connection.config.password = { $env: envVar };
-                await saveToEnvFile(envVar, connection.password);
+                if (connection.storageMethod === 'keychain') {
+                    connection.config.password = { $keychain: connection.name };
+                } else if (connection.storageMethod === 'env') {
+                    const envVar = `SHERLOCK_${connection.name.toUpperCase().replace(/-/g, '_')}_PASSWORD`;
+                    connection.config.password = { $env: envVar };
+                    await saveToEnvFile(envVar, connection.password);
+                }
             }
 
             saveConfig(config);
@@ -435,16 +436,17 @@ async function addConnectionWizard(): Promise<void> {
         }
     }
 
-    // Handle password storage
-    await handlePasswordStorage(connection.name, connection.password);
+    // Handle password storage (only if a password was provided)
+    if (connection.password) {
+        await handlePasswordStorage(connection.name, connection.password);
 
-    // Update config with appropriate password reference
-    if (connection.storageMethod === 'keychain') {
-        connection.config.password = { $keychain: connection.name };
-    } else if (connection.storageMethod === 'env') {
-        const envVar = `SHERLOCK_${connection.name.toUpperCase().replace(/-/g, '_')}_PASSWORD`;
-        connection.config.password = { $env: envVar };
-        await saveToEnvFile(envVar, connection.password);
+        if (connection.storageMethod === 'keychain') {
+            connection.config.password = { $keychain: connection.name };
+        } else if (connection.storageMethod === 'env') {
+            const envVar = `SHERLOCK_${connection.name.toUpperCase().replace(/-/g, '_')}_PASSWORD`;
+            connection.config.password = { $env: envVar };
+            await saveToEnvFile(envVar, connection.password);
+        }
     }
 
     config.connections[connection.name] = connection.config;
@@ -625,7 +627,7 @@ async function promptForConnection(
     name: string;
     config: ConnectionConfig;
     password: string;
-    storageMethod: 'keychain' | 'env';
+    storageMethod?: 'keychain' | 'env';
 } | null> {
     const result = await p.group(
         {
@@ -698,14 +700,6 @@ async function promptForConnection(
                 p.password({
                     message: 'Password (leave empty if none)',
                 });
-            redisFields.storageMethod = () =>
-                p.select({
-                    message: 'Where should the password be stored?',
-                    options: [
-                        { value: 'keychain', label: 'OS Keychain', hint: 'Recommended - encrypted by OS' },
-                        { value: 'env', label: 'Environment file', hint: '~/.config/sherlock/.env' },
-                    ],
-                });
         }
 
         const redisResult = await p.group(
@@ -717,6 +711,22 @@ async function promptForConnection(
                 },
             }
         );
+
+        const redisPassword = isEditing ? '' : (redisResult.password as string || '');
+        let redisStorageMethod: 'keychain' | 'env' | undefined;
+        if (!isEditing && redisPassword) {
+            redisStorageMethod = await p.select({
+                message: 'Where should the password be stored?',
+                options: [
+                    { value: 'keychain', label: 'OS Keychain', hint: 'Recommended - encrypted by OS' },
+                    { value: 'env', label: 'Environment file', hint: '~/.config/sherlock/.env' },
+                ],
+            }) as 'keychain' | 'env';
+            if (p.isCancel(redisStorageMethod)) {
+                p.cancel('Cancelled');
+                process.exit(0);
+            }
+        }
 
         const directory = await p.text({
             message: 'Project directory (auto-selects this connection when you are in this dir)',
@@ -744,8 +754,8 @@ async function promptForConnection(
         return {
             name: result.name as string,
             config,
-            password: isEditing ? '' : (redisResult.password as string || ''),
-            storageMethod: isEditing ? 'env' : (redisResult.storageMethod as 'keychain' | 'env' || 'env'),
+            password: redisPassword,
+            storageMethod: redisStorageMethod,
         };
     }
 
@@ -838,18 +848,7 @@ async function promptForConnection(
     if (!isEditing) {
         connFields.password = () =>
             p.password({
-                message: 'Password',
-                validate: (value) => {
-                    if (!value) return 'Password is required';
-                },
-            });
-        connFields.storageMethod = () =>
-            p.select({
-                message: 'Where should the password be stored?',
-                options: [
-                    { value: 'keychain', label: 'OS Keychain', hint: 'Recommended - encrypted by OS' },
-                    { value: 'env', label: 'Environment file', hint: '~/.config/sherlock/.env' },
-                ],
+                message: 'Password (leave empty if none)',
             });
     }
 
@@ -868,6 +867,22 @@ async function promptForConnection(
             },
         }
     );
+
+    const connPassword = isEditing ? '' : (connResult.password as string || '');
+    let connStorageMethod: 'keychain' | 'env' | undefined;
+    if (!isEditing && connPassword) {
+        connStorageMethod = await p.select({
+            message: 'Where should the password be stored?',
+            options: [
+                { value: 'keychain', label: 'OS Keychain', hint: 'Recommended - encrypted by OS' },
+                { value: 'env', label: 'Environment file', hint: '~/.config/sherlock/.env' },
+            ],
+        }) as 'keychain' | 'env';
+        if (p.isCancel(connStorageMethod)) {
+            p.cancel('Cancelled');
+            process.exit(0);
+        }
+    }
 
     const directory = await p.text({
         message: 'Project directory (auto-selects this connection when you are in this dir)',
@@ -898,8 +913,8 @@ async function promptForConnection(
     return {
         name: result.name as string,
         config,
-        password: isEditing ? '' : (connResult.password as string),
-        storageMethod: isEditing ? 'env' : (connResult.storageMethod as 'keychain' | 'env'),
+        password: connPassword,
+        storageMethod: connStorageMethod,
     };
 }
 
