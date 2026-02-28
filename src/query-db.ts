@@ -12,7 +12,7 @@ import * as p from '@clack/prompts';
 
 // Config
 import { listConnections, getConnectionConfig, detectConnectionFromCwd } from './config';
-import { DB_TYPES, TEST_QUERIES, isRedisConfig, type DbType } from './db-types';
+import { DB_TYPES, isRedisConfig, type DbType } from './db-types';
 
 // Credentials
 import {
@@ -531,8 +531,8 @@ function setupCLI() {
                         await client.send('PING', []);
                     });
                 } else {
-                    await withConnection(connectionName, opts.config, async (sql, dbType) => {
-                        await sql.unsafe(TEST_QUERIES[dbType as DbType]);
+                    await withConnection(connectionName, opts.config, async (sql) => {
+                        await sql.connect();
                     });
                 }
                 console.log(`\x1b[32m✓ Connection "${connectionName}" successful!\x1b[0m`);

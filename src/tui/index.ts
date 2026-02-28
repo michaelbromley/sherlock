@@ -8,7 +8,7 @@ import * as path from 'path';
 import { findConfigFile, getConfigDir, ensureConfigDir } from '../config/paths';
 import { loadConfigFile, listConnections } from '../config';
 import type { SherlockConfig, ConnectionConfig } from '../config/types';
-import { DB_TYPES, DEFAULT_PORTS, TEST_QUERIES, isRedisConfig, type DbType } from '../db-types';
+import { DB_TYPES, DEFAULT_PORTS, isRedisConfig, type DbType } from '../db-types';
 import {
     setKeychainPassword,
     hasKeychainPassword,
@@ -142,7 +142,7 @@ async function testConnectionMenu(connections: string[]): Promise<void> {
         } else {
             const { SQL } = await import('bun');
             const sql = new SQL(config.url);
-            await sql.unsafe(TEST_QUERIES[config.type]);
+            await sql.connect();
             sql.close();
         }
         p.log.success(`Connection "${selected}" successful!`);
