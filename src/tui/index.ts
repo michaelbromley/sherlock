@@ -5,8 +5,9 @@
 import * as p from '@clack/prompts';
 import * as fs from 'fs';
 import * as path from 'path';
+import { SQL, RedisClient } from 'bun';
 import { findConfigFile, getConfigDir, ensureConfigDir } from '../config/paths';
-import { loadConfigFile, listConnections } from '../config';
+import { loadConfigFile, listConnections, resolveConnection } from '../config';
 import type { SherlockConfig, ConnectionConfig } from '../config/types';
 import { DB_TYPES, DEFAULT_PORTS, isRedisConfig, type DbType } from '../db-types';
 import {
@@ -129,18 +130,15 @@ async function testConnectionMenu(connections: string[]): Promise<void> {
     if (p.isCancel(selected)) return;
 
     p.log.info(`Testing ${selected}...`);
-    const { resolveConnection } = await import('../config');
 
     try {
         const config = await resolveConnection(selected as string);
 
         if (isRedisConfig(config)) {
-            const { RedisClient } = await import('bun');
             const client = new RedisClient(config.url);
             await client.send('PING', []);
             client.close();
         } else {
-            const { SQL } = await import('bun');
             const sql = new SQL(config.url);
             await sql.connect();
             sql.close();
