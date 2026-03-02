@@ -15,6 +15,26 @@ export function createRedisConnection(config: ResolvedConnectionConfig): RedisCl
 }
 
 /**
+ * Execute a command with a pre-resolved Redis connection config
+ * Skips the name-based config lookup — used for ad hoc --url connections
+ */
+export async function withRedisConnectionFromConfig<T>(
+    config: ResolvedConnectionConfig,
+    handler: (client: RedisClient) => Promise<T>
+): Promise<T> {
+    let client: RedisClient | null = null;
+
+    try {
+        client = createRedisConnection(config);
+        return await handler(client);
+    } finally {
+        if (client) {
+            client.close();
+        }
+    }
+}
+
+/**
  * Execute a command with a Redis connection
  * Automatically handles connection lifecycle (open/close)
  */

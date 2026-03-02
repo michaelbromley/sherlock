@@ -12,7 +12,8 @@ import * as p from '@clack/prompts';
 
 // Config
 import { listConnections, getConnectionConfig, detectConnectionFromCwd } from './config';
-import { DB_TYPES, isRedisConfig, type DbType } from './db-types';
+import { DB_TYPES, isRedisConfig, detectDbTypeFromUrl, type DbType } from './db-types';
+import type { ResolvedConnectionConfig } from './config/types';
 
 // Credentials
 import {
@@ -32,7 +33,7 @@ import { initConfig, migrateConfig } from './config/init';
 import { validateReadOnlyQuery } from './query-validation';
 
 // Database
-import { withConnection } from './db/connection';
+import { withConnection, withConnectionFromConfig } from './db/connection';
 import {
     getTables,
     describeTable,
@@ -45,7 +46,7 @@ import {
 } from './db/operations';
 
 // Redis
-import { withRedisConnection } from './redis/connection';
+import { withRedisConnection, withRedisConnectionFromConfig } from './redis/connection';
 import {
     getServerInfo,
     scanKeys,
@@ -108,8 +109,35 @@ async function promptPassword(message: string): Promise<string> {
     return result;
 }
 
-/** Require connection option or exit. Auto-detects from cwd if not provided. */
-function requireConnection(opts: { connection?: string; config?: string }): asserts opts is { connection: string } {
+/** Derive a synthetic connection name from a URL (for caching/logging) */
+function syntheticNameFromUrl(url: string): string {
+    try {
+        const parsed = new URL(url);
+        const host = parsed.hostname || 'localhost';
+        const port = parsed.port || '';
+        const db = parsed.pathname.replace(/^\//, '') || 'db';
+        const raw = `adhoc_${host}_${port ? port + '_' : ''}${db}`;
+        // Sanitize to match SAFE_IDENTIFIER: /^[a-zA-Z_][a-zA-Z0-9_]*$/
+        return raw.replace(/[^a-zA-Z0-9_]/g, '_').replace(/^(\d)/, '_$1');
+    } catch {
+        return 'adhoc_unknown';
+    }
+}
+
+/** Require connection option or exit. Auto-detects from cwd if not provided. Handles --url. */
+function requireConnection(opts: Record<string, any>): asserts opts is { connection: string } {
+    // --url mode: resolve config up front
+    if (opts.url) {
+        const detectedType = detectDbTypeFromUrl(opts.url);
+        if (!detectedType) {
+            console.error(`Error: Cannot detect database type from URL. Supported prefixes: postgres://, mysql://, sqlite://, redis://`);
+            process.exit(1);
+        }
+        opts._resolvedConfig = { type: detectedType, url: opts.url } as ResolvedConnectionConfig;
+        opts.connection = syntheticNameFromUrl(opts.url);
+        return;
+    }
+
     if (!opts.connection) {
         const detected = detectConnectionFromCwd(opts.config);
         if (detected) {
@@ -117,13 +145,20 @@ function requireConnection(opts: { connection?: string; config?: string }): asse
             console.error(`Using connection "${detected}" (matched directory ${process.cwd()})`);
             return;
         }
-        console.error('Error: --connection (-c) is required. Specify which database to use.');
+        console.error('Error: --connection (-c) or --url (-u) is required. Specify which database to use.');
         process.exit(1);
     }
 }
 
 /** Check that the active connection is a Redis connection */
-function requireRedisConnection(opts: { connection: string; config?: string }): void {
+function requireRedisConnection(opts: Record<string, any>): void {
+    if (opts._resolvedConfig) {
+        if (opts._resolvedConfig.type !== DB_TYPES.REDIS) {
+            console.error(`Error: URL is a ${opts._resolvedConfig.type} connection. This command only works with Redis connections.`);
+            process.exit(1);
+        }
+        return;
+    }
     const config = getConnectionConfig(opts.connection, opts.config);
     if (!isRedisConfig(config)) {
         const type = config.type || 'SQL';
@@ -133,7 +168,14 @@ function requireRedisConnection(opts: { connection: string; config?: string }): 
 }
 
 /** Check that the active connection is a SQL connection */
-function requireSqlConnection(opts: { connection: string; config?: string }): void {
+function requireSqlConnection(opts: Record<string, any>): void {
+    if (opts._resolvedConfig) {
+        if (opts._resolvedConfig.type === DB_TYPES.REDIS) {
+            console.error(`Error: URL is a Redis connection. Use Redis commands (info, keys, get, inspect, slowlog, command) instead.`);
+            process.exit(1);
+        }
+        return;
+    }
     const config = getConnectionConfig(opts.connection, opts.config);
     if (isRedisConfig(config)) {
         console.error(`Error: "${opts.connection}" is a Redis connection. Use Redis commands (info, keys, get, inspect, slowlog, command) instead.`);
@@ -151,6 +193,28 @@ function parsePositiveInt(value: string, name: string, max?: number): number {
     return n;
 }
 
+/** Route to the right SQL connection handler based on whether we have a pre-resolved config */
+async function runWithSqlConnection<T>(
+    opts: Record<string, any>,
+    handler: (sql: ReturnType<typeof import('bun').SQL>, dbType: string) => Promise<T>
+): Promise<T> {
+    if (opts._resolvedConfig) {
+        return withConnectionFromConfig(opts._resolvedConfig, handler);
+    }
+    return withConnection(opts.connection, opts.config, handler);
+}
+
+/** Route to the right Redis connection handler based on whether we have a pre-resolved config */
+async function runWithRedisConnection<T>(
+    opts: Record<string, any>,
+    handler: (client: import('bun').RedisClient) => Promise<T>
+): Promise<T> {
+    if (opts._resolvedConfig) {
+        return withRedisConnectionFromConfig(opts._resolvedConfig, handler);
+    }
+    return withRedisConnection(opts.connection, opts.config, handler);
+}
+
 // ============================================================================
 // CLI Setup
 // ============================================================================
@@ -166,13 +230,18 @@ function setupCLI() {
     // Global options
     program
         .option('-c, --connection <name>', 'database connection name from config (required for DB commands)')
+        .option('-u, --url <url>', 'connect directly via URL (e.g. postgres://user:pass@host:5432/db)')
         .option('--config <path>', 'path to config file')
         .option('--no-log', 'disable query logging')
         .option('-f, --format <format>', 'output format: json or markdown', DEFAULT_OUTPUT_FORMAT)
         .hook('preAction', (thisCommand) => {
-            const format = thisCommand.opts().format;
-            if (format && !['json', 'markdown'].includes(format)) {
-                console.error(`Error: Invalid format "${format}". Must be 'json' or 'markdown'.`);
+            const opts = thisCommand.opts();
+            if (opts.connection && opts.url) {
+                console.error('Error: --connection (-c) and --url (-u) are mutually exclusive. Use one or the other.');
+                process.exit(1);
+            }
+            if (opts.format && !['json', 'markdown'].includes(opts.format)) {
+                console.error(`Error: Invalid format "${opts.format}". Must be 'json' or 'markdown'.`);
                 process.exit(1);
             }
         });
@@ -189,7 +258,7 @@ function setupCLI() {
             const opts = program.opts();
             requireConnection(opts);
             requireSqlConnection(opts);
-            await withConnection(opts.connection, opts.config, async (sql, dbType) => {
+            await runWithSqlConnection(opts, async (sql, dbType) => {
                 const tables = await getTables(sql, dbType as DbType);
                 console.log(JSON.stringify({ tables }, null, 2));
             });
@@ -232,7 +301,7 @@ function setupCLI() {
             }
 
             // Fetch fresh schema
-            await withConnection(opts.connection, opts.config, async (sql, dbType) => {
+            await runWithSqlConnection(opts, async (sql, dbType) => {
                 const result = await introspectSchema(sql, dbType as DbType);
 
                 // Cache the result
@@ -257,7 +326,7 @@ function setupCLI() {
             const opts = program.opts();
             requireConnection(opts);
             requireSqlConnection(opts);
-            await withConnection(opts.connection, opts.config, async (sql, dbType) => {
+            await runWithSqlConnection(opts, async (sql, dbType) => {
                 const result = await describeTable(sql, dbType as DbType, tableName);
                 console.log(JSON.stringify(result, null, 2));
             });
@@ -275,17 +344,19 @@ function setupCLI() {
 
             const limit = parsePositiveInt(cmdOpts.limit, 'limit', MAX_SAMPLE_LIMIT);
 
-            await withConnection(opts.connection, opts.config, async (sql, dbType) => {
+            await runWithSqlConnection(opts, async (sql, dbType) => {
                 const result = await sampleTable(sql, dbType as DbType, tableName, limit);
 
-                // Log if enabled
-                const connConfig = getConnectionConfig(opts.connection, opts.config);
-                const loggingEnabled = connConfig.logging === true && opts.log !== false;
-                if (loggingEnabled) {
-                    logQuery(opts.connection, `-- sherlock sample ${tableName} --limit ${limit}`, {
-                        rowCount: result.rowCount,
-                        rows: result.rows,
-                    });
+                // Log if enabled (ad hoc --url connections have logging disabled)
+                if (!opts._resolvedConfig) {
+                    const connConfig = getConnectionConfig(opts.connection, opts.config);
+                    const loggingEnabled = connConfig.logging === true && opts.log !== false;
+                    if (loggingEnabled) {
+                        logQuery(opts.connection, `-- sherlock sample ${tableName} --limit ${limit}`, {
+                            rowCount: result.rowCount,
+                            rows: result.rows,
+                        });
+                    }
                 }
 
                 const format = opts.format as OutputFormat;
@@ -301,7 +372,7 @@ function setupCLI() {
             const opts = program.opts();
             requireConnection(opts);
             requireSqlConnection(opts);
-            await withConnection(opts.connection, opts.config, async (sql, dbType) => {
+            await runWithSqlConnection(opts, async (sql, dbType) => {
                 const result = await getTableStats(sql, dbType as DbType, tableName);
                 const format = opts.format as OutputFormat;
                 if (format === 'markdown') {
@@ -320,7 +391,7 @@ function setupCLI() {
             const opts = program.opts();
             requireConnection(opts);
             requireSqlConnection(opts);
-            await withConnection(opts.connection, opts.config, async (sql, dbType) => {
+            await runWithSqlConnection(opts, async (sql, dbType) => {
                 const result = await getForeignKeys(sql, dbType as DbType, tableName);
                 const format = opts.format as OutputFormat;
                 if (format === 'markdown') {
@@ -348,7 +419,7 @@ function setupCLI() {
             const opts = program.opts();
             requireConnection(opts);
             requireSqlConnection(opts);
-            await withConnection(opts.connection, opts.config, async (sql, dbType) => {
+            await runWithSqlConnection(opts, async (sql, dbType) => {
                 const result = await getIndexes(sql, dbType as DbType, tableName);
                 const format = opts.format as OutputFormat;
                 if (format === 'markdown') {
@@ -379,14 +450,16 @@ function setupCLI() {
                 process.exit(1);
             }
 
-            await withConnection(opts.connection, opts.config, async (sql) => {
+            await runWithSqlConnection(opts, async (sql) => {
                 const result = await executeQuery(sql, sqlQuery);
 
-                // Log if enabled
-                const connConfig = getConnectionConfig(opts.connection, opts.config);
-                const loggingEnabled = connConfig.logging === true && opts.log !== false;
-                if (loggingEnabled) {
-                    logQuery(opts.connection, sqlQuery, result);
+                // Log if enabled (ad hoc --url connections have logging disabled)
+                if (!opts._resolvedConfig) {
+                    const connConfig = getConnectionConfig(opts.connection, opts.config);
+                    const loggingEnabled = connConfig.logging === true && opts.log !== false;
+                    if (loggingEnabled) {
+                        logQuery(opts.connection, sqlQuery, result);
+                    }
                 }
 
                 const format = opts.format as OutputFormat;
@@ -407,7 +480,7 @@ function setupCLI() {
             const opts = program.opts();
             requireConnection(opts);
             requireRedisConnection(opts);
-            await withRedisConnection(opts.connection, opts.config, async (client) => {
+            await runWithRedisConnection(opts, async (client) => {
                 const result = await getServerInfo(client, cmdOpts.section);
                 console.log(JSON.stringify(result, null, 2));
             });
@@ -426,7 +499,7 @@ function setupCLI() {
 
             const limit = parsePositiveInt(cmdOpts.limit, 'limit');
 
-            await withRedisConnection(opts.connection, opts.config, async (client) => {
+            await runWithRedisConnection(opts, async (client) => {
                 const result = await scanKeys(client, pattern || '*', limit, cmdOpts.types);
                 console.log(JSON.stringify(result, null, 2));
             });
@@ -444,7 +517,7 @@ function setupCLI() {
 
             const limit = parsePositiveInt(cmdOpts.limit, 'limit');
 
-            await withRedisConnection(opts.connection, opts.config, async (client) => {
+            await runWithRedisConnection(opts, async (client) => {
                 const result = await getKeyValue(client, key, limit);
                 console.log(JSON.stringify(result, null, 2));
             });
@@ -458,7 +531,7 @@ function setupCLI() {
             const opts = program.opts();
             requireConnection(opts);
             requireRedisConnection(opts);
-            await withRedisConnection(opts.connection, opts.config, async (client) => {
+            await runWithRedisConnection(opts, async (client) => {
                 const result = await inspectKey(client, key);
                 console.log(JSON.stringify(result, null, 2));
             });
@@ -476,7 +549,7 @@ function setupCLI() {
 
             const count = parsePositiveInt(cmdOpts.count, 'count');
 
-            await withRedisConnection(opts.connection, opts.config, async (client) => {
+            await runWithRedisConnection(opts, async (client) => {
                 const result = await getSlowlog(client, count);
                 console.log(JSON.stringify(result, null, 2));
             });
@@ -490,7 +563,7 @@ function setupCLI() {
             const opts = program.opts();
             requireConnection(opts);
             requireRedisConnection(opts);
-            await withRedisConnection(opts.connection, opts.config, async (client) => {
+            await runWithRedisConnection(opts, async (client) => {
                 const result = await executeCommand(client, cmd, args);
                 console.log(JSON.stringify(result, null, 2));
             });

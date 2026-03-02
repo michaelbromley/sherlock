@@ -4,7 +4,7 @@ import { findConfigFile, getConfigDir, getEnvFilePath } from './paths';
 import { getCredentialResolver } from '../credentials';
 import type { SherlockConfig, ConnectionConfig, ResolvedConnectionConfig, CredentialRef } from './types';
 import { getEnvVarForConnection } from '../credentials/providers/env';
-import { DB_TYPES, DEFAULT_PORTS, type DbType } from '../db-types';
+import { DB_TYPES, DEFAULT_PORTS, detectDbTypeFromUrl, type DbType } from '../db-types';
 
 let cachedConfig: SherlockConfig | null = null;
 let cachedConfigPath: string | null = null;
@@ -177,18 +177,7 @@ export async function resolveConnection(
         }
 
         // Auto-detect type from URL
-        let type: DbType;
-        if (url.startsWith('postgres://') || url.startsWith('postgresql://')) {
-            type = DB_TYPES.POSTGRES;
-        } else if (url.startsWith('mysql://')) {
-            type = DB_TYPES.MYSQL;
-        } else if (url.startsWith('sqlite://') || url.startsWith('file://') || url === ':memory:') {
-            type = DB_TYPES.SQLITE;
-        } else if (url.startsWith('redis://') || url.startsWith('rediss://')) {
-            type = DB_TYPES.REDIS;
-        } else {
-            type = config.type || DB_TYPES.POSTGRES;
-        }
+        const type = detectDbTypeFromUrl(url) ?? config.type ?? DB_TYPES.POSTGRES;
 
         return { type, url };
     }

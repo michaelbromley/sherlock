@@ -9,9 +9,26 @@ allowed-tools:
 
 Read-only database access for SQL and Redis. Binary: `~/.claude/skills/sherlock/sherlock`
 
+## Ad Hoc Connections (`--url`)
+
+Use `--url` (`-u`) to connect directly via a database URL without any config file setup. This is ideal when a project has a `DATABASE_URL` in its `.env` file.
+
+```bash
+sherlock -u "postgres://user:pass@localhost:5432/mydb" tables
+sherlock -u "mysql://user:pass@localhost:3306/mydb" query "SELECT 1"
+sherlock -u "redis://localhost:6379" info
+```
+
+- `--url` and `-c` are mutually exclusive — use one or the other
+- Database type is auto-detected from the URL prefix (`postgres://`, `mysql://`, `sqlite://`, `redis://`)
+- Schema caching and introspection work normally (cached under a synthetic name derived from the URL)
+- Query logging is disabled for ad hoc connections
+
+**When to use `--url` vs `-c`:** Use `--url` for quick one-off access, especially when the project already has a `DATABASE_URL`. Use `-c` for repeated access to the same database with config-managed credentials.
+
 ## SQL Commands
 
-All SQL commands require `-c <connection>`. Output is JSON by default, use `-f markdown` for tables.
+All SQL commands require `-c <connection>` or `-u <url>`. Output is JSON by default, use `-f markdown` for tables.
 
 ```bash
 sherlock connections                    # List available connections
@@ -46,7 +63,7 @@ sherlock -c <conn> command GET mykey    # Execute any read-only Redis command
 ## Constraints
 
 - **Read-only**: SQL allows SELECT, SHOW, DESCRIBE, EXPLAIN, WITH only. Redis allows read commands only (GET, HGETALL, SCAN, etc.) — mutations (SET, DEL, HSET, etc.) are blocked.
-- **Connection required**: Always specify `-c <connection>` (no default)
+- **Connection required**: Always specify `-c <connection>` or `-u <url>` (no default)
 - **Type-aware**: SQL commands only work with SQL connections, Redis commands only work with Redis connections
 - **Quoting**: PostgreSQL/SQLite use `"identifier"`, MySQL uses `` `identifier` ``
 

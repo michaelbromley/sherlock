@@ -37,6 +37,20 @@ export const TEST_QUERIES: Record<DbType, string> = {
     [DB_TYPES.REDIS]: 'PING',
 };
 
+/** Auto-detect database type from a connection URL */
+export function detectDbTypeFromUrl(url: string): DbType | null {
+    if (url.startsWith('postgres://') || url.startsWith('postgresql://')) {
+        return DB_TYPES.POSTGRES;
+    } else if (url.startsWith('mysql://')) {
+        return DB_TYPES.MYSQL;
+    } else if (url.startsWith('sqlite://') || url.startsWith('file://') || url === ':memory:') {
+        return DB_TYPES.SQLITE;
+    } else if (url.startsWith('redis://') || url.startsWith('rediss://')) {
+        return DB_TYPES.REDIS;
+    }
+    return null;
+}
+
 /** Check if a connection config looks like Redis (by type field or URL prefix) */
 export function isRedisConfig(config: { type?: string; url?: unknown }): boolean {
     if (config.type === DB_TYPES.REDIS) return true;

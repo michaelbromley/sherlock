@@ -15,6 +15,26 @@ export function createConnection(config: ResolvedConnectionConfig): ReturnType<t
 }
 
 /**
+ * Execute a command with a pre-resolved connection config
+ * Skips the name-based config lookup — used for ad hoc --url connections
+ */
+export async function withConnectionFromConfig<T>(
+    config: ResolvedConnectionConfig,
+    handler: (sql: ReturnType<typeof SQL>, dbType: string) => Promise<T>
+): Promise<T> {
+    let sql: ReturnType<typeof SQL> | null = null;
+
+    try {
+        sql = createConnection(config);
+        return await handler(sql, config.type);
+    } finally {
+        if (sql) {
+            sql.close();
+        }
+    }
+}
+
+/**
  * Execute a command with a database connection
  * Automatically handles connection lifecycle (open/close)
  */
