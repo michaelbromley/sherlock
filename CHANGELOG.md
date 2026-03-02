@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.0] - 2026-03-02
+
+### Added
+
+- **Ad hoc `--url` (`-u`) connections** — connect directly via a database URL without any config file setup. Ideal for projects with a `DATABASE_URL` in `.env`
+  - `sherlock -u "postgres://user:pass@host:5432/db" tables`
+  - `sherlock -u "redis://localhost:6379" info`
+  - Auto-detects database type from URL prefix (`postgres://`, `mysql://`, `sqlite://`, `redis://`)
+  - Mutually exclusive with `-c` — clear error if both are used
+  - Schema caching works under a synthetic name derived from the URL
+  - Query logging disabled for ad hoc connections (no config entry to enable it)
+- `detectDbTypeFromUrl()` shared utility for URL-to-type detection (replaces duplicated inline logic)
+- `withConnectionFromConfig()` / `withRedisConnectionFromConfig()` for direct config-based connections without name lookup
+
 ## [1.1.1] - 2026-02-28
 
 ### Fixed
