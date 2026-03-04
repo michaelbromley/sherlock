@@ -3,18 +3,20 @@
  * Contains all read-only database introspection and query operations
  */
 
-import { SQL } from 'bun';
 import { DB_TYPES, type DbType } from '../db-types';
+import type { SqlAdapter } from './mssql-adapter';
 
 /** Valid SQL identifier pattern (prevents injection via malicious names) */
 const SAFE_IDENTIFIER = /^[a-zA-Z_][a-zA-Z0-9_]*$/;
 
 /**
  * Quote an identifier for safe use in SQL queries.
- * PostgreSQL uses double quotes, MySQL/SQLite use backticks.
+ * PostgreSQL uses double quotes, MSSQL uses square brackets, MySQL/SQLite use backticks.
  */
 export function quoteIdentifier(name: string, dbType: DbType): string {
-    return dbType === DB_TYPES.POSTGRES ? `"${name}"` : `\`${name}\``;
+    if (dbType === DB_TYPES.POSTGRES) return `"${name}"`;
+    if (dbType === DB_TYPES.MSSQL) return `[${name}]`;
+    return `\`${name}\``;
 }
 
 /**
@@ -32,7 +34,7 @@ export function validateIdentifier(name: string, type: 'table' | 'column'): void
  * Combines identifier validation with existence check.
  */
 export async function validateTableExists(
-    sql: ReturnType<typeof SQL>,
+    sql: SqlAdapter,
     dbType: DbType,
     tableName: string
 ): Promise<void> {
@@ -113,13 +115,15 @@ export interface SchemaInfo {
 /**
  * Get list of tables in the database
  */
-export async function getTables(sql: ReturnType<typeof SQL>, dbType: DbType): Promise<string[]> {
+export async function getTables(sql: SqlAdapter, dbType: DbType): Promise<string[]> {
     let query: string;
 
     if (dbType === DB_TYPES.POSTGRES) {
         query = "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' ORDER BY table_name";
     } else if (dbType === DB_TYPES.SQLITE) {
         query = "SELECT name as table_name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name";
+    } else if (dbType === DB_TYPES.MSSQL) {
+        query = "SELECT TABLE_NAME as table_name FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_TYPE = 'BASE TABLE' ORDER BY TABLE_NAME";
     } else {
         // MySQL
         query = 'SHOW TABLES';
@@ -127,14 +131,12 @@ export async function getTables(sql: ReturnType<typeof SQL>, dbType: DbType): Pr
 
     const result = await sql.unsafe(query);
 
-    if (dbType === DB_TYPES.POSTGRES || dbType === DB_TYPES.SQLITE) {
-        return result.map((row: Record<string, unknown>) =>
-            String(row.table_name || row.name)
-        );
+    if (dbType === DB_TYPES.POSTGRES || dbType === DB_TYPES.SQLITE || dbType === DB_TYPES.MSSQL) {
+        return (result as Record<string, unknown>[]).map(row => String(row.table_name || row.name));
     } else {
         // MySQL returns { Tables_in_<dbname>: 'tablename' }
         const key = Object.keys(result[0] as object)[0];
-        return result.map((row: Record<string, unknown>) => String(row[key]));
+        return (result as Record<string, unknown>[]).map(row => String(row[key]));
     }
 }
 
@@ -142,7 +144,7 @@ export async function getTables(sql: ReturnType<typeof SQL>, dbType: DbType): Pr
  * Describe a table's schema
  */
 export async function describeTable(
-    sql: ReturnType<typeof SQL>,
+    sql: SqlAdapter,
     dbType: DbType,
     tableName: string
 ): Promise<TableDescription> {
@@ -164,6 +166,18 @@ export async function describeTable(
         `;
     } else if (dbType === DB_TYPES.SQLITE) {
         query = `PRAGMA table_info(${quoteIdentifier(tableName, dbType)})`;
+    } else if (dbType === DB_TYPES.MSSQL) {
+        query = `
+            SELECT
+                COLUMN_NAME as column_name,
+                DATA_TYPE as data_type,
+                IS_NULLABLE as is_nullable,
+                COLUMN_DEFAULT as column_default,
+                CHARACTER_MAXIMUM_LENGTH as character_maximum_length
+            FROM INFORMATION_SCHEMA.COLUMNS
+            WHERE TABLE_NAME = '${tableName}'
+            ORDER BY ORDINAL_POSITION
+        `;
     } else {
         // MySQL
         query = `DESCRIBE ${quoteIdentifier(tableName, dbType)}`;
@@ -177,7 +191,7 @@ export async function describeTable(
  * Get random sample rows from a table
  */
 export async function sampleTable(
-    sql: ReturnType<typeof SQL>,
+    sql: SqlAdapter,
     dbType: DbType,
     tableName: string,
     limit: number
@@ -189,6 +203,8 @@ export async function sampleTable(
 
     if (dbType === DB_TYPES.MYSQL) {
         query = `SELECT * FROM ${quotedTable} ORDER BY RAND() LIMIT ${limit}`;
+    } else if (dbType === DB_TYPES.MSSQL) {
+        query = `SELECT TOP ${limit} * FROM ${quotedTable} ORDER BY NEWID()`;
     } else {
         // PostgreSQL and SQLite both use RANDOM()
         query = `SELECT * FROM ${quotedTable} ORDER BY RANDOM() LIMIT ${limit}`;
@@ -206,7 +222,7 @@ export async function sampleTable(
  * Get indexes for a table
  */
 export async function getIndexes(
-    sql: ReturnType<typeof SQL>,
+    sql: SqlAdapter,
     dbType: DbType,
     tableName: string
 ): Promise<IndexesResult> {
@@ -226,6 +242,18 @@ export async function getIndexes(
         `;
     } else if (dbType === DB_TYPES.SQLITE) {
         query = `PRAGMA index_list(${quoteIdentifier(tableName, dbType)})`;
+    } else if (dbType === DB_TYPES.MSSQL) {
+        query = `
+            SELECT
+                i.name AS index_name,
+                i.type_desc AS index_type,
+                i.is_unique AS is_unique,
+                i.is_primary_key AS is_primary_key
+            FROM sys.indexes i
+            WHERE i.object_id = OBJECT_ID('${tableName}')
+              AND i.name IS NOT NULL
+            ORDER BY i.name
+        `;
     } else {
         // MySQL
         query = `SHOW INDEX FROM ${quoteIdentifier(tableName, dbType)}`;
@@ -243,7 +271,7 @@ export async function getIndexes(
  * Get foreign key relationships for a table
  */
 export async function getForeignKeys(
-    sql: ReturnType<typeof SQL>,
+    sql: SqlAdapter,
     dbType: DbType,
     tableName: string
 ): Promise<ForeignKeysResult> {
@@ -356,6 +384,47 @@ export async function getForeignKeys(
 
         // SQLite doesn't easily support finding incoming FKs without scanning all tables
         referencedBy = [];
+
+    } else if (dbType === DB_TYPES.MSSQL) {
+        // Outgoing FKs: what this table references
+        const outgoingQuery = `
+            SELECT
+                c.name AS col,
+                rt.name AS ref_table,
+                rc.name AS ref_col
+            FROM sys.foreign_keys fk
+            JOIN sys.foreign_key_columns fkc ON fk.object_id = fkc.constraint_object_id
+            JOIN sys.columns c ON fkc.parent_object_id = c.object_id AND fkc.parent_column_id = c.column_id
+            JOIN sys.tables rt ON fkc.referenced_object_id = rt.object_id
+            JOIN sys.columns rc ON fkc.referenced_object_id = rc.object_id AND fkc.referenced_column_id = rc.column_id
+            WHERE OBJECT_NAME(fk.parent_object_id) = '${tableName}'
+        `;
+        const outgoing = await sql.unsafe(outgoingQuery);
+        references = (outgoing as Record<string, unknown>[]).map(row => ({
+            column: String(row.col),
+            referencesTable: String(row.ref_table),
+            referencesColumn: String(row.ref_col),
+        }));
+
+        // Incoming FKs: what references this table
+        const incomingQuery = `
+            SELECT
+                OBJECT_NAME(fk.parent_object_id) AS from_table,
+                c.name AS from_col,
+                rc.name AS to_col
+            FROM sys.foreign_keys fk
+            JOIN sys.foreign_key_columns fkc ON fk.object_id = fkc.constraint_object_id
+            JOIN sys.columns c ON fkc.parent_object_id = c.object_id AND fkc.parent_column_id = c.column_id
+            JOIN sys.columns rc ON fkc.referenced_object_id = rc.object_id AND fkc.referenced_column_id = rc.column_id
+            WHERE OBJECT_NAME(fk.referenced_object_id) = '${tableName}'
+        `;
+        const incoming = await sql.unsafe(incomingQuery);
+        referencedBy = (incoming as Record<string, unknown>[]).map(row => ({
+            fromTable: String(row.from_table),
+            fromColumn: String(row.from_col),
+            toColumn: String(row.to_col),
+        }));
+
     } else {
         throw new Error(`Foreign key lookup not supported for database type: ${dbType}`);
     }
@@ -367,7 +436,7 @@ export async function getForeignKeys(
  * Get data profiling stats for a table
  */
 export async function getTableStats(
-    sql: ReturnType<typeof SQL>,
+    sql: SqlAdapter,
     dbType: DbType,
     tableName: string
 ): Promise<TableStats> {
@@ -377,7 +446,7 @@ export async function getTableStats(
     const tableDesc = await describeTable(sql, dbType, tableName);
     const columnNames: string[] = [];
 
-    // PostgreSQL uses column_name, SQLite uses name, MySQL uses Field
+    // PostgreSQL/MSSQL use column_name, SQLite uses name, MySQL uses Field
     for (const col of tableDesc.columns) {
         const c = col as Record<string, unknown>;
         const name = c.column_name || c.name || c.Field;
@@ -393,7 +462,31 @@ export async function getTableStats(
 
     const quotedTable = quoteIdentifier(tableName, dbType);
 
-    // Build a SINGLE query that gets all stats in one table scan
+    if (dbType === DB_TYPES.MSSQL) {
+        // MSSQL: use a CTE to get row count and per-column stats in one pass
+        // COUNT(DISTINCT ...) doesn't work across all column types in MSSQL, so we do it per-column
+        const rowCountResult = await sql.unsafe(`SELECT COUNT(*) AS cnt FROM ${quotedTable}`);
+        const rowCount = Number((rowCountResult[0] as Record<string, unknown>).cnt) || 0;
+
+        const columnStats: ColumnStats[] = await Promise.all(
+            columnNames.map(async col => {
+                const quotedCol = quoteIdentifier(col, dbType);
+                const statsResult = await sql.unsafe(
+                    `SELECT COUNT(*) - COUNT(${quotedCol}) AS null_count, COUNT(DISTINCT ${quotedCol}) AS distinct_count FROM ${quotedTable}`
+                );
+                const r = statsResult[0] as Record<string, unknown>;
+                return {
+                    column: col,
+                    nullCount: Number(r.null_count) || 0,
+                    distinctCount: Number(r.distinct_count) || 0,
+                };
+            })
+        );
+
+        return { table: tableName, rowCount, columns: columnStats };
+    }
+
+    // Build a SINGLE query that gets all stats in one table scan (non-MSSQL)
     const columnExpressions = columnNames.map(col => {
         const quotedCol = quoteIdentifier(col, dbType);
         return `COUNT(*) - COUNT(${quotedCol}) as "${col}_null_count", COUNT(DISTINCT ${quotedCol}) as "${col}_distinct_count"`;
@@ -419,7 +512,7 @@ export async function getTableStats(
  * Introspect full schema (all tables)
  */
 export async function introspectSchema(
-    sql: ReturnType<typeof SQL>,
+    sql: SqlAdapter,
     dbType: DbType
 ): Promise<SchemaInfo> {
     const tables = await getTables(sql, dbType);
@@ -436,7 +529,7 @@ export async function introspectSchema(
  * Execute a read-only SQL query
  */
 export async function executeQuery(
-    sql: ReturnType<typeof SQL>,
+    sql: SqlAdapter,
     query: string
 ): Promise<QueryResult> {
     try {

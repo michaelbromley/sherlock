@@ -154,6 +154,8 @@ function buildConnectionUrl(
         return `postgres://${encodedUsername}:${encodedPassword}@${host}:${port || defaultPort}/${database}`;
     } else if (type === DB_TYPES.MYSQL) {
         return `mysql://${encodedUsername}:${encodedPassword}@${host}:${port || defaultPort}/${database}`;
+    } else if (type === DB_TYPES.MSSQL) {
+        return `mssql://${encodedUsername}:${encodedPassword}@${host}:${port || defaultPort}/${database}`;
     }
 
     throw new Error(`Unsupported database type: ${type}`);
