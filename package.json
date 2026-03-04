@@ -23,7 +23,8 @@
   "dependencies": {
     "@clack/prompts": "^0.11.0",
     "@napi-rs/keyring": "^1.2.0",
-    "commander": "^14.0.2"
+    "commander": "^14.0.2",
+    "mssql": "^12.2.0"
   },
   "devDependencies": {
     "@types/bun": "latest",

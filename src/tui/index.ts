@@ -6,6 +6,7 @@ import * as p from '@clack/prompts';
 import * as fs from 'fs';
 import * as path from 'path';
 import { SQL, RedisClient } from 'bun';
+import { MssqlAdapter } from '../db/mssql-adapter';
 import { findConfigFile, getConfigDir, ensureConfigDir } from '../config/paths';
 import { loadConfigFile, listConnections, resolveConnection } from '../config';
 import type { SherlockConfig, ConnectionConfig } from '../config/types';
@@ -138,6 +139,10 @@ async function testConnectionMenu(connections: string[]): Promise<void> {
             const client = new RedisClient(config.url);
             await client.send('PING', []);
             client.close();
+        } else if (config.type === DB_TYPES.MSSQL) {
+            const adapter = await MssqlAdapter.connect(config.url);
+            await adapter.unsafe('SELECT 1 AS test');
+            await adapter.close();
         } else {
             const sql = new SQL(config.url);
             await sql.connect();
@@ -650,6 +655,7 @@ async function promptForConnection(
                         { value: DB_TYPES.MYSQL, label: 'MySQL / MariaDB' },
                         { value: DB_TYPES.SQLITE, label: 'SQLite' },
                         { value: DB_TYPES.REDIS, label: 'Redis' },
+                        { value: DB_TYPES.MSSQL, label: 'Microsoft SQL Server' },
                     ],
                 }),
         },

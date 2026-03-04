@@ -8,6 +8,7 @@ export const DB_TYPES = {
     MYSQL: 'mysql',
     SQLITE: 'sqlite',
     REDIS: 'redis',
+    MSSQL: 'mssql',
 } as const;
 
 /** Database type union */
@@ -27,6 +28,7 @@ export const DEFAULT_PORTS: Record<DbType, number> = {
     [DB_TYPES.MYSQL]: 3306,
     [DB_TYPES.SQLITE]: 0, // SQLite doesn't use ports
     [DB_TYPES.REDIS]: 6379,
+    [DB_TYPES.MSSQL]: 1433,
 };
 
 /** Simple test query for each database type */
@@ -35,6 +37,7 @@ export const TEST_QUERIES: Record<DbType, string> = {
     [DB_TYPES.MYSQL]: 'SELECT 1',
     [DB_TYPES.SQLITE]: 'SELECT 1',
     [DB_TYPES.REDIS]: 'PING',
+    [DB_TYPES.MSSQL]: 'SELECT 1 AS test',
 };
 
 /** Auto-detect database type from a connection URL */
@@ -47,6 +50,8 @@ export function detectDbTypeFromUrl(url: string): DbType | null {
         return DB_TYPES.SQLITE;
     } else if (url.startsWith('redis://') || url.startsWith('rediss://')) {
         return DB_TYPES.REDIS;
+    } else if (url.startsWith('mssql://') || url.startsWith('sqlserver://')) {
+        return DB_TYPES.MSSQL;
     }
     return null;
 }
