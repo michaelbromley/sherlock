@@ -380,37 +380,32 @@ section { padding: 6rem 0; }
 
 .tab-bar {
   display: flex;
-  gap: 0.25rem;
+  gap: 0;
   overflow-x: auto;
-  scroll-snap-type: x mandatory;
   -webkit-overflow-scrolling: touch;
-  padding-bottom: 0.5rem;
-  margin-bottom: 2rem;
-  scrollbar-width: thin;
-  scrollbar-color: var(--border) transparent;
+  scrollbar-width: none;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 0;
 }
 
-.tab-bar::-webkit-scrollbar { height: 4px; }
-.tab-bar::-webkit-scrollbar-track { background: transparent; }
-.tab-bar::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+.tab-bar::-webkit-scrollbar { display: none; }
 
 .tab-radio { display: none; }
 
 .tab-label {
   flex-shrink: 0;
-  scroll-snap-align: start;
-  padding: 0.6rem 1.25rem;
-  border-radius: 6px;
+  padding: 0.85rem 1.5rem;
   font-size: 0.9rem;
   font-weight: 500;
-  color: var(--text-muted);
+  color: var(--text-dim);
   cursor: pointer;
   transition: all 0.2s;
   white-space: nowrap;
-  border: 1px solid transparent;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
 }
 
-.tab-label:hover { color: var(--text); background: var(--elevated); }
+.tab-label:hover { color: var(--text); }
 
 #tab1:checked ~ .tab-bar label[for="tab1"],
 #tab2:checked ~ .tab-bar label[for="tab2"],
@@ -418,11 +413,18 @@ section { padding: 6rem 0; }
 #tab4:checked ~ .tab-bar label[for="tab4"],
 #tab5:checked ~ .tab-bar label[for="tab5"] {
   color: var(--amber);
-  background: var(--amber-dim);
-  border-color: rgba(245, 158, 11, 0.25);
+  border-bottom-color: var(--amber);
 }
 
-.tab-panels { position: relative; margin-top: 2rem; }
+.tab-panels {
+  position: relative;
+  margin-top: 0;
+  background: var(--elevated);
+  border: 1px solid var(--border);
+  border-top: none;
+  border-radius: 0 0 12px 12px;
+  padding: 2rem;
+}
 
 .tab-panel {
   display: none;
@@ -565,22 +567,26 @@ section { padding: 6rem 0; }
 /* ── Quick Start ──────────────────────────────────── */
 
 .steps {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-  gap: 2rem;
-  max-width: 900px;
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+  max-width: 640px;
   margin: 0 auto;
 }
 
 .step {
-  text-align: center;
-  padding: 2rem 1.5rem;
-  min-width: 0;
+  display: flex;
+  align-items: flex-start;
+  gap: 1.25rem;
+  padding: 1.5rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
 }
 
 .step-number {
-  width: 48px;
-  height: 48px;
+  width: 40px;
+  height: 40px;
   background: var(--amber);
   color: var(--bg);
   border-radius: 50%;
@@ -588,31 +594,46 @@ section { padding: 6rem 0; }
   align-items: center;
   justify-content: center;
   font-weight: 700;
-  font-size: 1.25rem;
-  margin: 0 auto 1.25rem;
+  font-size: 1.1rem;
+  flex-shrink: 0;
 }
 
+.step-content { min-width: 0; }
+
 .step h3 {
-  font-size: 1.15rem;
-  margin-bottom: 0.75rem;
+  font-size: 1.05rem;
+  margin-bottom: 0.35rem;
 }
 
 .step p {
   color: var(--text-muted);
-  font-size: 0.95rem;
-  margin-bottom: 0.75rem;
+  font-size: 0.9rem;
+  margin-bottom: 0.5rem;
 }
 
-.step code {
-  display: block;
-  background: var(--surface);
+.step-code-block {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  background: var(--bg);
   border: 1px solid var(--border);
   border-radius: 6px;
-  padding: 0.5rem 1rem;
-  font-size: 0.85rem;
+  padding: 0.5rem 0.75rem;
+}
+
+.step-code-block code {
+  font-size: clamp(0.65rem, 1.2vw, 0.8rem);
   color: var(--amber);
-  overflow-x: auto;
-  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+  flex: 1;
+}
+
+.step-code-block .copy-btn {
+  padding: 0.25rem 0.4rem;
+  flex-shrink: 0;
 }
 
 /* ── Footer ───────────────────────────────────────── */
@@ -644,7 +665,7 @@ footer .footer-links {
   .db-grid,
   .features-grid { grid-template-columns: 1fr; }
 
-  .steps { grid-template-columns: 1fr; gap: 1rem; }
+  .steps { gap: 1rem; }
 
   .msg { max-width: 92%; }
 
@@ -754,7 +775,7 @@ footer .footer-links {
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" stroke-width="2" stroke-linecap="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
         </div>
         <h3>Security by default</h3>
-        <p>Read-only enforced, OS keychain credentials, no default connections.</p>
+        <p>Read-only enforced, OS keychain credentials, SQL injection prevention built in.</p>
       </div>
     </div>
   </div>
@@ -963,10 +984,10 @@ footer .footer-links {
       </div>
       <div class="feature-card">
         <div class="feature-icon">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/></svg>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
         </div>
-        <h3>No default connection</h3>
-        <p>Explicit <code class="mono">-c</code> flag required. No accidental production queries.</p>
+        <h3>Zero network exposure</h3>
+        <p>No server, no open ports. Sherlock connects outbound only, never listens for inbound traffic.</p>
       </div>
       <div class="feature-card">
         <div class="feature-icon">
@@ -1001,21 +1022,39 @@ footer .footer-links {
     <div class="steps">
       <div class="step">
         <div class="step-number">1</div>
-        <h3>Install</h3>
-        <p>One command, no dependencies.</p>
-        <code>curl -fsSL https://raw.githubusercontent.com/michaelbromley/sherlock/main/install.sh | bash</code>
+        <div class="step-content">
+          <h3>Install</h3>
+          <p>One command, no dependencies.</p>
+          <div class="step-code-block">
+            <code>curl -fsSL https://raw.githubusercontent.com/michaelbromley/sherlock/main/install.sh | bash</code>
+            <button class="copy-btn" data-copy="curl -fsSL https://raw.githubusercontent.com/michaelbromley/sherlock/main/install.sh | bash" aria-label="Copy install command">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+            </button>
+          </div>
+        </div>
       </div>
       <div class="step">
         <div class="step-number">2</div>
-        <h3>Configure</h3>
-        <p>Interactive wizard sets up your connection and stores credentials securely.</p>
-        <code>sherlock manage</code>
+        <div class="step-content">
+          <h3>Configure</h3>
+          <p>Interactive wizard sets up your connection and stores credentials securely.</p>
+          <div class="step-code-block">
+            <code>sherlock manage</code>
+            <button class="copy-btn" data-copy="sherlock manage" aria-label="Copy command">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+            </button>
+          </div>
+        </div>
       </div>
       <div class="step">
         <div class="step-number">3</div>
-        <h3>Investigate</h3>
-        <p>Ask Claude Code questions about your data.</p>
-        <code>"Show me the top customers by order value from prod-db"</code>
+        <div class="step-content">
+          <h3>Investigate</h3>
+          <p>Ask your AI questions about your data.</p>
+          <div class="step-code-block">
+            <code>"Show me the top customers by order value from prod-db"</code>
+          </div>
+        </div>
       </div>
     </div>
   </div>
