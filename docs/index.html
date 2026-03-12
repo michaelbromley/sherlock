@@ -60,17 +60,55 @@ a:hover { text-decoration: underline; }
   padding: 2rem 1.5rem;
 }
 
-.hero-icon {
-  width: 80px;
-  height: 80px;
+.hero-eye-container {
+  position: relative;
+  width: 85vw;
+  max-width: 1000px;
+  aspect-ratio: 280 / 130;
   margin-bottom: 2rem;
-  filter: drop-shadow(0 0 24px rgba(245, 158, 11, 0.35));
-  animation: glow 3s ease-in-out infinite;
 }
 
-@keyframes glow {
-  0%, 100% { filter: drop-shadow(0 0 24px rgba(245, 158, 11, 0.35)); }
-  50% { filter: drop-shadow(0 0 40px rgba(245, 158, 11, 0.55)); }
+@media (max-width: 768px) {
+  .hero-eye-container { width: 95vw; }
+}
+
+.hero-eye-container svg {
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+.hero-eye-container .pupil-group {
+  transition: transform 0.06s ease-out;
+}
+
+.hero-eye-container .eye-glow {
+  animation: eyeGlow 3s ease-in-out infinite;
+}
+
+@keyframes eyeGlow {
+  0%, 100% { opacity: 0.12; }
+  50% { opacity: 0.3; }
+}
+
+.eyelid-top {
+  animation: blinkTop 5s ease-in-out infinite;
+  animation-delay: 2s;
+}
+
+.eyelid-bottom {
+  animation: blinkBottom 5s ease-in-out infinite;
+  animation-delay: 2s;
+}
+
+@keyframes blinkTop {
+  0%, 92%, 100% { transform: translateY(-60px); }
+  95%, 97% { transform: translateY(0); }
+}
+
+@keyframes blinkBottom {
+  0%, 92%, 100% { transform: translateY(60px); }
+  95%, 97% { transform: translateY(0); }
 }
 
 .hero h1 {
@@ -79,6 +117,17 @@ a:hover { text-decoration: underline; }
   letter-spacing: -0.03em;
   line-height: 1.1;
   margin-bottom: 0.5rem;
+  display: flex;
+  align-items: center;
+  gap: 0.4em;
+}
+
+.hero h1 .hero-mag {
+  display: inline-block;
+  width: 0.7em;
+  height: 0.7em;
+  flex-shrink: 0;
+  filter: drop-shadow(0 0 12px rgba(245, 158, 11, 0.4));
 }
 
 .hero .tagline {
@@ -608,12 +657,65 @@ footer .footer-links {
 
 <!-- ════════════════════ Hero ════════════════════ -->
 <section class="hero">
-  <svg class="hero-icon" viewBox="0 0 80 80" fill="none" xmlns="http://www.w3.org/2000/svg">
-    <circle cx="34" cy="34" r="22" stroke="#f59e0b" stroke-width="4" fill="none"/>
-    <line x1="50" y1="50" x2="70" y2="70" stroke="#f59e0b" stroke-width="5" stroke-linecap="round"/>
-    <circle cx="34" cy="34" r="12" stroke="#f59e0b" stroke-width="1.5" opacity="0.3" fill="none"/>
-  </svg>
-  <h1>Sherlock</h1>
+  <div class="hero-eye-container" id="heroEye">
+    <svg viewBox="0 0 280 130" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <radialGradient id="irisGlow" cx="50%" cy="50%" r="50%">
+          <stop offset="0%" stop-color="#f59e0b" stop-opacity="0.5"/>
+          <stop offset="100%" stop-color="#f59e0b" stop-opacity="0"/>
+        </radialGradient>
+        <clipPath id="eyeClip">
+          <path d="M 5 65 Q 70 5, 140 5 Q 210 5, 275 65 Q 210 125, 140 125 Q 70 125, 5 65 Z"/>
+        </clipPath>
+      </defs>
+
+      <!-- Ambient glow -->
+      <ellipse class="eye-glow" cx="140" cy="65" rx="145" ry="68" fill="url(#irisGlow)" opacity="0.15"/>
+
+      <!-- Eye shape -->
+      <path d="M 5 65 Q 70 5, 140 5 Q 210 5, 275 65 Q 210 125, 140 125 Q 70 125, 5 65 Z" fill="#141c2b" stroke="#334155" stroke-width="1.5"/>
+
+      <!-- Clipped contents -->
+      <g clip-path="url(#eyeClip)">
+        <g class="pupil-group" id="pupilGroup">
+          <!-- Iris - flat concentric rings -->
+          <circle cx="140" cy="65" r="52" fill="#92400e"/>
+          <circle cx="140" cy="65" r="48" fill="#b45309"/>
+          <circle cx="140" cy="65" r="42" fill="#d97706"/>
+          <circle cx="140" cy="65" r="36" fill="#f59e0b"/>
+
+          <!-- Pupil -->
+          <circle cx="140" cy="65" r="22" fill="#0a0e17"/>
+          <circle cx="140" cy="65" r="20" fill="#050810"/>
+
+          <!-- Catchlight -->
+          <circle cx="130" cy="55" r="5" fill="white" opacity="0.55"/>
+          <circle cx="128" cy="53" r="2.5" fill="white" opacity="0.8"/>
+        </g>
+      </g>
+
+      <!-- Eyelid lines -->
+      <path d="M 5 65 Q 70 5, 140 5 Q 210 5, 275 65" stroke="#475569" stroke-width="2" fill="none"/>
+      <path d="M 5 65 Q 70 125, 140 125 Q 210 125, 275 65" stroke="#334155" stroke-width="1.5" fill="none"/>
+      <!-- Corner points -->
+      <circle cx="5" cy="65" r="1.5" fill="#475569"/>
+      <circle cx="275" cy="65" r="1.5" fill="#475569"/>
+
+      <!-- Eyelids for blink animation -->
+      <g clip-path="url(#eyeClip)">
+        <rect class="eyelid-top" x="0" y="0" width="280" height="65" fill="#0a0e17"/>
+        <rect class="eyelid-bottom" x="0" y="65" width="280" height="65" fill="#0a0e17"/>
+      </g>
+    </svg>
+  </div>
+  <h1>
+    <svg class="hero-mag" viewBox="0 0 80 80" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <circle cx="34" cy="34" r="22" stroke="#f59e0b" stroke-width="4" fill="none"/>
+      <line x1="50" y1="50" x2="70" y2="70" stroke="#f59e0b" stroke-width="5" stroke-linecap="round"/>
+      <circle cx="34" cy="34" r="12" stroke="#f59e0b" stroke-width="1.5" opacity="0.3" fill="none"/>
+    </svg>
+    Sherlock
+  </h1>
   <p class="tagline">A read-only database query tool for AI assistants</p>
   <p class="subtitle">Give your AI the power to investigate &mdash; without the power to destroy.</p>
   <div class="install-block">
@@ -950,6 +1052,71 @@ document.querySelectorAll('.copy-btn').forEach(btn => {
     });
   });
 });
+
+// ── Hero Eye Mouse Tracking ──
+(function() {
+  const container = document.getElementById('heroEye');
+  const pupilGroup = document.getElementById('pupilGroup');
+  if (!container || !pupilGroup) return;
+
+  const maxPupilMove = 14;
+
+  function updateEye(clientX, clientY) {
+    const rect = container.getBoundingClientRect();
+    const centerX = rect.left + rect.width / 2;
+    const centerY = rect.top + rect.height / 2;
+
+    const dx = clientX - centerX;
+    const dy = clientY - centerY;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    const maxDist = Math.max(window.innerWidth, window.innerHeight);
+
+    const factor = Math.min(dist / (maxDist * 0.4), 1);
+    const angle = Math.atan2(dy, dx);
+
+    const pupilX = Math.cos(angle) * maxPupilMove * factor;
+    const pupilY = Math.sin(angle) * maxPupilMove * factor;
+
+    pupilGroup.setAttribute('transform', `translate(${pupilX}, ${pupilY})`);
+  }
+
+  document.addEventListener('mousemove', function(e) {
+    requestAnimationFrame(() => updateEye(e.clientX, e.clientY));
+  });
+
+  document.addEventListener('touchmove', function(e) {
+    if (e.touches.length > 0) {
+      requestAnimationFrame(() => updateEye(e.touches[0].clientX, e.touches[0].clientY));
+    }
+  }, { passive: true });
+
+  // Gentle idle animation
+  let idleTimer;
+  let idleAngle = 0;
+  function startIdle() {
+    idleTimer = setInterval(() => {
+      idleAngle += 0.02;
+      const ix = Math.sin(idleAngle) * 4;
+      const iy = Math.cos(idleAngle * 0.7) * 2.5;
+      pupilGroup.setAttribute('transform', `translate(${ix}, ${iy})`);
+    }, 50);
+  }
+
+  function resetIdle() {
+    clearInterval(idleTimer);
+    idleTimer = null;
+    idleAngle = 0;
+  }
+
+  let moveTimeout;
+  document.addEventListener('mousemove', function() {
+    resetIdle();
+    clearTimeout(moveTimeout);
+    moveTimeout = setTimeout(startIdle, 3000);
+  });
+
+  startIdle();
+})();
 
 document.querySelectorAll('a[href^="#"]').forEach(a => {
   a.addEventListener('click', e => {
