@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Sherlock — A read-only database query tool for AI assistants</title>
-<meta name="description" content="Give your AI the power to investigate your databases — without the power to destroy. PostgreSQL, MySQL, SQLite, and Redis. Single binary, zero dependencies.">
+<meta name="description" content="Give your AI the power to investigate your databases — without the power to destroy. PostgreSQL, MySQL, SQLite, MSSQL, and Redis. Single binary, zero dependencies.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
@@ -25,6 +25,7 @@
   --mysql: #f29111;
   --sqlite: #44a0d6;
   --redis: #dc382d;
+  --mssql: #cc2927;
 }
 
 html { scroll-behavior: smooth; }
@@ -498,7 +499,7 @@ section { padding: 6rem 0; }
 
 .db-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
   gap: 1.5rem;
 }
 
@@ -745,8 +746,8 @@ footer .footer-links {
         <div class="pillar-icon">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" stroke-width="2" stroke-linecap="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/><path d="M3 12c0 1.66 4 3 9 3s9-1.34 9-3"/></svg>
         </div>
-        <h3>Four databases, one tool</h3>
-        <p>PostgreSQL, MySQL, SQLite, and Redis. One binary, one command.</p>
+        <h3>Five databases, one tool</h3>
+        <p>PostgreSQL, MySQL, SQLite, MSSQL, and Redis. One binary, one command.</p>
       </div>
       <div class="pillar">
         <div class="pillar-icon">
@@ -923,6 +924,10 @@ footer .footer-links {
       <div class="db-card" style="border-top-color: var(--mysql)">
         <h3>MySQL / MariaDB</h3>
         <p>Full introspection, stats, and read-only queries.</p>
+      </div>
+      <div class="db-card" style="border-top-color: var(--mssql)">
+        <h3>MSSQL / SQL Server</h3>
+        <p>Full introspection, schemas, queries, and stats for SQL Server.</p>
       </div>
       <div class="db-card" style="border-top-color: var(--sqlite)">
         <h3>SQLite</h3>
