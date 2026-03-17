@@ -9,6 +9,7 @@ export const DB_TYPES = {
     SQLITE: 'sqlite',
     REDIS: 'redis',
     MSSQL: 'mssql',
+    CLICKHOUSE: 'clickhouse',
 } as const;
 
 /** Database type union */
@@ -29,6 +30,7 @@ export const DEFAULT_PORTS: Record<DbType, number> = {
     [DB_TYPES.SQLITE]: 0, // SQLite doesn't use ports
     [DB_TYPES.REDIS]: 6379,
     [DB_TYPES.MSSQL]: 1433,
+    [DB_TYPES.CLICKHOUSE]: 8123,
 };
 
 /** Simple test query for each database type */
@@ -38,6 +40,7 @@ export const TEST_QUERIES: Record<DbType, string> = {
     [DB_TYPES.SQLITE]: 'SELECT 1',
     [DB_TYPES.REDIS]: 'PING',
     [DB_TYPES.MSSQL]: 'SELECT 1 AS test',
+    [DB_TYPES.CLICKHOUSE]: 'SELECT 1',
 };
 
 /** Auto-detect database type from a connection URL */
@@ -52,6 +55,8 @@ export function detectDbTypeFromUrl(url: string): DbType | null {
         return DB_TYPES.REDIS;
     } else if (url.startsWith('mssql://') || url.startsWith('sqlserver://')) {
         return DB_TYPES.MSSQL;
+    } else if (url.startsWith('clickhouse://') || url.startsWith('clickhouses://')) {
+        return DB_TYPES.CLICKHOUSE;
     }
     return null;
 }

@@ -16,6 +16,7 @@ const SAFE_IDENTIFIER = /^[a-zA-Z_][a-zA-Z0-9_]*$/;
 export function quoteIdentifier(name: string, dbType: DbType): string {
     if (dbType === DB_TYPES.POSTGRES) return `"${name}"`;
     if (dbType === DB_TYPES.MSSQL) return `[${name}]`;
+    // MySQL, SQLite, ClickHouse all use backticks
     return `\`${name}\``;
 }
 
@@ -124,6 +125,9 @@ export async function getTables(sql: SqlAdapter, dbType: DbType): Promise<string
         query = "SELECT name as table_name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name";
     } else if (dbType === DB_TYPES.MSSQL) {
         query = "SELECT TABLE_NAME as table_name FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_TYPE = 'BASE TABLE' ORDER BY TABLE_NAME";
+    } else if (dbType === DB_TYPES.CLICKHOUSE) {
+        // Exclude non-queryable View engine; MaterializedView is data-bearing and kept
+        query = "SELECT name AS table_name FROM system.tables WHERE database = currentDatabase() AND engine != 'View' ORDER BY name";
     } else {
         // MySQL
         query = 'SHOW TABLES';
@@ -131,7 +135,7 @@ export async function getTables(sql: SqlAdapter, dbType: DbType): Promise<string
 
     const result = await sql.unsafe(query);
 
-    if (dbType === DB_TYPES.POSTGRES || dbType === DB_TYPES.SQLITE || dbType === DB_TYPES.MSSQL) {
+    if (dbType === DB_TYPES.POSTGRES || dbType === DB_TYPES.SQLITE || dbType === DB_TYPES.MSSQL || dbType === DB_TYPES.CLICKHOUSE) {
         return (result as Record<string, unknown>[]).map(row => String(row.table_name || row.name));
     } else {
         // MySQL returns { Tables_in_<dbname>: 'tablename' }
@@ -178,6 +182,21 @@ export async function describeTable(
             WHERE TABLE_NAME = '${tableName}'
             ORDER BY ORDINAL_POSITION
         `;
+    } else if (dbType === DB_TYPES.CLICKHOUSE) {
+        query = `
+            SELECT
+                name AS column_name,
+                type AS data_type,
+                default_kind,
+                default_expression AS column_default,
+                comment,
+                is_in_sorting_key,
+                is_in_partition_key
+            FROM system.columns
+            WHERE database = currentDatabase()
+              AND table = '${tableName}'
+            ORDER BY position
+        `;
     } else {
         // MySQL
         query = `DESCRIBE ${quoteIdentifier(tableName, dbType)}`;
@@ -205,6 +224,8 @@ export async function sampleTable(
         query = `SELECT * FROM ${quotedTable} ORDER BY RAND() LIMIT ${limit}`;
     } else if (dbType === DB_TYPES.MSSQL) {
         query = `SELECT TOP ${limit} * FROM ${quotedTable} ORDER BY NEWID()`;
+    } else if (dbType === DB_TYPES.CLICKHOUSE) {
+        query = `SELECT * FROM ${quotedTable} ORDER BY rand() LIMIT ${limit}`;
     } else {
         // PostgreSQL and SQLite both use RANDOM()
         query = `SELECT * FROM ${quotedTable} ORDER BY RANDOM() LIMIT ${limit}`;
@@ -254,6 +275,39 @@ export async function getIndexes(
               AND i.name IS NOT NULL
             ORDER BY i.name
         `;
+    } else if (dbType === DB_TYPES.CLICKHOUSE) {
+        // ClickHouse: get table keys (primary index) and data-skipping indices
+        const keysResult = await sql.unsafe(
+            `SELECT sorting_key, primary_key, partition_key, engine FROM system.tables WHERE database = currentDatabase() AND name = '${tableName}'`
+        );
+        const keysRow = keysResult[0] as Record<string, unknown>;
+
+        // Data-skipping indices may not be accessible depending on user permissions
+        let skippingResult: unknown[] = [];
+        try {
+            skippingResult = await sql.unsafe(
+                `SELECT name AS index_name, type AS index_type, expr AS index_expression, granularity FROM system.data_skipping_indices WHERE database = currentDatabase() AND table = '${tableName}' ORDER BY name`
+            );
+        } catch {
+            // Insufficient permissions for system.data_skipping_indices — skip
+        }
+
+        const hasPrimaryIndex = !!(keysRow?.sorting_key || keysRow?.primary_key || keysRow?.partition_key);
+        const indexes = [
+            ...(hasPrimaryIndex ? [{
+                index_name: '(primary/sorting key)',
+                index_type: String(keysRow?.engine ?? ''),
+                index_expression: String(keysRow?.sorting_key || keysRow?.primary_key || ''),
+                partition_key: String(keysRow?.partition_key ?? ''),
+            }] : []),
+            ...skippingResult,
+        ];
+
+        return {
+            table: tableName,
+            indexCount: indexes.length,
+            indexes,
+        };
     } else {
         // MySQL
         query = `SHOW INDEX FROM ${quoteIdentifier(tableName, dbType)}`;
@@ -280,7 +334,10 @@ export async function getForeignKeys(
     let references: FKReference[] = [];
     let referencedBy: FKReferencedBy[] = [];
 
-    if (dbType === DB_TYPES.POSTGRES) {
+    if (dbType === DB_TYPES.CLICKHOUSE) {
+        // ClickHouse does not support foreign key constraints
+        return { table: tableName, references: [], referencedBy: [] };
+    } else if (dbType === DB_TYPES.POSTGRES) {
         // Outgoing FKs: what this table references
         const outgoingQuery = `
             SELECT
@@ -462,7 +519,45 @@ export async function getTableStats(
 
     const quotedTable = quoteIdentifier(tableName, dbType);
 
-    if (dbType === DB_TYPES.MSSQL) {
+    if (dbType === DB_TYPES.CLICKHOUSE) {
+        // Try fast row count from system.parts first, fall back to COUNT(*)
+        // system.parts only works for MergeTree-family engines; returns 0/NULL for others
+        let rowCount = 0;
+        try {
+            const rowCountResult = await sql.unsafe(
+                `SELECT sum(rows) AS cnt FROM system.parts WHERE database = currentDatabase() AND table = '${tableName}' AND active = 1`
+            );
+            const cnt = Number((rowCountResult[0] as Record<string, unknown>).cnt);
+            if (!isNaN(cnt) && cnt > 0) {
+                rowCount = cnt;
+            } else {
+                // Non-MergeTree engine or empty parts — use COUNT(*)
+                const fallback = await sql.unsafe(`SELECT count(*) AS cnt FROM ${quotedTable}`);
+                rowCount = Number((fallback[0] as Record<string, unknown>).cnt) || 0;
+            }
+        } catch {
+            const rowCountResult = await sql.unsafe(`SELECT count(*) AS cnt FROM ${quotedTable}`);
+            rowCount = Number((rowCountResult[0] as Record<string, unknown>).cnt) || 0;
+        }
+
+        // Per-column stats using uniqExact() (ClickHouse-optimized exact distinct count)
+        const columnStats: ColumnStats[] = await Promise.all(
+            columnNames.map(async col => {
+                const quotedCol = quoteIdentifier(col, dbType);
+                const statsResult = await sql.unsafe(
+                    `SELECT count(*) - count(${quotedCol}) AS null_count, uniqExact(${quotedCol}) AS distinct_count FROM ${quotedTable}`
+                );
+                const r = statsResult[0] as Record<string, unknown>;
+                return {
+                    column: col,
+                    nullCount: Number(r.null_count) || 0,
+                    distinctCount: Number(r.distinct_count) || 0,
+                };
+            })
+        );
+
+        return { table: tableName, rowCount, columns: columnStats };
+    } else if (dbType === DB_TYPES.MSSQL) {
         // MSSQL: use a CTE to get row count and per-column stats in one pass
         // COUNT(DISTINCT ...) doesn't work across all column types in MSSQL, so we do it per-column
         const rowCountResult = await sql.unsafe(`SELECT COUNT(*) AS cnt FROM ${quotedTable}`);

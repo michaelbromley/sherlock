@@ -8,6 +8,7 @@ import { resolveConnection } from '../config';
 import type { ResolvedConnectionConfig } from '../config/types';
 import { DB_TYPES } from '../db-types';
 import { MssqlAdapter, type SqlAdapter } from './mssql-adapter';
+import { ClickhouseAdapter } from './clickhouse-adapter';
 
 /** Re-export SqlAdapter so callers can use it as a type */
 export type { SqlAdapter };
@@ -19,6 +20,9 @@ export type { SqlAdapter };
 export async function createConnection(config: ResolvedConnectionConfig): Promise<SqlAdapter> {
     if (config.type === DB_TYPES.MSSQL) {
         return MssqlAdapter.connect(config.url);
+    }
+    if (config.type === DB_TYPES.CLICKHOUSE) {
+        return ClickhouseAdapter.connect(config.url);
     }
 
     // Wrap Bun.SQL to match SqlAdapter interface
