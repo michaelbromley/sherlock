@@ -53,10 +53,21 @@ export interface QueryResult {
     error?: string;
 }
 
+/** ClickHouse table metadata (only present for ClickHouse connections) */
+export interface ClickHouseTableInfo {
+    engine: string;
+    sorting_key: string;
+    partition_key: string;
+    primary_key: string;
+    comment: string;
+}
+
 /** Table description result */
 export interface TableDescription {
     table: string;
     columns: unknown[];
+    /** ClickHouse-specific table metadata (engine, keys, TTL). Omitted for other DB types. */
+    tableInfo?: ClickHouseTableInfo;
 }
 
 /** Sample result */
@@ -101,11 +112,22 @@ export interface ColumnStats {
     distinctCount: number;
 }
 
+/** ClickHouse storage metrics (only present for ClickHouse connections) */
+export interface ClickHouseStorageInfo {
+    compressedSize: string;
+    uncompressedSize: string;
+    compressionRatio: string;
+    partCount: number;
+    activePartitions: number;
+}
+
 /** Table stats result */
 export interface TableStats {
     table: string;
     rowCount: number;
     columns: ColumnStats[];
+    /** ClickHouse-specific storage metrics (compression, parts, partitions). Omitted for other DB types. */
+    storage?: ClickHouseStorageInfo;
 }
 
 /** Schema info (for introspection) */
@@ -203,6 +225,33 @@ export async function describeTable(
     }
 
     const result = await sql.unsafe(query);
+
+    // Enrich with ClickHouse table metadata (engine, keys, TTL)
+    if (dbType === DB_TYPES.CLICKHOUSE) {
+        try {
+            const metaResult = await sql.unsafe(
+                `SELECT engine, sorting_key, partition_key, primary_key, comment ` +
+                `FROM system.tables WHERE database = currentDatabase() AND name = '${tableName}'`
+            );
+            const meta = metaResult[0] as Record<string, unknown> | undefined;
+            if (meta) {
+                return {
+                    table: tableName,
+                    columns: result,
+                    tableInfo: {
+                        engine: String(meta.engine ?? ''),
+                        sorting_key: String(meta.sorting_key ?? ''),
+                        partition_key: String(meta.partition_key ?? ''),
+                        primary_key: String(meta.primary_key ?? ''),
+                        comment: String(meta.comment ?? ''),
+                    },
+                };
+            }
+        } catch {
+            // If system.tables is inaccessible, return without metadata
+        }
+    }
+
     return { table: tableName, columns: result };
 }
 
@@ -556,7 +605,34 @@ export async function getTableStats(
             })
         );
 
-        return { table: tableName, rowCount, columns: columnStats };
+        // Fetch storage metrics (compressed/uncompressed size, parts, partitions)
+        let storage: ClickHouseStorageInfo | undefined;
+        try {
+            const storageResult = await sql.unsafe(
+                `SELECT ` +
+                `formatReadableSize(sum(bytes_on_disk)) AS compressed_size, ` +
+                `formatReadableSize(sum(data_uncompressed_bytes)) AS uncompressed_size, ` +
+                `round(sum(data_uncompressed_bytes) / greatest(sum(bytes_on_disk), 1), 2) AS compression_ratio, ` +
+                `count() AS part_count, ` +
+                `uniqExact(partition) AS active_partitions ` +
+                `FROM system.parts ` +
+                `WHERE database = currentDatabase() AND table = '${tableName}' AND active = 1`
+            );
+            const s = storageResult[0] as Record<string, unknown>;
+            if (s && Number(s.part_count) > 0) {
+                storage = {
+                    compressedSize: String(s.compressed_size),
+                    uncompressedSize: String(s.uncompressed_size),
+                    compressionRatio: `${s.compression_ratio}x`,
+                    partCount: Number(s.part_count),
+                    activePartitions: Number(s.active_partitions),
+                };
+            }
+        } catch {
+            // system.parts inaccessible — skip storage info
+        }
+
+        return { table: tableName, rowCount, columns: columnStats, storage };
     } else if (dbType === DB_TYPES.MSSQL) {
         // MSSQL: use a CTE to get row count and per-column stats in one pass
         // COUNT(DISTINCT ...) doesn't work across all column types in MSSQL, so we do it per-column
