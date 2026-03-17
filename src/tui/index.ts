@@ -7,6 +7,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { SQL, RedisClient } from 'bun';
 import { MssqlAdapter } from '../db/mssql-adapter';
+import { ClickhouseAdapter } from '../db/clickhouse-adapter';
 import { findConfigFile, getConfigDir, ensureConfigDir } from '../config/paths';
 import { loadConfigFile, listConnections, resolveConnection } from '../config';
 import type { SherlockConfig, ConnectionConfig } from '../config/types';
@@ -142,6 +143,10 @@ async function testConnectionMenu(connections: string[]): Promise<void> {
         } else if (config.type === DB_TYPES.MSSQL) {
             const adapter = await MssqlAdapter.connect(config.url);
             await adapter.unsafe('SELECT 1 AS test');
+            await adapter.close();
+        } else if (config.type === DB_TYPES.CLICKHOUSE) {
+            const adapter = await ClickhouseAdapter.connect(config.url);
+            await adapter.unsafe('SELECT 1');
             await adapter.close();
         } else {
             const sql = new SQL(config.url);
@@ -656,6 +661,7 @@ async function promptForConnection(
                         { value: DB_TYPES.SQLITE, label: 'SQLite' },
                         { value: DB_TYPES.REDIS, label: 'Redis' },
                         { value: DB_TYPES.MSSQL, label: 'Microsoft SQL Server' },
+                        { value: DB_TYPES.CLICKHOUSE, label: 'ClickHouse' },
                     ],
                 }),
         },
