@@ -4,7 +4,7 @@ import { findConfigFile, getConfigDir, getEnvFilePath } from './paths';
 import { getCredentialResolver } from '../credentials';
 import type { SherlockConfig, ConnectionConfig, ResolvedConnectionConfig, CredentialRef, SslConfig } from './types';
 import { getEnvVarForConnection } from '../credentials/providers/env';
-import { DB_TYPES, DEFAULT_PORTS, detectDbTypeFromUrl, type DbType } from '../db-types';
+import { DB_TYPES, DEFAULT_PORTS, detectDbTypeFromUrl, parseBoolParam, type DbType } from '../db-types';
 
 let cachedConfig: SherlockConfig | null = null;
 let cachedConfigPath: string | null = null;
@@ -135,8 +135,12 @@ export function getConnectionConfig(
     return config.connections[connectionName];
 }
 
-/** Normalized SSL settings (internal representation) */
-interface NormalizedSsl {
+/**
+ * Normalized SSL settings — internal flat form used by the URL builders.
+ * Public callers should pass `ConnectionConfig['ssl']` directly; functions
+ * that consume this type normalize on entry via `normalizeSsl()`.
+ */
+export interface NormalizedSsl {
     enabled: boolean;
     /** Whether to verify the server certificate against system CAs */
     verify: boolean;
@@ -218,14 +222,12 @@ function parseMysqlSsl(params: URLSearchParams): ConnectionConfig['ssl'] | undef
  * Parse MSSQL SSL query params: encrypt + trustServerCertificate booleans.
  */
 function parseMssqlSslParams(params: URLSearchParams): ConnectionConfig['ssl'] | undefined {
-    const encryptStr = params.get('encrypt');
-    if (encryptStr == null) return undefined;
-    const encrypt = encryptStr.toLowerCase() === 'true' || encryptStr === '1';
+    const encrypt = parseBoolParam(params.get('encrypt'));
+    if (encrypt == null) return undefined;
     if (!encrypt) return false;
-    const trust = params.get('trustServerCertificate')?.toLowerCase();
     // trustServerCertificate=false means "verify the cert"
-    if (trust === 'false' || trust === '0') return { rejectUnauthorized: true };
-    return true;
+    const trust = parseBoolParam(params.get('trustServerCertificate'));
+    return trust === false ? { rejectUnauthorized: true } : true;
 }
 
 /**
@@ -259,7 +261,14 @@ export function parseConnectionUrl(rawUrl: string): ParsedConnectionUrl | null {
 
     const result: ParsedConnectionUrl = { type };
 
-    if (parsed.hostname) result.host = parsed.hostname;
+    if (parsed.hostname) {
+        // WHATWG URL retains brackets around IPv6 literals in `hostname` —
+        // strip them so the host string is bracket-free in our config form.
+        const hostname = parsed.hostname;
+        result.host = hostname.startsWith('[') && hostname.endsWith(']')
+            ? hostname.slice(1, -1)
+            : hostname;
+    }
     if (parsed.port) result.port = parseInt(parsed.port, 10);
     if (parsed.username) result.username = decodeURIComponent(parsed.username);
     if (parsed.password) result.password = decodeURIComponent(parsed.password);
@@ -279,8 +288,18 @@ export function parseConnectionUrl(rawUrl: string): ParsedConnectionUrl | null {
     return result;
 }
 
+/** Bracket an IPv6 host for inclusion in a URL authority component. */
+function formatHostForUrl(host: string): string {
+    // IPv6 literals contain colons and must be bracketed in URLs.
+    // IPv4 and hostnames never contain ':', so this check is unambiguous.
+    return host.includes(':') && !host.startsWith('[') ? `[${host}]` : host;
+}
+
 /**
- * Build a connection URL from individual config parameters
+ * Build a connection URL from individual config parameters.
+ *
+ * Accepts the public ssl config shape (boolean | SslConfig | undefined) and
+ * normalizes internally — callers don't need to construct NormalizedSsl.
  */
 export function buildConnectionUrl(
     type: DbType,
@@ -289,23 +308,72 @@ export function buildConnectionUrl(
     username: string,
     password: string,
     database: string,
-    ssl: NormalizedSsl
+    ssl?: ConnectionConfig['ssl']
 ): string {
     const encodedPassword = encodeURIComponent(password);
     const encodedUsername = encodeURIComponent(username);
     const defaultPort = DEFAULT_PORTS[type];
-    const sslQuery = buildSslQuery(type, ssl);
+    const sslQuery = buildSslQuery(type, normalizeSsl(ssl));
     const suffix = sslQuery ? `?${sslQuery}` : '';
+    const formattedHost = formatHostForUrl(host);
 
     if (type === DB_TYPES.POSTGRES) {
-        return `postgres://${encodedUsername}:${encodedPassword}@${host}:${port || defaultPort}/${database}${suffix}`;
+        return `postgres://${encodedUsername}:${encodedPassword}@${formattedHost}:${port || defaultPort}/${database}${suffix}`;
     } else if (type === DB_TYPES.MYSQL) {
-        return `mysql://${encodedUsername}:${encodedPassword}@${host}:${port || defaultPort}/${database}${suffix}`;
+        return `mysql://${encodedUsername}:${encodedPassword}@${formattedHost}:${port || defaultPort}/${database}${suffix}`;
     } else if (type === DB_TYPES.MSSQL) {
-        return `mssql://${encodedUsername}:${encodedPassword}@${host}:${port || defaultPort}/${database}${suffix}`;
+        return `mssql://${encodedUsername}:${encodedPassword}@${formattedHost}:${port || defaultPort}/${database}${suffix}`;
     }
 
     throw new Error(`Unsupported database type: ${type}`);
+}
+
+/** Driver-specific SSL query keys that we manage ourselves */
+const SSL_QUERY_KEYS: Record<DbType, string[]> = {
+    [DB_TYPES.POSTGRES]: ['sslmode'],
+    [DB_TYPES.MYSQL]: ['ssl-mode', 'sslmode', 'ssl'],
+    [DB_TYPES.MSSQL]: ['encrypt', 'trustServerCertificate'],
+    [DB_TYPES.REDIS]: [],
+    [DB_TYPES.SQLITE]: [],
+};
+
+/**
+ * Overlay an explicit `ssl` config onto an existing connection URL.
+ * Strips any pre-existing driver-specific SSL query params and re-adds them
+ * from the `ssl` config. For Redis, swaps the protocol between redis:// and
+ * rediss:// as appropriate. Returns the URL unchanged when `ssl` is null/undefined.
+ */
+export function applySslToUrl(url: string, type: DbType, ssl: ConnectionConfig['ssl']): string {
+    if (ssl === undefined) return url;
+
+    // Redis is handled by switching the protocol — no query params.
+    if (type === DB_TYPES.REDIS) {
+        const enabled = normalizeSsl(ssl).enabled;
+        if (enabled && url.startsWith('redis://')) return 'rediss://' + url.slice('redis://'.length);
+        if (!enabled && url.startsWith('rediss://')) return 'redis://' + url.slice('rediss://'.length);
+        return url;
+    }
+
+    let parsed: URL;
+    try {
+        parsed = new URL(url);
+    } catch {
+        return url;
+    }
+
+    // Strip any existing SSL params for this driver
+    for (const key of SSL_QUERY_KEYS[type]) parsed.searchParams.delete(key);
+
+    // Append the new ones (if ssl is enabled)
+    const sslQuery = buildSslQuery(type, normalizeSsl(ssl));
+    if (sslQuery) {
+        for (const pair of sslQuery.split('&')) {
+            const [k, v] = pair.split('=');
+            parsed.searchParams.set(k, v);
+        }
+    }
+
+    return parsed.toString();
 }
 
 /**
@@ -320,13 +388,15 @@ export async function resolveConnection(
 
     // Check for connection URL first
     if (config.url) {
-        const url = await resolver.resolveValue(config.url);
-        if (!url) {
+        const rawUrl = await resolver.resolveValue(config.url);
+        if (!rawUrl) {
             throw new Error('Connection URL resolved to empty value');
         }
 
         // Auto-detect type from URL
-        const type = detectDbTypeFromUrl(url) ?? config.type ?? DB_TYPES.POSTGRES;
+        const type = detectDbTypeFromUrl(rawUrl) ?? config.type ?? DB_TYPES.POSTGRES;
+        // If the user set `ssl` alongside `url`, apply it to the URL.
+        const url = applySslToUrl(rawUrl, type, config.ssl);
 
         return { type, url };
     }
@@ -341,12 +411,13 @@ export async function resolveConnection(
         const database = config.database || '0';
         const ssl = normalizeSsl(config.ssl);
         const protocol = ssl.enabled ? 'rediss' : 'redis';
+        const formattedHost = formatHostForUrl(host);
 
         let url: string;
         if (password) {
-            url = `${protocol}://:${encodeURIComponent(password)}@${host}:${port}/${database}`;
+            url = `${protocol}://:${encodeURIComponent(password)}@${formattedHost}:${port}/${database}`;
         } else {
-            url = `${protocol}://${host}:${port}/${database}`;
+            url = `${protocol}://${formattedHost}:${port}/${database}`;
         }
 
         return { type: DB_TYPES.REDIS, url };
@@ -408,8 +479,7 @@ export async function resolveConnection(
         );
     }
 
-    const ssl = normalizeSsl(config.ssl);
-    const url = buildConnectionUrl(type, host, port, username, password, database, ssl);
+    const url = buildConnectionUrl(type, host, port, username, password, database, config.ssl);
 
     return { type, url };
 }

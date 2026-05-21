@@ -4,20 +4,12 @@
  */
 
 import mssql from 'mssql';
+import { parseBoolParam } from '../db-types';
 
 /** Common interface for database connections (Bun SQL or MSSQL adapter) */
 export interface SqlAdapter {
     unsafe(query: string): Promise<unknown[]>;
     close(): void | Promise<void>;
-}
-
-/** Parse a "true"/"false" query param (case-insensitive). Returns undefined when absent. */
-function parseBoolParam(value: string | null): boolean | undefined {
-    if (value == null) return undefined;
-    const v = value.toLowerCase();
-    if (v === 'true' || v === '1') return true;
-    if (v === 'false' || v === '0') return false;
-    return undefined;
 }
 
 /** Parse an mssql:// URL into a mssql ConnectionConfig */

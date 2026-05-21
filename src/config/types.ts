@@ -38,15 +38,27 @@ export interface ConnectionConfig {
 
     /**
      * SSL/TLS configuration.
+     *
+     * Note on `ssl: true` semantics: this means "encrypt the connection but
+     * do NOT verify the server certificate". This is the common case for
+     * managed databases (Northflank, Supabase, Neon, RDS) where the cert
+     * chain isn't trusted by the system CA store but encryption is required.
+     * It is NOT the same as "maximum SSL security" — use the object form with
+     * `rejectUnauthorized: true` for full verification.
+     *
+     * Values:
      * - `false` or omitted: no SSL (default)
      * - `true`: require SSL, do not verify server certificate
-     *   (the common case for managed databases like Northflank, Supabase, Neon, RDS)
      * - `{ rejectUnauthorized: true }`: require SSL and verify against system CAs
      */
     ssl?: boolean | SslConfig;
 }
 
-/** SSL/TLS connection options */
+/**
+ * SSL/TLS connection options. Intentionally minimal — currently only exposes
+ * server-certificate verification. May grow to include `ca`, `cert`, `key`
+ * file paths for mutual TLS in future.
+ */
 export interface SslConfig {
     /**
      * Whether to verify the server certificate against system CAs.

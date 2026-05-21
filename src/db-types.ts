@@ -56,6 +56,18 @@ export function detectDbTypeFromUrl(url: string): DbType | null {
     return null;
 }
 
+/**
+ * Parse a URL query param as a boolean. Accepts "true"/"false"/"1"/"0"
+ * (case-insensitive). Returns undefined for null/empty/unrecognised values.
+ */
+export function parseBoolParam(value: string | null): boolean | undefined {
+    if (value == null) return undefined;
+    const v = value.toLowerCase();
+    if (v === 'true' || v === '1') return true;
+    if (v === 'false' || v === '0') return false;
+    return undefined;
+}
+
 /** Check if a connection config looks like Redis (by type field or URL prefix) */
 export function isRedisConfig(config: { type?: string; url?: unknown }): boolean {
     if (config.type === DB_TYPES.REDIS) return true;

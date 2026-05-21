@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'bun:test';
-import { parseConnectionUrl, buildConnectionUrl, normalizeSsl } from './index';
+import { parseConnectionUrl, buildConnectionUrl } from './index';
 import { DB_TYPES } from '../db-types';
 
 describe('parseConnectionUrl — postgres', () => {
@@ -59,6 +59,21 @@ describe('parseConnectionUrl — postgres', () => {
     it('omits ssl when no sslmode param', () => {
         const parsed = parseConnectionUrl('postgres://u:p@host/db');
         expect(parsed?.ssl).toBeUndefined();
+    });
+
+    it('treats sslmode=prefer as ssl: true (encrypt without verify)', () => {
+        const parsed = parseConnectionUrl('postgres://u:p@host/db?sslmode=prefer');
+        expect(parsed?.ssl).toBe(true);
+    });
+
+    it('treats sslmode=allow as ssl: true (encrypt without verify)', () => {
+        const parsed = parseConnectionUrl('postgres://u:p@host/db?sslmode=allow');
+        expect(parsed?.ssl).toBe(true);
+    });
+
+    it('treats sslmode=verify-ca as verify mode', () => {
+        const parsed = parseConnectionUrl('postgres://u:p@host/db?sslmode=verify-ca');
+        expect(parsed?.ssl).toEqual({ rejectUnauthorized: true });
     });
 });
 
@@ -120,6 +135,18 @@ describe('parseConnectionUrl — mssql', () => {
         const parsed = parseConnectionUrl('mssql://u:p@host/db?encrypt=false');
         expect(parsed?.ssl).toBe(false);
     });
+
+    it('accepts encrypt=1 numeric form', () => {
+        const parsed = parseConnectionUrl('mssql://u:p@host/db?encrypt=1&trustServerCertificate=0');
+        expect(parsed?.ssl).toEqual({ rejectUnauthorized: true });
+    });
+
+    it('accepts sqlserver:// scheme as mssql', () => {
+        const parsed = parseConnectionUrl('sqlserver://sa:secret@host:1433/master');
+        expect(parsed?.type).toBe(DB_TYPES.MSSQL);
+        expect(parsed?.host).toBe('host');
+        expect(parsed?.database).toBe('master');
+    });
 });
 
 describe('parseConnectionUrl — redis', () => {
@@ -168,9 +195,7 @@ describe('parseConnectionUrl — invalid input', () => {
 
 describe('roundtrip with buildConnectionUrl', () => {
     it('postgres without ssl', () => {
-        const url = buildConnectionUrl(
-            DB_TYPES.POSTGRES, 'host', 5432, 'user', 'pass', 'db', normalizeSsl(undefined)
-        );
+        const url = buildConnectionUrl(DB_TYPES.POSTGRES, 'host', 5432, 'user', 'pass', 'db');
         const parsed = parseConnectionUrl(url);
         expect(parsed?.type).toBe(DB_TYPES.POSTGRES);
         expect(parsed?.host).toBe('host');
@@ -182,32 +207,42 @@ describe('roundtrip with buildConnectionUrl', () => {
     });
 
     it('postgres with ssl require', () => {
-        const url = buildConnectionUrl(
-            DB_TYPES.POSTGRES, 'host', 5432, 'user', 'pass', 'db', normalizeSsl(true)
-        );
+        const url = buildConnectionUrl(DB_TYPES.POSTGRES, 'host', 5432, 'user', 'pass', 'db', true);
         expect(parseConnectionUrl(url)?.ssl).toBe(true);
     });
 
     it('postgres with ssl verify', () => {
         const url = buildConnectionUrl(
-            DB_TYPES.POSTGRES, 'host', 5432, 'user', 'pass', 'db',
-            normalizeSsl({ rejectUnauthorized: true })
+            DB_TYPES.POSTGRES, 'host', 5432, 'user', 'pass', 'db', { rejectUnauthorized: true }
         );
         expect(parseConnectionUrl(url)?.ssl).toEqual({ rejectUnauthorized: true });
     });
 
     it('mssql with ssl verify roundtrip', () => {
         const url = buildConnectionUrl(
-            DB_TYPES.MSSQL, 'host', 1433, 'user', 'pass', 'db',
-            normalizeSsl({ rejectUnauthorized: true })
+            DB_TYPES.MSSQL, 'host', 1433, 'user', 'pass', 'db', { rejectUnauthorized: true }
         );
         expect(parseConnectionUrl(url)?.ssl).toEqual({ rejectUnauthorized: true });
     });
 
     it('postgres with special chars in password roundtrips', () => {
-        const url = buildConnectionUrl(
-            DB_TYPES.POSTGRES, 'host', 5432, 'user', 'p@ss/w:rd&!', 'db', normalizeSsl(true)
-        );
+        const url = buildConnectionUrl(DB_TYPES.POSTGRES, 'host', 5432, 'user', 'p@ss/w:rd&!', 'db', true);
         expect(parseConnectionUrl(url)?.password).toBe('p@ss/w:rd&!');
+    });
+
+    it('IPv6 host roundtrips', () => {
+        const url = buildConnectionUrl(DB_TYPES.POSTGRES, '::1', 5432, 'user', 'pass', 'db', true);
+        const parsed = parseConnectionUrl(url);
+        expect(parsed?.host).toBe('::1');
+        expect(parsed?.port).toBe(5432);
+        expect(parsed?.ssl).toBe(true);
+    });
+
+    it('ssl: false → undefined asymmetry is intentional (omitted = disabled)', () => {
+        // Confirming the documented asymmetry: explicit `ssl: false` produces
+        // a URL with no sslmode param, which parses back as `undefined`.
+        const url = buildConnectionUrl(DB_TYPES.POSTGRES, 'host', 5432, 'u', 'p', 'db', false);
+        expect(url).not.toContain('sslmode');
+        expect(parseConnectionUrl(url)?.ssl).toBeUndefined();
     });
 });
