@@ -1,10 +1,13 @@
 #!/usr/bin/env tsx
 /* eslint-disable no-console */
 /**
- * Test suite for sherlock skill
+ * Manual integration test runner for sherlock.
  *
- * Tests all commands (tables, introspect, describe, query) for each configured database connection.
- * Run with: tsx src/db-query.spec.ts
+ * Tests all commands (tables, introspect, describe, query) against configured
+ * database connections. NOT picked up by `bun test` (filename ends `.integration.ts`,
+ * not `.spec.ts` / `.test.ts`) — this is a hand-run script, not a unit test.
+ *
+ * Run with: tsx src/db-query.integration.ts
  *
  * Prerequisites:
  * - Create a config.ts file in the project root with your database connections

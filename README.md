@@ -9,6 +9,8 @@ A read-only database query tool for AI assistants. Single binary, secure credent
 - **Read-only enforced** - SQL: only SELECT/SHOW/DESCRIBE/EXPLAIN. Redis: read-only command whitelist
 - **Explicit connections** - Must specify which database to query (no accidental production queries)
 - **Multiple databases** - PostgreSQL, MySQL/MariaDB, SQLite, Redis
+- **SSL/TLS support** - Works with managed databases (Northflank, Supabase, Neon, RDS, Azure SQL) that require encrypted connections
+- **Paste a connection string** - Set up new connections by pasting a URL — sherlock parses out host, port, user, password, database, and SSL settings
 - **Claude Code integration** - Works as a skill for AI-assisted database exploration
 
 ## Quick Start
@@ -36,10 +38,12 @@ npm run build:windows   # build dist/sherlock-windows.exe first
 sherlock setup
 ```
 
-The interactive wizard will guide you through:
-- Database type (PostgreSQL, MySQL, SQLite, Redis)
-- Connection details (host, port, database, credentials)
-- Secure password storage (OS keychain or env file)
+The interactive wizard offers two ways to add a connection:
+
+- **Paste a connection string** — paste a URL like `postgres://user:pass@host:5432/db?sslmode=require` and sherlock pulls out the host, port, user, password, database, and SSL settings. You'll only be prompted for whatever's missing.
+- **Enter details manually** — answer prompts for database type, host, port, database name, credentials, and SSL/TLS.
+
+After the details, you'll choose secure password storage (OS keychain or env file).
 
 ### 3. Use with Claude Code
 
@@ -126,7 +130,8 @@ Config lives at `~/.config/sherlock/config.json`:
       "port": 5432,
       "database": "myapp",
       "username": { "$env": "PROD_DB_USER" },
-      "password": { "$keychain": "prod-db" }
+      "password": { "$keychain": "prod-db" },
+      "ssl": true
     },
     "local-dev": {
       "type": "mysql",
@@ -147,6 +152,20 @@ Config lives at `~/.config/sherlock/config.json`:
   }
 }
 ```
+
+### SSL/TLS
+
+Add `ssl` to any connection to enable encryption. Managed databases (Northflank, Supabase, Neon, RDS, Azure SQL) typically require this:
+
+| Value | Behaviour |
+|---|---|
+| omitted / `false` | No SSL (default) |
+| `true` | Require SSL, do not verify server certificate — works for most managed DBs |
+| `{ "rejectUnauthorized": true }` | Require SSL **and** verify the certificate against system CAs |
+
+The `manage` wizard offers these as three options ("No SSL" / "Require SSL (accept any cert)" / "Require SSL + verify cert"). Use "Configure SSL/TLS" in the edit menu to change SSL on an existing connection.
+
+If you pass an `ssl` field alongside a raw `url:` (instead of individual host/port fields), sherlock overlays the SSL settings onto the URL — handy when you've stored a `DATABASE_URL` and want to enable SSL without rewriting it.
 
 ### Credential Sources
 

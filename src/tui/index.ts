@@ -8,8 +8,9 @@ import * as path from 'path';
 import { SQL, RedisClient } from 'bun';
 import { MssqlAdapter } from '../db/mssql-adapter';
 import { findConfigFile, getConfigDir, ensureConfigDir } from '../config/paths';
-import { loadConfigFile, listConnections, resolveConnection } from '../config';
+import { loadConfigFile, listConnections, resolveConnection, parseConnectionUrl } from '../config';
 import type { SherlockConfig, ConnectionConfig } from '../config/types';
+import type { ParsedConnectionUrl } from '../config';
 import { DB_TYPES, DEFAULT_PORTS, isRedisConfig, type DbType } from '../db-types';
 import {
     setKeychainPassword,
@@ -181,7 +182,8 @@ async function listConnectionsDisplay(): Promise<void> {
         }
         const host = typeof conn.host === 'string' ? conn.host : '';
         const database = conn.database || '';
-        return `${name} (${type}) ${host}${database ? ' - ' + database : ''}`;
+        const sslTag = conn.ssl ? ' [ssl]' : '';
+        return `${name} (${type})${sslTag} ${host}${database ? ' - ' + database : ''}`;
     });
 
     p.note(lines.join('\n'), 'Configured Connections');
@@ -373,31 +375,37 @@ async function runSetupWizard(): Promise<void> {
     ensureConfigDir();
 
     if (createFirst) {
-        const connection = await promptForConnection();
-        if (connection) {
-            const config: SherlockConfig = {
-                version: '2.0',
-                connections: {
-                    [connection.name]: connection.config,
-                },
-            };
-
-            // Handle password storage (only if a password was provided)
-            if (connection.password) {
-                await handlePasswordStorage(connection.name, connection.password);
-
-                if (connection.storageMethod === 'keychain') {
-                    connection.config.password = { $keychain: connection.name };
-                } else if (connection.storageMethod === 'env') {
-                    const envVar = `SHERLOCK_${connection.name.toUpperCase().replace(/-/g, '_')}_PASSWORD`;
-                    connection.config.password = { $env: envVar };
-                    await saveToEnvFile(envVar, connection.password);
-                }
-            }
-
-            saveConfig(config);
-            p.log.success('Setup complete! Use `sherlock manage` to test your connection.');
+        const prefill = await promptForSetupMethod();
+        const connection = await promptForConnection(undefined, undefined, prefill);
+        if (!connection) {
+            // Cancelled mid-flow — leave an empty config so `sherlock manage`
+            // works next time, and tell the user what to do from here.
+            saveConfig({ version: '2.0', connections: {} });
+            p.log.info('Setup cancelled. Empty config saved — use `sherlock manage` to add connections later.');
+            return;
         }
+        const config: SherlockConfig = {
+            version: '2.0',
+            connections: {
+                [connection.name]: connection.config,
+            },
+        };
+
+        // Handle password storage (only if a password was provided)
+        if (connection.password) {
+            await handlePasswordStorage(connection.name, connection.password);
+
+            if (connection.storageMethod === 'keychain') {
+                connection.config.password = { $keychain: connection.name };
+            } else if (connection.storageMethod === 'env') {
+                const envVar = `SHERLOCK_${connection.name.toUpperCase().replace(/-/g, '_')}_PASSWORD`;
+                connection.config.password = { $env: envVar };
+                await saveToEnvFile(envVar, connection.password);
+            }
+        }
+
+        saveConfig(config);
+        p.log.success('Setup complete! Use `sherlock manage` to test your connection.');
     } else {
         // Create empty config
         const config: SherlockConfig = {
@@ -413,7 +421,8 @@ async function runSetupWizard(): Promise<void> {
  * Interactive wizard to add a new connection
  */
 async function addConnectionWizard(): Promise<void> {
-    const connection = await promptForConnection();
+    const prefill = await promptForSetupMethod();
+    const connection = await promptForConnection(undefined, undefined, prefill);
     if (!connection) {
         return;
     }
@@ -492,15 +501,23 @@ async function editConnectionWizard(): Promise<void> {
 
     const loggingStatus = existingConn.logging ? 'enabled' : 'disabled';
     const directoryHint = existingConn.directory || 'not set';
+    const sslHint = sslHintLabel(existingConn.ssl);
+    const isSqlite = existingConn.type === DB_TYPES.SQLITE;
+    type EditAction = 'edit' | 'password' | 'directory' | 'logging' | 'ssl' | 'delete';
+    const editOptions: Array<{ value: EditAction; label: string; hint?: string }> = [
+        { value: 'edit', label: 'Edit connection details' },
+        { value: 'password', label: 'Update password' },
+        { value: 'directory', label: 'Set project directory', hint: directoryHint },
+        { value: 'logging', label: 'Toggle query logging', hint: `Currently ${loggingStatus}` },
+    ];
+    if (!isSqlite) {
+        editOptions.push({ value: 'ssl', label: 'Configure SSL/TLS', hint: sslHint });
+    }
+    editOptions.push({ value: 'delete', label: 'Delete connection', hint: 'Cannot be undone' });
+
     const action = await p.select({
         message: `What would you like to do with "${connName}"?`,
-        options: [
-            { value: 'edit', label: 'Edit connection details' },
-            { value: 'password', label: 'Update password' },
-            { value: 'directory', label: 'Set project directory', hint: directoryHint },
-            { value: 'logging', label: 'Toggle query logging', hint: `Currently ${loggingStatus}` },
-            { value: 'delete', label: 'Delete connection', hint: 'Cannot be undone' },
-        ],
+        options: editOptions,
     });
 
     if (p.isCancel(action)) return;
@@ -550,6 +567,19 @@ async function editConnectionWizard(): Promise<void> {
         saveConfig(config);
         const status = newLogging ? 'enabled' : 'disabled';
         p.log.success(`Query logging ${status} for "${connName}".`);
+        return;
+    }
+
+    if (action === 'ssl') {
+        const newSsl = await promptForSsl(existingConn.ssl);
+        if (newSsl === null) return;
+        if (newSsl === undefined) {
+            delete config.connections[connName].ssl;
+        } else {
+            config.connections[connName].ssl = newSsl;
+        }
+        saveConfig(config);
+        p.log.success(`SSL set to "${sslHintLabel(newSsl)}" for "${connName}".`);
         return;
     }
 
@@ -620,291 +650,455 @@ async function editConnectionWizard(): Promise<void> {
 // Shared Helpers
 // ============================================================================
 
+// ----------------------------------------------------------------------------
+// Per-field prompts. Each returns the field value, or null when the user
+// cancelled. promptForConnection composes these.
+// ----------------------------------------------------------------------------
+
+async function promptForName(initial?: string): Promise<string | null> {
+    const v = await p.text({
+        message: 'Connection name',
+        placeholder: 'e.g., production, staging, local',
+        initialValue: initial || '',
+        validate: (value) => {
+            if (!value) return 'Name is required';
+            if (!/^[a-zA-Z0-9_-]+$/.test(value)) {
+                return 'Name can only contain letters, numbers, hyphens, and underscores';
+            }
+        },
+    });
+    return p.isCancel(v) ? null : v;
+}
+
+async function promptForType(initial?: DbType): Promise<DbType | null> {
+    const v = await p.select({
+        message: 'Database type',
+        initialValue: initial || DB_TYPES.POSTGRES,
+        options: [
+            { value: DB_TYPES.POSTGRES, label: 'PostgreSQL' },
+            { value: DB_TYPES.MYSQL, label: 'MySQL / MariaDB' },
+            { value: DB_TYPES.SQLITE, label: 'SQLite' },
+            { value: DB_TYPES.REDIS, label: 'Redis' },
+            { value: DB_TYPES.MSSQL, label: 'Microsoft SQL Server' },
+        ],
+    });
+    return p.isCancel(v) ? null : (v as DbType);
+}
+
+async function promptForHost(initial?: string): Promise<string | null> {
+    const v = await p.text({
+        message: 'Host',
+        placeholder: 'localhost',
+        initialValue: initial || 'localhost',
+    });
+    return p.isCancel(v) ? null : v;
+}
+
+async function promptForPort(defaultPort: number, initial?: number): Promise<number | null> {
+    const v = await p.text({
+        message: 'Port',
+        placeholder: String(defaultPort),
+        initialValue: initial?.toString() || String(defaultPort),
+        validate: (value) => {
+            if (value && isNaN(parseInt(value))) return 'Port must be a number';
+        },
+    });
+    if (p.isCancel(v)) return null;
+    return parseInt(v as string, 10);
+}
+
+async function promptForDbName(initial?: string): Promise<string | null> {
+    const v = await p.text({
+        message: 'Database name',
+        placeholder: 'myapp',
+        initialValue: initial || '',
+        validate: (value) => {
+            if (!value) return 'Database name is required';
+        },
+    });
+    return p.isCancel(v) ? null : v;
+}
+
+async function promptForRedisDbNumber(initial?: string): Promise<string | null> {
+    const v = await p.text({
+        message: 'Database number (0-15)',
+        placeholder: '0',
+        initialValue: initial || '0',
+        validate: (value) => {
+            const num = parseInt(value);
+            if (isNaN(num) || num < 0 || num > 15) return 'Database must be 0-15';
+        },
+    });
+    return p.isCancel(v) ? null : v;
+}
+
+async function promptForSqlitePath(initial?: string): Promise<string | null> {
+    const v = await p.text({
+        message: 'Database file path',
+        placeholder: '/path/to/database.sqlite or :memory:',
+        initialValue: initial || '',
+        validate: (value) => {
+            if (!value) return 'File path is required';
+        },
+    });
+    return p.isCancel(v) ? null : v;
+}
+
+async function promptForUsername(initial?: string): Promise<string | null> {
+    const v = await p.text({
+        message: 'Username',
+        placeholder: 'dbuser',
+        initialValue: initial || '',
+        validate: (value) => {
+            if (!value) return 'Username is required';
+        },
+    });
+    return p.isCancel(v) ? null : v;
+}
+
+async function promptForOptionalPassword(): Promise<string | null> {
+    const v = await p.password({ message: 'Password (leave empty if none)' });
+    if (p.isCancel(v)) return null;
+    return (v as string) || '';
+}
+
+async function promptForLogging(initial?: boolean): Promise<boolean | null> {
+    const v = await p.confirm({
+        message: 'Enable query logging?',
+        initialValue: initial ?? false,
+    });
+    return p.isCancel(v) ? null : v;
+}
+
+async function promptForStorageMethod(): Promise<'keychain' | 'env' | null> {
+    const v = await p.select({
+        message: 'Where should the password be stored?',
+        options: [
+            { value: 'keychain', label: 'OS Keychain', hint: 'Recommended - encrypted by OS' },
+            { value: 'env', label: 'Environment file', hint: '~/.config/sherlock/.env' },
+        ],
+    });
+    return p.isCancel(v) ? null : (v as 'keychain' | 'env');
+}
+
 /**
- * Prompt user for connection details
+ * Prompt user for connection details.
+ *
+ * When `prefill` is provided (paste-URL flow), any field already present in
+ * the parsed URL is skipped — only missing fields are prompted for.
+ *
+ * Returns null on cancellation at any step. The caller decides what to do —
+ * the wizards return to their menu; the first-run setup exits.
  */
 async function promptForConnection(
     existingName?: string,
-    existingConfig?: ConnectionConfig
+    existingConfig?: ConnectionConfig,
+    prefill?: ParsedConnectionUrl | null
 ): Promise<{
     name: string;
     config: ConnectionConfig;
     password: string;
     storageMethod?: 'keychain' | 'env';
 } | null> {
-    const result = await p.group(
-        {
-            name: () =>
-                p.text({
-                    message: 'Connection name',
-                    placeholder: 'e.g., production, staging, local',
-                    initialValue: existingName || '',
-                    validate: (value) => {
-                        if (!value) return 'Name is required';
-                        if (!/^[a-zA-Z0-9_-]+$/.test(value)) {
-                            return 'Name can only contain letters, numbers, hyphens, and underscores';
-                        }
-                    },
-                }),
-            type: () =>
-                p.select({
-                    message: 'Database type',
-                    initialValue: existingConfig?.type || DB_TYPES.POSTGRES,
-                    options: [
-                        { value: DB_TYPES.POSTGRES, label: 'PostgreSQL' },
-                        { value: DB_TYPES.MYSQL, label: 'MySQL / MariaDB' },
-                        { value: DB_TYPES.SQLITE, label: 'SQLite' },
-                        { value: DB_TYPES.REDIS, label: 'Redis' },
-                        { value: DB_TYPES.MSSQL, label: 'Microsoft SQL Server' },
-                    ],
-                }),
-        },
-        {
-            onCancel: () => {
-                p.cancel('Cancelled');
-                process.exit(0);
-            },
-        }
-    );
+    const isEditing = !!existingConfig;
 
-    if (result.type === DB_TYPES.REDIS) {
-        const isEditing = !!existingConfig;
+    const name = await promptForName(existingName);
+    if (name === null) return null;
 
-        const redisFields: Record<string, () => any> = {
-            host: () =>
-                p.text({
-                    message: 'Host',
-                    placeholder: 'localhost',
-                    initialValue: (existingConfig?.host as string) || 'localhost',
-                }),
-            port: () =>
-                p.text({
-                    message: 'Port',
-                    placeholder: String(DEFAULT_PORTS[DB_TYPES.REDIS]),
-                    initialValue: existingConfig?.port?.toString() || String(DEFAULT_PORTS[DB_TYPES.REDIS]),
-                    validate: (value) => {
-                        if (value && isNaN(parseInt(value))) return 'Port must be a number';
-                    },
-                }),
-            // Redis defaults to 16 databases (0-15), configurable via `databases` in redis.conf
-            database: () =>
-                p.text({
-                    message: 'Database number (0-15)',
-                    placeholder: '0',
-                    initialValue: existingConfig?.database || '0',
-                    validate: (value) => {
-                        const num = parseInt(value);
-                        if (isNaN(num) || num < 0 || num > 15) return 'Database must be 0-15';
-                    },
-                }),
-        };
-
-        if (!isEditing) {
-            redisFields.password = () =>
-                p.password({
-                    message: 'Password (leave empty if none)',
-                });
-        }
-
-        const redisResult = await p.group(
-            redisFields,
-            {
-                onCancel: () => {
-                    p.cancel('Cancelled');
-                    process.exit(0);
-                },
-            }
-        );
-
-        const redisPassword = isEditing ? '' : (redisResult.password as string || '');
-        let redisStorageMethod: 'keychain' | 'env' | undefined;
-        if (!isEditing && redisPassword) {
-            redisStorageMethod = await p.select({
-                message: 'Where should the password be stored?',
-                options: [
-                    { value: 'keychain', label: 'OS Keychain', hint: 'Recommended - encrypted by OS' },
-                    { value: 'env', label: 'Environment file', hint: '~/.config/sherlock/.env' },
-                ],
-            }) as 'keychain' | 'env';
-            if (p.isCancel(redisStorageMethod)) {
-                p.cancel('Cancelled');
-                process.exit(0);
-            }
-        }
-
-        const directory = await promptForDirectory(existingConfig?.directory);
-        if (directory === null) {
-            p.cancel('Cancelled');
-            process.exit(0);
-        }
-
-        const config: ConnectionConfig = {
-            type: DB_TYPES.REDIS,
-            host: redisResult.host as string,
-            port: parseInt(redisResult.port as string),
-            database: redisResult.database as string,
-            password: isEditing ? existingConfig!.password : '',
-        };
-
-        if (directory) {
-            config.directory = directory;
-        }
-
-        return {
-            name: result.name as string,
-            config,
-            password: redisPassword,
-            storageMethod: redisStorageMethod,
-        };
+    let type: DbType;
+    if (prefill?.type != null) {
+        type = prefill.type;
+    } else {
+        const t = await promptForType(existingConfig?.type);
+        if (t === null) return null;
+        type = t;
     }
 
-    if (result.type === DB_TYPES.SQLITE) {
-        const sqliteResult = await p.group({
-            filename: () =>
-                p.text({
-                    message: 'Database file path',
-                    placeholder: '/path/to/database.sqlite or :memory:',
-                    initialValue: (existingConfig?.filename as string) || '',
-                    validate: (value) => {
-                        if (!value) return 'File path is required';
-                    },
-                }),
-            logging: () =>
-                p.confirm({
-                    message: 'Enable query logging?',
-                    initialValue: existingConfig?.logging ?? false,
-                }),
-        });
+    // ---- SQLite branch ----
+    if (type === DB_TYPES.SQLITE) {
+        let filename: string;
+        if (prefill?.database != null) {
+            filename = prefill.database;
+        } else {
+            const f = await promptForSqlitePath(existingConfig?.filename as string | undefined);
+            if (f === null) return null;
+            filename = f;
+        }
+
+        const logging = await promptForLogging(existingConfig?.logging);
+        if (logging === null) return null;
 
         const directory = await promptForDirectory(existingConfig?.directory);
-        if (directory === null) {
-            p.cancel('Cancelled');
-            process.exit(0);
-        }
+        if (directory === null) return null;
 
         const config: ConnectionConfig = {
             type: DB_TYPES.SQLITE,
-            filename: sqliteResult.filename as string,
-            logging: sqliteResult.logging as boolean,
+            filename,
+            logging,
         };
+        if (directory) config.directory = directory;
 
-        if (directory) {
-            config.directory = directory;
-        }
-
-        return {
-            name: result.name as string,
-            config,
-            password: '',
-            storageMethod: 'env',
-        };
+        return { name, config, password: '', storageMethod: 'env' };
     }
 
-    const isEditing = !!existingConfig;
+    // ---- Redis branch ----
+    if (type === DB_TYPES.REDIS) {
+        let host: string;
+        if (prefill?.host != null) {
+            host = prefill.host;
+        } else {
+            const v = await promptForHost(existingConfig?.host as string | undefined);
+            if (v === null) return null;
+            host = v;
+        }
 
-    // When editing, skip password/storage — those have their own menu item
-    const connFields: Record<string, () => any> = {
-        host: () =>
-            p.text({
-                message: 'Host',
-                placeholder: 'localhost',
-                initialValue: (existingConfig?.host as string) || 'localhost',
-            }),
-        port: () =>
-            p.text({
-                message: 'Port',
-                placeholder: String(DEFAULT_PORTS[result.type as DbType]),
-                initialValue: existingConfig?.port?.toString() || String(DEFAULT_PORTS[result.type as DbType]),
-                validate: (value) => {
-                    if (value && isNaN(parseInt(value))) return 'Port must be a number';
-                },
-            }),
-        database: () =>
-            p.text({
-                message: 'Database name',
-                placeholder: 'myapp',
-                initialValue: existingConfig?.database || '',
-                validate: (value) => {
-                    if (!value) return 'Database name is required';
-                },
-            }),
-        username: () =>
-            p.text({
-                message: 'Username',
-                placeholder: 'dbuser',
-                initialValue: typeof existingConfig?.username === 'string' ? existingConfig.username : '',
-                validate: (value) => {
-                    if (!value) return 'Username is required';
-                },
-            }),
-    };
+        let port: number;
+        if (prefill?.port != null) {
+            port = prefill.port;
+        } else {
+            const v = await promptForPort(DEFAULT_PORTS[DB_TYPES.REDIS], existingConfig?.port);
+            if (v === null) return null;
+            port = v;
+        }
 
+        let database: string;
+        if (prefill?.database != null) {
+            database = prefill.database;
+        } else {
+            const v = await promptForRedisDbNumber(existingConfig?.database);
+            if (v === null) return null;
+            database = v;
+        }
+
+        let password = '';
+        if (!isEditing) {
+            if (prefill?.password != null) {
+                password = prefill.password;
+            } else {
+                const v = await promptForOptionalPassword();
+                if (v === null) return null;
+                password = v;
+            }
+        }
+
+        let storageMethod: 'keychain' | 'env' | undefined;
+        if (!isEditing && password) {
+            const v = await promptForStorageMethod();
+            if (v === null) return null;
+            storageMethod = v;
+        }
+
+        let ssl: ConnectionConfig['ssl'];
+        if (prefill?.ssl !== undefined) {
+            ssl = prefill.ssl;
+        } else {
+            const v = await promptForSsl(existingConfig?.ssl);
+            if (v === null) return null;
+            ssl = v;
+        }
+
+        const directory = await promptForDirectory(existingConfig?.directory);
+        if (directory === null) return null;
+
+        const config: ConnectionConfig = {
+            type: DB_TYPES.REDIS,
+            host,
+            port,
+            database,
+            password: isEditing ? existingConfig!.password : '',
+        };
+        if (ssl) config.ssl = ssl;
+        if (directory) config.directory = directory;
+
+        return { name, config, password, storageMethod };
+    }
+
+    // ---- Generic SQL branch (postgres / mysql / mssql) ----
+    let host: string;
+    if (prefill?.host != null) {
+        host = prefill.host;
+    } else {
+        const v = await promptForHost(existingConfig?.host as string | undefined);
+        if (v === null) return null;
+        host = v;
+    }
+
+    let port: number;
+    if (prefill?.port != null) {
+        port = prefill.port;
+    } else {
+        const v = await promptForPort(DEFAULT_PORTS[type], existingConfig?.port);
+        if (v === null) return null;
+        port = v;
+    }
+
+    let database: string;
+    if (prefill?.database != null) {
+        database = prefill.database;
+    } else {
+        const v = await promptForDbName(existingConfig?.database);
+        if (v === null) return null;
+        database = v;
+    }
+
+    let username: string;
+    if (prefill?.username != null) {
+        username = prefill.username;
+    } else {
+        const initial = typeof existingConfig?.username === 'string' ? existingConfig.username : undefined;
+        const v = await promptForUsername(initial);
+        if (v === null) return null;
+        username = v;
+    }
+
+    let password = '';
     if (!isEditing) {
-        connFields.password = () =>
-            p.password({
-                message: 'Password (leave empty if none)',
-            });
+        if (prefill?.password != null) {
+            password = prefill.password;
+        } else {
+            const v = await promptForOptionalPassword();
+            if (v === null) return null;
+            password = v;
+        }
     }
 
-    connFields.logging = () =>
-        p.confirm({
-            message: 'Enable query logging?',
-            initialValue: existingConfig?.logging ?? false,
-        });
+    let storageMethod: 'keychain' | 'env' | undefined;
+    if (!isEditing && password) {
+        const v = await promptForStorageMethod();
+        if (v === null) return null;
+        storageMethod = v;
+    }
 
-    const connResult = await p.group(
-        connFields,
-        {
-            onCancel: () => {
-                p.cancel('Cancelled');
-                process.exit(0);
-            },
-        }
-    );
+    const logging = await promptForLogging(existingConfig?.logging);
+    if (logging === null) return null;
 
-    const connPassword = isEditing ? '' : (connResult.password as string || '');
-    let connStorageMethod: 'keychain' | 'env' | undefined;
-    if (!isEditing && connPassword) {
-        connStorageMethod = await p.select({
-            message: 'Where should the password be stored?',
-            options: [
-                { value: 'keychain', label: 'OS Keychain', hint: 'Recommended - encrypted by OS' },
-                { value: 'env', label: 'Environment file', hint: '~/.config/sherlock/.env' },
-            ],
-        }) as 'keychain' | 'env';
-        if (p.isCancel(connStorageMethod)) {
-            p.cancel('Cancelled');
-            process.exit(0);
-        }
+    let ssl: ConnectionConfig['ssl'];
+    if (prefill?.ssl !== undefined) {
+        ssl = prefill.ssl;
+    } else {
+        const v = await promptForSsl(existingConfig?.ssl);
+        if (v === null) return null;
+        ssl = v;
     }
 
     const directory = await promptForDirectory(existingConfig?.directory);
-    if (directory === null) {
-        p.cancel('Cancelled');
-        process.exit(0);
-    }
+    if (directory === null) return null;
 
     const config: ConnectionConfig = {
-        type: result.type as DbType,
-        host: connResult.host as string,
-        port: parseInt(connResult.port as string),
-        database: connResult.database as string,
-        username: connResult.username as string,
+        type,
+        host,
+        port,
+        database,
+        username,
         // When editing, preserve existing password config
         password: isEditing ? existingConfig!.password : '',
-        logging: connResult.logging as boolean,
+        logging,
     };
+    if (ssl) config.ssl = ssl;
+    if (directory) config.directory = directory;
 
-    if (directory) {
-        config.directory = directory;
+    return { name, config, password, storageMethod };
+}
+
+/**
+ * Ask whether to set up via connection string or manual entry. Returns parsed
+ * URL fields on success, or null when the user picked manual (or cancelled).
+ */
+async function promptForSetupMethod(): Promise<ParsedConnectionUrl | null> {
+    const method = await p.select({
+        message: 'How would you like to set up this connection?',
+        options: [
+            { value: 'paste', label: 'Paste a connection string', hint: 'fastest if you have one' },
+            { value: 'manual', label: 'Enter details manually' },
+        ],
+    });
+
+    if (p.isCancel(method) || method === 'manual') return null;
+    return await promptForConnectionUrl();
+}
+
+/**
+ * Prompt the user for a connection URL and parse it. Returns parsed fields, or
+ * null if the user cancelled or chose to skip (caller should fall through to
+ * manual entry).
+ */
+async function promptForConnectionUrl(): Promise<ParsedConnectionUrl | null> {
+    while (true) {
+        const raw = await p.password({
+            message: 'Paste connection string',
+        });
+
+        if (p.isCancel(raw)) return null;
+
+        const parsed = parseConnectionUrl(raw as string);
+        if (parsed) {
+            // Show what we extracted so the user can sanity-check before continuing
+            const lines: string[] = [];
+            if (parsed.type) lines.push(`type:     ${parsed.type}`);
+            if (parsed.host) lines.push(`host:     ${parsed.host}`);
+            if (parsed.port != null) lines.push(`port:     ${parsed.port}`);
+            if (parsed.database) lines.push(`database: ${parsed.database}`);
+            if (parsed.username) lines.push(`username: ${parsed.username}`);
+            if (parsed.password) lines.push(`password: ${'*'.repeat(Math.min(parsed.password.length, 8))}`);
+            if (parsed.ssl !== undefined) lines.push(`ssl:      ${sslHintLabel(parsed.ssl)}`);
+            p.note(lines.join('\n'), 'Parsed from URL');
+            return parsed;
+        }
+
+        const retry = await p.select({
+            message: 'Could not parse that as a connection string. What now?',
+            options: [
+                { value: 'retry', label: 'Try again' },
+                { value: 'manual', label: 'Enter details manually instead' },
+                { value: 'cancel', label: 'Cancel' },
+            ],
+        });
+
+        if (p.isCancel(retry) || retry === 'cancel') return null;
+        if (retry === 'manual') return null;
+        // 'retry' loops
     }
+}
 
-    return {
-        name: result.name as string,
-        config,
-        password: connPassword,
-        storageMethod: connStorageMethod,
-    };
+/** Map an existing ssl config back to one of the three TUI options */
+function sslConfigToChoice(ssl: ConnectionConfig['ssl']): 'off' | 'require' | 'verify' {
+    if (!ssl) return 'off';
+    if (ssl === true) return 'require';
+    return ssl.rejectUnauthorized === true ? 'verify' : 'require';
+}
+
+/** Short label describing the current SSL state, used as a menu hint */
+function sslHintLabel(ssl: ConnectionConfig['ssl']): string {
+    const choice = sslConfigToChoice(ssl);
+    if (choice === 'off') return 'disabled';
+    if (choice === 'verify') return 'enabled, verify cert';
+    return 'enabled, accept any cert';
+}
+
+/** Map the TUI choice back to a ConnectionConfig['ssl'] value */
+function sslChoiceToConfig(choice: 'off' | 'require' | 'verify'): ConnectionConfig['ssl'] {
+    if (choice === 'off') return undefined;
+    if (choice === 'require') return true;
+    return { rejectUnauthorized: true };
+}
+
+/**
+ * Prompt for SSL configuration. Returns the new ssl config (or undefined for off),
+ * or null if the user cancelled.
+ */
+async function promptForSsl(existingSsl?: ConnectionConfig['ssl']): Promise<ConnectionConfig['ssl'] | null> {
+    const choice = await p.select({
+        message: 'SSL/TLS',
+        initialValue: sslConfigToChoice(existingSsl),
+        options: [
+            { value: 'off', label: 'No SSL', hint: 'local development, plaintext' },
+            { value: 'require', label: 'Require SSL (accept any certificate)', hint: 'most managed databases' },
+            { value: 'verify', label: 'Require SSL + verify server certificate', hint: 'strict' },
+        ],
+    });
+
+    if (p.isCancel(choice)) return null;
+    return sslChoiceToConfig(choice as 'off' | 'require' | 'verify');
 }
 
 /**

@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.0] - 2026-05-21
+
+### Added
+
+- **SSL/TLS support** for managed databases (Northflank, Supabase, Neon, RDS, Azure SQL). New `ssl` field on connection configs; `true` to encrypt, `{ rejectUnauthorized: true }` to also verify the cert.
+- **Paste a connection string** in the setup wizard — sherlock parses host/port/user/password/database/ssl from the URL and only prompts for what's missing.
+- IPv6 hosts are now bracketed in built URLs.
+
 ## [1.3.0] - 2026-03-11
 
 ### Added
