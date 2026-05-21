@@ -11,9 +11,24 @@ export interface SqlAdapter {
     close(): void | Promise<void>;
 }
 
+/** Parse a "true"/"false" query param (case-insensitive). Returns undefined when absent. */
+function parseBoolParam(value: string | null): boolean | undefined {
+    if (value == null) return undefined;
+    const v = value.toLowerCase();
+    if (v === 'true' || v === '1') return true;
+    if (v === 'false' || v === '0') return false;
+    return undefined;
+}
+
 /** Parse an mssql:// URL into a mssql ConnectionConfig */
-function parseMssqlUrl(url: string): mssql.config {
+export function parseMssqlUrl(url: string): mssql.config {
     const parsed = new URL(url);
+    // Backwards-compatible defaults: no encryption, trust whatever cert is presented.
+    // SSL is opt-in via the ssl config (which sets encrypt/trustServerCertificate query params).
+    const encrypt = parseBoolParam(parsed.searchParams.get('encrypt')) ?? false;
+    const trustServerCertificate =
+        parseBoolParam(parsed.searchParams.get('trustServerCertificate')) ?? true;
+
     return {
         server: parsed.hostname,
         port: parsed.port ? parseInt(parsed.port, 10) : 1433,
@@ -21,8 +36,8 @@ function parseMssqlUrl(url: string): mssql.config {
         password: decodeURIComponent(parsed.password),
         database: parsed.pathname.replace(/^\//, ''),
         options: {
-            encrypt: false,
-            trustServerCertificate: true,
+            encrypt,
+            trustServerCertificate,
         },
     };
 }

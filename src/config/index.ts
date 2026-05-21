@@ -2,7 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { findConfigFile, getConfigDir, getEnvFilePath } from './paths';
 import { getCredentialResolver } from '../credentials';
-import type { SherlockConfig, ConnectionConfig, ResolvedConnectionConfig, CredentialRef } from './types';
+import type { SherlockConfig, ConnectionConfig, ResolvedConnectionConfig, CredentialRef, SslConfig } from './types';
 import { getEnvVarForConnection } from '../credentials/providers/env';
 import { DB_TYPES, DEFAULT_PORTS, detectDbTypeFromUrl, type DbType } from '../db-types';
 
@@ -135,27 +135,70 @@ export function getConnectionConfig(
     return config.connections[connectionName];
 }
 
+/** Normalized SSL settings (internal representation) */
+interface NormalizedSsl {
+    enabled: boolean;
+    /** Whether to verify the server certificate against system CAs */
+    verify: boolean;
+}
+
+/**
+ * Normalize the public ssl config (boolean | object | undefined) into a flat
+ * internal form. Keeps the per-driver URL building logic simple.
+ */
+export function normalizeSsl(ssl: ConnectionConfig['ssl']): NormalizedSsl {
+    if (ssl === true) return { enabled: true, verify: false };
+    if (ssl === false || ssl == null) return { enabled: false, verify: false };
+    // Object form: rejectUnauthorized defaults to false ("encrypt but don't verify")
+    return { enabled: true, verify: ssl.rejectUnauthorized === true };
+}
+
+/**
+ * Build the SSL query-string fragment for a given driver. Returns a string
+ * that can be appended to a URL after `?`, or an empty string when no SSL.
+ */
+function buildSslQuery(type: DbType, ssl: NormalizedSsl): string {
+    if (!ssl.enabled) return '';
+
+    if (type === DB_TYPES.POSTGRES) {
+        return ssl.verify ? 'sslmode=verify-full' : 'sslmode=require';
+    }
+    if (type === DB_TYPES.MYSQL) {
+        return ssl.verify ? 'ssl-mode=VERIFY_IDENTITY' : 'ssl-mode=REQUIRED';
+    }
+    if (type === DB_TYPES.MSSQL) {
+        // trustServerCertificate=true means "do not verify"
+        return ssl.verify
+            ? 'encrypt=true&trustServerCertificate=false'
+            : 'encrypt=true&trustServerCertificate=true';
+    }
+    return '';
+}
+
 /**
  * Build a connection URL from individual config parameters
  */
-function buildConnectionUrl(
+export function buildConnectionUrl(
     type: DbType,
     host: string,
     port: number | undefined,
     username: string,
     password: string,
-    database: string
+    database: string,
+    ssl: NormalizedSsl
 ): string {
     const encodedPassword = encodeURIComponent(password);
     const encodedUsername = encodeURIComponent(username);
     const defaultPort = DEFAULT_PORTS[type];
+    const sslQuery = buildSslQuery(type, ssl);
+    const suffix = sslQuery ? `?${sslQuery}` : '';
 
     if (type === DB_TYPES.POSTGRES) {
-        return `postgres://${encodedUsername}:${encodedPassword}@${host}:${port || defaultPort}/${database}`;
+        return `postgres://${encodedUsername}:${encodedPassword}@${host}:${port || defaultPort}/${database}${suffix}`;
     } else if (type === DB_TYPES.MYSQL) {
-        return `mysql://${encodedUsername}:${encodedPassword}@${host}:${port || defaultPort}/${database}`;
+        return `mysql://${encodedUsername}:${encodedPassword}@${host}:${port || defaultPort}/${database}${suffix}`;
     } else if (type === DB_TYPES.MSSQL) {
-        return `mssql://${encodedUsername}:${encodedPassword}@${host}:${port || defaultPort}/${database}`;
+        return `mssql://${encodedUsername}:${encodedPassword}@${host}:${port || defaultPort}/${database}${suffix}`;
     }
 
     throw new Error(`Unsupported database type: ${type}`);
@@ -192,12 +235,14 @@ export async function resolveConnection(
             getEnvVarForConnection(connectionName, 'PASSWORD');
         const port = config.port || DEFAULT_PORTS[DB_TYPES.REDIS];
         const database = config.database || '0';
+        const ssl = normalizeSsl(config.ssl);
+        const protocol = ssl.enabled ? 'rediss' : 'redis';
 
         let url: string;
         if (password) {
-            url = `redis://:${encodeURIComponent(password)}@${host}:${port}/${database}`;
+            url = `${protocol}://:${encodeURIComponent(password)}@${host}:${port}/${database}`;
         } else {
-            url = `redis://${host}:${port}/${database}`;
+            url = `${protocol}://${host}:${port}/${database}`;
         }
 
         return { type: DB_TYPES.REDIS, url };
@@ -259,7 +304,8 @@ export async function resolveConnection(
         );
     }
 
-    const url = buildConnectionUrl(type, host, port, username, password, database);
+    const ssl = normalizeSsl(config.ssl);
+    const url = buildConnectionUrl(type, host, port, username, password, database, ssl);
 
     return { type, url };
 }

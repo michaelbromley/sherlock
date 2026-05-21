@@ -181,7 +181,8 @@ async function listConnectionsDisplay(): Promise<void> {
         }
         const host = typeof conn.host === 'string' ? conn.host : '';
         const database = conn.database || '';
-        return `${name} (${type}) ${host}${database ? ' - ' + database : ''}`;
+        const sslTag = conn.ssl ? ' [ssl]' : '';
+        return `${name} (${type})${sslTag} ${host}${database ? ' - ' + database : ''}`;
     });
 
     p.note(lines.join('\n'), 'Configured Connections');
@@ -492,15 +493,23 @@ async function editConnectionWizard(): Promise<void> {
 
     const loggingStatus = existingConn.logging ? 'enabled' : 'disabled';
     const directoryHint = existingConn.directory || 'not set';
+    const sslHint = sslHintLabel(existingConn.ssl);
+    const isSqlite = existingConn.type === DB_TYPES.SQLITE;
+    type EditAction = 'edit' | 'password' | 'directory' | 'logging' | 'ssl' | 'delete';
+    const editOptions: Array<{ value: EditAction; label: string; hint?: string }> = [
+        { value: 'edit', label: 'Edit connection details' },
+        { value: 'password', label: 'Update password' },
+        { value: 'directory', label: 'Set project directory', hint: directoryHint },
+        { value: 'logging', label: 'Toggle query logging', hint: `Currently ${loggingStatus}` },
+    ];
+    if (!isSqlite) {
+        editOptions.push({ value: 'ssl', label: 'Configure SSL/TLS', hint: sslHint });
+    }
+    editOptions.push({ value: 'delete', label: 'Delete connection', hint: 'Cannot be undone' });
+
     const action = await p.select({
         message: `What would you like to do with "${connName}"?`,
-        options: [
-            { value: 'edit', label: 'Edit connection details' },
-            { value: 'password', label: 'Update password' },
-            { value: 'directory', label: 'Set project directory', hint: directoryHint },
-            { value: 'logging', label: 'Toggle query logging', hint: `Currently ${loggingStatus}` },
-            { value: 'delete', label: 'Delete connection', hint: 'Cannot be undone' },
-        ],
+        options: editOptions,
     });
 
     if (p.isCancel(action)) return;
@@ -550,6 +559,19 @@ async function editConnectionWizard(): Promise<void> {
         saveConfig(config);
         const status = newLogging ? 'enabled' : 'disabled';
         p.log.success(`Query logging ${status} for "${connName}".`);
+        return;
+    }
+
+    if (action === 'ssl') {
+        const newSsl = await promptForSsl(existingConn.ssl);
+        if (newSsl === null) return;
+        if (newSsl === undefined) {
+            delete config.connections[connName].ssl;
+        } else {
+            config.connections[connName].ssl = newSsl;
+        }
+        saveConfig(config);
+        p.log.success(`SSL set to "${sslHintLabel(newSsl)}" for "${connName}".`);
         return;
     }
 
@@ -732,6 +754,12 @@ async function promptForConnection(
             }
         }
 
+        const ssl = await promptForSsl(existingConfig?.ssl);
+        if (ssl === null) {
+            p.cancel('Cancelled');
+            process.exit(0);
+        }
+
         const directory = await promptForDirectory(existingConfig?.directory);
         if (directory === null) {
             p.cancel('Cancelled');
@@ -746,6 +774,9 @@ async function promptForConnection(
             password: isEditing ? existingConfig!.password : '',
         };
 
+        if (ssl) {
+            config.ssl = ssl;
+        }
         if (directory) {
             config.directory = directory;
         }
@@ -878,6 +909,12 @@ async function promptForConnection(
         }
     }
 
+    const ssl = await promptForSsl(existingConfig?.ssl);
+    if (ssl === null) {
+        p.cancel('Cancelled');
+        process.exit(0);
+    }
+
     const directory = await promptForDirectory(existingConfig?.directory);
     if (directory === null) {
         p.cancel('Cancelled');
@@ -895,6 +932,9 @@ async function promptForConnection(
         logging: connResult.logging as boolean,
     };
 
+    if (ssl) {
+        config.ssl = ssl;
+    }
     if (directory) {
         config.directory = directory;
     }
@@ -905,6 +945,47 @@ async function promptForConnection(
         password: connPassword,
         storageMethod: connStorageMethod,
     };
+}
+
+/** Map an existing ssl config back to one of the three TUI options */
+function sslConfigToChoice(ssl: ConnectionConfig['ssl']): 'off' | 'require' | 'verify' {
+    if (!ssl) return 'off';
+    if (ssl === true) return 'require';
+    return ssl.rejectUnauthorized === true ? 'verify' : 'require';
+}
+
+/** Short label describing the current SSL state, used as a menu hint */
+function sslHintLabel(ssl: ConnectionConfig['ssl']): string {
+    const choice = sslConfigToChoice(ssl);
+    if (choice === 'off') return 'disabled';
+    if (choice === 'verify') return 'enabled, verify cert';
+    return 'enabled, accept any cert';
+}
+
+/** Map the TUI choice back to a ConnectionConfig['ssl'] value */
+function sslChoiceToConfig(choice: 'off' | 'require' | 'verify'): ConnectionConfig['ssl'] {
+    if (choice === 'off') return undefined;
+    if (choice === 'require') return true;
+    return { rejectUnauthorized: true };
+}
+
+/**
+ * Prompt for SSL configuration. Returns the new ssl config (or undefined for off),
+ * or null if the user cancelled.
+ */
+async function promptForSsl(existingSsl?: ConnectionConfig['ssl']): Promise<ConnectionConfig['ssl'] | null> {
+    const choice = await p.select({
+        message: 'SSL/TLS',
+        initialValue: sslConfigToChoice(existingSsl),
+        options: [
+            { value: 'off', label: 'No SSL', hint: 'local development, plaintext' },
+            { value: 'require', label: 'Require SSL (accept any certificate)', hint: 'most managed databases' },
+            { value: 'verify', label: 'Require SSL + verify server certificate', hint: 'strict' },
+        ],
+    });
+
+    if (p.isCancel(choice)) return null;
+    return sslChoiceToConfig(choice as 'off' | 'require' | 'verify');
 }
 
 /**

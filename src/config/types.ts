@@ -35,6 +35,25 @@ export interface ConnectionConfig {
 
     /** Enable query logging for this connection (default: false) */
     logging?: boolean;
+
+    /**
+     * SSL/TLS configuration.
+     * - `false` or omitted: no SSL (default)
+     * - `true`: require SSL, do not verify server certificate
+     *   (the common case for managed databases like Northflank, Supabase, Neon, RDS)
+     * - `{ rejectUnauthorized: true }`: require SSL and verify against system CAs
+     */
+    ssl?: boolean | SslConfig;
+}
+
+/** SSL/TLS connection options */
+export interface SslConfig {
+    /**
+     * Whether to verify the server certificate against system CAs.
+     * - `false` (default when ssl is enabled): encrypt only, do not verify
+     * - `true`: full verification (postgres `verify-full`, mysql `VERIFY_IDENTITY`, mssql trustServerCertificate=false)
+     */
+    rejectUnauthorized?: boolean;
 }
 
 /**
