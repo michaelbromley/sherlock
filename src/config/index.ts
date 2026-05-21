@@ -176,6 +176,110 @@ function buildSslQuery(type: DbType, ssl: NormalizedSsl): string {
 }
 
 /**
+ * Result of parsing a connection string. Each field is optional —
+ * the TUI uses presence to decide which prompts to skip.
+ */
+export interface ParsedConnectionUrl {
+    type?: DbType;
+    host?: string;
+    port?: number;
+    username?: string;
+    password?: string;
+    database?: string;
+    ssl?: ConnectionConfig['ssl'];
+}
+
+/**
+ * Parse postgres SSL query params into our ssl config form.
+ * sslmode values: disable, allow, prefer, require, verify-ca, verify-full
+ */
+function parsePostgresSsl(params: URLSearchParams): ConnectionConfig['ssl'] | undefined {
+    const mode = params.get('sslmode')?.toLowerCase();
+    if (!mode) return undefined;
+    if (mode === 'disable') return false;
+    if (mode === 'verify-ca' || mode === 'verify-full') return { rejectUnauthorized: true };
+    // require / prefer / allow → encrypt without verification
+    return true;
+}
+
+/**
+ * Parse MySQL SSL query params. ssl-mode values: DISABLED, PREFERRED,
+ * REQUIRED, VERIFY_CA, VERIFY_IDENTITY (case-insensitive).
+ */
+function parseMysqlSsl(params: URLSearchParams): ConnectionConfig['ssl'] | undefined {
+    const mode = params.get('ssl-mode')?.toUpperCase() ?? params.get('sslmode')?.toUpperCase();
+    if (!mode) return undefined;
+    if (mode === 'DISABLED') return false;
+    if (mode === 'VERIFY_CA' || mode === 'VERIFY_IDENTITY') return { rejectUnauthorized: true };
+    return true;
+}
+
+/**
+ * Parse MSSQL SSL query params: encrypt + trustServerCertificate booleans.
+ */
+function parseMssqlSslParams(params: URLSearchParams): ConnectionConfig['ssl'] | undefined {
+    const encryptStr = params.get('encrypt');
+    if (encryptStr == null) return undefined;
+    const encrypt = encryptStr.toLowerCase() === 'true' || encryptStr === '1';
+    if (!encrypt) return false;
+    const trust = params.get('trustServerCertificate')?.toLowerCase();
+    // trustServerCertificate=false means "verify the cert"
+    if (trust === 'false' || trust === '0') return { rejectUnauthorized: true };
+    return true;
+}
+
+/**
+ * Parse a connection string into individual config fields. Returns each piece
+ * as optional so callers can tell what was present in the URL vs what still
+ * needs to be prompted for. Returns null if the string isn't a parseable URL
+ * or doesn't have a recognised database scheme.
+ */
+export function parseConnectionUrl(rawUrl: string): ParsedConnectionUrl | null {
+    const url = rawUrl.trim();
+    if (!url) return null;
+
+    const type = detectDbTypeFromUrl(url);
+    if (type == null) return null;
+
+    let parsed: URL;
+    try {
+        parsed = new URL(url);
+    } catch {
+        return null;
+    }
+
+    // SQLite is just a path, not really a URL with creds/host.
+    if (type === DB_TYPES.SQLITE) {
+        const filename = parsed.pathname.replace(/^\//, '') || (url === ':memory:' ? ':memory:' : '');
+        return {
+            type,
+            database: filename || undefined,
+        };
+    }
+
+    const result: ParsedConnectionUrl = { type };
+
+    if (parsed.hostname) result.host = parsed.hostname;
+    if (parsed.port) result.port = parseInt(parsed.port, 10);
+    if (parsed.username) result.username = decodeURIComponent(parsed.username);
+    if (parsed.password) result.password = decodeURIComponent(parsed.password);
+
+    const dbPath = parsed.pathname.replace(/^\//, '');
+    if (dbPath) result.database = decodeURIComponent(dbPath);
+
+    // SSL detection — per-driver, plus the rediss:// scheme shortcut
+    let ssl: ConnectionConfig['ssl'] | undefined;
+    if (type === DB_TYPES.POSTGRES) ssl = parsePostgresSsl(parsed.searchParams);
+    else if (type === DB_TYPES.MYSQL) ssl = parseMysqlSsl(parsed.searchParams);
+    else if (type === DB_TYPES.MSSQL) ssl = parseMssqlSslParams(parsed.searchParams);
+    else if (type === DB_TYPES.REDIS && url.startsWith('rediss://')) ssl = true;
+
+    if (ssl !== undefined) result.ssl = ssl;
+
+    return result;
+}
+
+/**
  * Build a connection URL from individual config parameters
  */
 export function buildConnectionUrl(
