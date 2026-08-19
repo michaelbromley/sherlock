@@ -14,6 +14,7 @@ import * as p from '@clack/prompts';
 import { listConnections, getConnectionConfig, detectConnectionFromCwd } from './config';
 import { DB_TYPES, isRedisConfig, detectDbTypeFromUrl, type DbType } from './db-types';
 import type { ResolvedConnectionConfig } from './config/types';
+import type { ConnectionAddOptions } from './config/connection-input';
 
 // Credentials
 import {
@@ -92,12 +93,38 @@ const MAX_SAMPLE_LIMIT = 1000;
 // Helpers
 // ============================================================================
 
+/** Print every configured connection name as JSON */
+function listConnectionsAction(configPath?: string): void {
+    try {
+        console.log(JSON.stringify({ connections: listConnections(configPath) }, null, 2));
+    } catch (error: unknown) {
+        console.error(JSON.stringify({ error: getErrorMessage(error) }));
+        process.exit(1);
+    }
+}
+
 /** Get error message from unknown error */
 function getErrorMessage(error: unknown): string {
     if (error instanceof Error) {
         return error.message;
     }
     return String(error);
+}
+
+/**
+ * Read a password from stdin, for non-interactive setup.
+ *
+ * Passwords are taken this way rather than as a flag so they never reach the
+ * process list or the shell history. A trailing newline from `echo` or a heredoc
+ * is stripped; anything else is passed through unchanged.
+ */
+async function readPasswordFromStdin(): Promise<string | null> {
+    const chunks: Buffer[] = [];
+    for await (const chunk of process.stdin) {
+        chunks.push(Buffer.from(chunk));
+    }
+    const value = Buffer.concat(chunks).toString('utf-8').replace(/\r?\n$/, '');
+    return value.length > 0 ? value : null;
 }
 
 /** Prompt for password input (hidden) */
@@ -573,20 +600,12 @@ function setupCLI() {
     // Connection Management Commands
     // ========================================================================
 
-    // Connections list command (hidden — use `manage` instead)
+    // Hidden: `connection list` is the documented spelling, but scripts and
+    // older docs use `connections`.
     program
         .command('connections', { hidden: true })
         .description('List all configured connections')
-        .action(() => {
-            const opts = program.opts();
-            try {
-                const connections = listConnections(opts.config);
-                console.log(JSON.stringify({ connections }, null, 2));
-            } catch (error: unknown) {
-                console.error(JSON.stringify({ error: getErrorMessage(error) }));
-                process.exit(1);
-            }
-        });
+        .action(() => listConnectionsAction(program.opts().config));
 
     // Test connection command (hidden — use `manage` instead)
     program
@@ -612,6 +631,94 @@ function setupCLI() {
             } catch (error: unknown) {
                 console.error(`\x1b[31m✗ Connection "${connectionName}" failed\x1b[0m`);
                 console.error(`  Error: ${getErrorMessage(error)}`);
+                process.exit(1);
+            }
+        });
+
+    // ========================================================================
+    // Connection Setup Commands
+    // ========================================================================
+
+    const connection = program
+        .command('connection')
+        .description('Add and inspect connections without the interactive wizard');
+
+    connection
+        .command('list')
+        .description('List all configured connections')
+        .action(() => listConnectionsAction(program.opts().config));
+
+    connection
+        .command('add <name>')
+        .description('Add a connection non-interactively')
+        .option('--from-url <url>', 'take host, port, user and database from a connection URL')
+        .option('--type <type>', 'postgres, mysql, mssql, sqlite or redis')
+        .option('--host <host>', 'database host')
+        .option('--port <port>', 'database port')
+        .option('--username <user>', 'database user')
+        .option('--database <name>', 'database name, or file path for sqlite')
+        .option('--ssl <mode>', 'off, require, or verify')
+        .option('--logging', 'record queries for this connection')
+        .option('--directory <path>', 'auto-select this connection when inside this directory')
+        .option('--password-stdin', 'read the password from stdin and store it in the OS keychain')
+        .option('--password-env <var>', 'read the password from this environment variable at query time')
+        .option('--tunnel-command <cmd>', 'port-forwarding command; use {{port}} where it takes a local port')
+        .option('--tunnel-northflank <project/addon>', 'shorthand for a northflank addon tunnel')
+        .option('--tunnel-local-port <port>', 'fixed local port, when the command cannot be told one')
+        .option('--tunnel-endpoint-pattern <regex>', 'read the endpoint from the command output')
+        .option('--tunnel-idle-timeout <duration>', 'shut the tunnel down after this long unused')
+        .option('--tunnel-ready-timeout <duration>', 'how long to wait for the tunnel to accept')
+        .option('--force', 'replace an existing connection of the same name')
+        .action(async (name: string, cmdOpts: ConnectionAddOptions & { force?: boolean }) => {
+            const { buildConnectionConfig } = await import('./config/connection-input');
+            const { addConnection, connectionExists } = await import('./config/write');
+
+            // -u/--url is a global option meaning "connect to this URL now", so
+            // it never reaches this command. Say so rather than reporting the
+            // missing details it would have supplied.
+            if (program.opts().url) {
+                console.error(
+                    'Error: use --from-url to build a connection from a URL. ' +
+                    '-u/--url connects to a URL without saving it.'
+                );
+                process.exit(1);
+            }
+
+            try {
+                const config = buildConnectionConfig(name, cmdOpts);
+
+                // Refuse a duplicate before storing the secret. Writing the
+                // keychain entry first would replace the existing connection's
+                // password and then abandon it, leaving that connection
+                // pointing at credentials that no longer work.
+                if (connectionExists(name) && !cmdOpts.force) {
+                    throw new Error(
+                        `Connection "${name}" already exists. Pass --force to replace it.`
+                    );
+                }
+
+                if (cmdOpts.passwordStdin) {
+                    const password = await readPasswordFromStdin();
+                    if (password === null) {
+                        console.error('Error: --password-stdin was given but stdin was empty.');
+                        process.exit(1);
+                    }
+                    setKeychainPassword(name, password);
+                }
+
+                const { replaced, path: configPath } = addConnection(name, config, {
+                    force: cmdOpts.force,
+                });
+
+                console.log(JSON.stringify({
+                    connection: name,
+                    action: replaced ? 'replaced' : 'added',
+                    config: configPath,
+                    tunnel: config.tunnel ? config.tunnel.command : null,
+                    next: `sherlock -c ${name} tables`,
+                }, null, 2));
+            } catch (error: unknown) {
+                console.error(`Error: ${getErrorMessage(error)}`);
                 process.exit(1);
             }
         });

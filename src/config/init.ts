@@ -1,3 +1,4 @@
+import { CONFIG_VERSION } from './write';
 /**
  * Config initialization and migration utilities
  * Extracted from query-db.ts so both CLI commands and TUI can use them.
@@ -33,7 +34,7 @@ export async function initConfig(): Promise<void> {
     }
 
     const exampleConfig = {
-        version: '2.0',
+        version: CONFIG_VERSION,
         connections: {
             'myapp-prod': {
                 type: DB_TYPES.POSTGRES,
@@ -142,7 +143,7 @@ export async function migrateConfig(fromPath: string): Promise<void> {
     }
 
     const newConfig = {
-        version: '2.0',
+        version: CONFIG_VERSION,
         connections: newConnections,
     };
 

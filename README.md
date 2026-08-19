@@ -46,6 +46,18 @@ The interactive wizard offers two ways to add a connection:
 
 After the details, you'll choose secure password storage (OS keychain or env file).
 
+#### Without the wizard
+
+`sherlock connection add` sets up a connection in one command, for scripting or for asking Claude to do it. The password is read from stdin and stored in the OS keychain, so it never appears in the process list or the shell history.
+
+```bash
+printf '%s' "$PASSWORD" | sherlock connection add prod \
+  --type postgres --host db.example.com --database app --username dbuser \
+  --password-stdin --ssl require
+```
+
+`--from-url postgres://dbuser@host:5432/app` replaces the individual flags. `--password-env VAR` stores a reference to an environment variable instead of a keychain entry. `--tunnel-command`, `--tunnel-northflank` and the other tunnel flags are covered under [Tunnels](#tunnels). Run `sherlock connection add --help` for the full list.
+
 ### 3. Use with Claude Code
 
 Once configured, just ask Claude Code questions about your data:
@@ -237,7 +249,23 @@ Sherlock detects this failure and lists these three options in the error.
 
 The connection's `host` and `port` are replaced by the tunnel's local endpoint, so they can be left out or left pointing at the real remote address, whichever documents the connection better.
 
-Use "Configure tunnel" in the `sherlock manage` edit menu to set this up without hand-editing the config.
+The `sherlock manage` wizard asks whether a connection needs a tunnel when you add one, and "Configure tunnel" in the edit menu changes it later.
+
+To set one up in a single command, `sherlock connection add` takes the same settings as flags:
+
+```bash
+# northflank, which needs no port because it announces its own
+printf '%s' "$PASSWORD" | sherlock connection add vcloud-dev \
+  --type postgres --database app --username dbuser --password-stdin --ssl require \
+  --tunnel-northflank my-project/my-addon
+
+# anything that takes a port
+printf '%s' "$PASSWORD" | sherlock connection add bastion \
+  --type postgres --host db.internal --database app --username dbuser --password-stdin \
+  --tunnel-command 'ssh -N -L {{port}}:db.internal:5432 bastion.example.com'
+```
+
+`--tunnel-northflank <project>/<addon>` expands to the full `northflank forward ... --skipHostnames` command along with the pattern that reads the port back out of that command's output, so neither has to be typed by hand. `--tunnel-local-port`, `--tunnel-endpoint-pattern`, `--tunnel-idle-timeout` and `--tunnel-ready-timeout` map to the config fields above. The tunnel settings are validated as the connection is written, so a bad command or duration fails there rather than on the first query.
 
 Manage running tunnels with:
 

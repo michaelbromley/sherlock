@@ -85,11 +85,20 @@ function setPasswordViaSecurity(service: string, account: string, password: stri
         // Ignore - entry might not exist
     }
 
-    // Add new entry with -A flag to allow any app access (avoids repeated prompts)
-    // Password is properly escaped with single quotes
+    // `security` asks for the password twice when -w is given no value, and
+    // reads both from stdin. Passing it as an argument instead would put the
+    // password in the process list, where any local user can read it.
+    if (password.includes('\n')) {
+        throw new Error(
+            'Passwords containing a newline cannot be stored in the macOS keychain by sherlock.'
+        );
+    }
+
+    // -A allows any app to read the entry, which avoids a keychain prompt on
+    // every query from a differently-signed binary.
     execSync(
-        `security add-generic-password -s ${shellEscape(service)} -a ${shellEscape(account)} -w ${shellEscape(password)} -A`,
-        { stdio: ['pipe', 'pipe', 'pipe'] }
+        `security add-generic-password -s ${shellEscape(service)} -a ${shellEscape(account)} -A -w`,
+        { input: `${password}\n${password}\n`, stdio: ['pipe', 'pipe', 'pipe'] }
     );
 }
 

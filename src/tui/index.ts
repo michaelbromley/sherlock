@@ -31,6 +31,7 @@ import {
     deleteKeychainPassword,
 } from '../credentials/providers/keychain';
 import { initConfig, migrateConfig } from '../config/init';
+import { saveConfig } from '../config/write';
 
 // ============================================================================
 // Connection Manager Menu (main entry point)
@@ -959,6 +960,9 @@ async function promptForConnection(
         const directory = await promptForDirectory(existingConfig?.directory);
         if (directory === null) return null;
 
+        const tunnel = await resolveTunnelForConnection(isEditing, existingConfig);
+        if (tunnel === CANCELLED) return null;
+
         const config: ConnectionConfig = {
             type: DB_TYPES.REDIS,
             host,
@@ -968,6 +972,7 @@ async function promptForConnection(
         };
         if (ssl) config.ssl = ssl;
         if (directory) config.directory = directory;
+        if (tunnel) config.tunnel = tunnel;
 
         return { name, config, password, storageMethod };
     }
@@ -1043,6 +1048,9 @@ async function promptForConnection(
     const directory = await promptForDirectory(existingConfig?.directory);
     if (directory === null) return null;
 
+    const tunnel = await resolveTunnelForConnection(isEditing, existingConfig);
+    if (tunnel === CANCELLED) return null;
+
     const config: ConnectionConfig = {
         type,
         host,
@@ -1055,6 +1063,7 @@ async function promptForConnection(
     };
     if (ssl) config.ssl = ssl;
     if (directory) config.directory = directory;
+    if (tunnel) config.tunnel = tunnel;
 
     return { name, config, password, storageMethod };
 }
@@ -1167,6 +1176,46 @@ export function tunnelHintLabel(tunnel: ConnectionConfig['tunnel']): string {
     if (tunnel.localPort) port = `port ${tunnel.localPort}`;
     else if (tunnel.endpointPattern) port = 'port from output';
     return `${port}, idle ${tunnel.idleTimeout ?? DEFAULT_IDLE_TIMEOUT}`;
+}
+
+/**
+ * Returned when the user backs out of a prompt whose normal answers already
+ * include `undefined`, so "cancelled" stays distinct from "no tunnel".
+ */
+const CANCELLED = Symbol('cancelled');
+
+/**
+ * Decide the tunnel for a connection being added or edited.
+ *
+ * Editing has its own "Configure tunnel" menu entry, so editing only carries
+ * the existing value through. Carrying it through is what matters: the caller
+ * rebuilds the connection config from the answers it collected, and would
+ * otherwise drop the tunnel of any connection edited for another reason.
+ */
+async function resolveTunnelForConnection(
+    isEditing: boolean,
+    existingConfig?: ConnectionConfig
+): Promise<ConnectionConfig['tunnel'] | typeof CANCELLED> {
+    return isEditing ? existingConfig?.tunnel : promptForOptionalTunnel();
+}
+
+/**
+ * Offer a tunnel while adding a connection. Most databases do not need one, so
+ * this asks a yes/no question first rather than making everyone walk through
+ * the tunnel prompts.
+ */
+async function promptForOptionalTunnel(): Promise<
+    ConnectionConfig['tunnel'] | typeof CANCELLED
+> {
+    const wanted = await p.confirm({
+        message: 'Does this database need a tunnel to reach it?',
+        initialValue: false,
+    });
+    if (p.isCancel(wanted)) return CANCELLED;
+    if (!wanted) return undefined;
+
+    const tunnel = await promptForTunnel();
+    return tunnel === null ? CANCELLED : tunnel;
 }
 
 /**
@@ -1388,9 +1437,4 @@ async function saveToEnvFile(key: string, value: string): Promise<void> {
 /**
  * Save config to file
  */
-function saveConfig(config: SherlockConfig): void {
-    ensureConfigDir();
-    const configPath = path.join(getConfigDir(), 'config.json');
-    fs.writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf-8');
-    fs.chmodSync(configPath, 0o600);
-}
+
