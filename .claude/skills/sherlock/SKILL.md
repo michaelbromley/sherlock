@@ -60,6 +60,20 @@ sherlock -c <conn> slowlog -n 20        # Last 20 slow log entries
 sherlock -c <conn> command GET mykey    # Execute any read-only Redis command
 ```
 
+## Tunnelled Connections
+
+Some connections reach the database through a port-forwarding process (Northflank, kubectl, ssh). Sherlock starts that tunnel automatically on the first query and reuses it for later commands — no action needed to open one.
+
+```bash
+sherlock tunnel status                  # Show running tunnels
+sherlock tunnel stop <conn>             # Stop one tunnel
+sherlock tunnel stop                    # Stop all tunnels
+```
+
+**Stop the tunnel when you have finished with a database.** It costs nothing to leave running and it shuts itself down after an idle period anyway, but stopping it promptly frees the connection and the local port.
+
+If a tunnel fails to start, the error includes the forwarding command's own output — read it before retrying, since the usual causes are a missing CLI, an expired login, or a command that needs `sudo` (which cannot work, as the tunnel runs with no terminal; the error explains the alternatives).
+
 ## Constraints
 
 - **Read-only**: SQL allows SELECT, SHOW, DESCRIBE, EXPLAIN, WITH only. Redis allows read commands only (GET, HGETALL, SCAN, etc.) — mutations (SET, DEL, HSET, etc.) are blocked.

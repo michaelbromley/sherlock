@@ -1,4 +1,5 @@
 import type { DbType } from '../db-types';
+import type { TunnelConfig } from '../tunnel/types';
 
 /**
  * Credential reference types for secure credential resolution
@@ -35,6 +36,17 @@ export interface ConnectionConfig {
 
     /** Enable query logging for this connection (default: false) */
     logging?: boolean;
+
+    /**
+     * Port-forwarding process to run before connecting, for databases that are
+     * only reachable through a tunnel. When set, the connection's host and port
+     * are replaced with the tunnel's local endpoint.
+     *
+     * Because this executes a shell command, it is honoured only from a config
+     * the user chose deliberately — never from a project-local `.sherlock.json`
+     * picked up out of the current directory.
+     */
+    tunnel?: TunnelConfig;
 
     /**
      * SSL/TLS configuration.

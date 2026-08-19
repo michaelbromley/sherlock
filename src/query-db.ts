@@ -617,6 +617,53 @@ function setupCLI() {
         });
 
     // ========================================================================
+    // Tunnel Commands
+    // ========================================================================
+
+    const tunnel = program
+        .command('tunnel')
+        .description('Inspect and stop background tunnels');
+
+    tunnel
+        .command('status')
+        .description('Show running tunnels')
+        .action(async () => {
+            const { listTunnels } = await import('./tunnel/manager');
+            const tunnels = await listTunnels();
+            console.log(JSON.stringify({ tunnels }, null, 2));
+        });
+
+    tunnel
+        .command('stop [connectionName]')
+        .description('Stop a tunnel, or all tunnels when no name is given')
+        .action(async (connectionName: string | undefined) => {
+            const { stopTunnel, stopAllTunnels } = await import('./tunnel/manager');
+            const results = connectionName
+                ? [await stopTunnel(connectionName)]
+                : await stopAllTunnels();
+
+            if (results.length === 0) {
+                console.log(JSON.stringify({ stopped: [], message: 'No tunnels running' }, null, 2));
+                return;
+            }
+            console.log(JSON.stringify({ stopped: results }, null, 2));
+        });
+
+    // Hidden: this is how sherlock re-invokes itself as a tunnel supervisor.
+    // Config path comes from the global --config, which commander parses even
+    // when it appears after the subcommand.
+    tunnel
+        .command('__supervise', { hidden: true })
+        .description('Run as a tunnel supervisor process (internal)')
+        .requiredOption('--name <name>', 'connection name to supervise')
+        .action(async (cmdOpts: { name: string }) => {
+            const opts = program.opts();
+            const { runSupervisor } = await import('./tunnel/supervisor');
+            const code = await runSupervisor(cmdOpts.name, opts.config);
+            process.exit(code);
+        });
+
+    // ========================================================================
     // Config Commands
     // ========================================================================
 
