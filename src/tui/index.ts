@@ -960,12 +960,7 @@ async function promptForConnection(
         const directory = await promptForDirectory(existingConfig?.directory);
         if (directory === null) return null;
 
-        // Editing has its own "Configure tunnel" menu entry, so this only asks
-        // when adding. Carrying the existing value through matters either way:
-        // the config below is rebuilt from scratch and would otherwise drop it.
-        const tunnel = isEditing
-            ? existingConfig?.tunnel
-            : await promptForOptionalTunnel();
+        const tunnel = await resolveTunnelForConnection(isEditing, existingConfig);
         if (tunnel === CANCELLED) return null;
 
         const config: ConnectionConfig = {
@@ -1053,13 +1048,8 @@ async function promptForConnection(
     const directory = await promptForDirectory(existingConfig?.directory);
     if (directory === null) return null;
 
-        // Editing has its own "Configure tunnel" menu entry, so this only asks
-        // when adding. Carrying the existing value through matters either way:
-        // the config below is rebuilt from scratch and would otherwise drop it.
-        const tunnel = isEditing
-            ? existingConfig?.tunnel
-            : await promptForOptionalTunnel();
-        if (tunnel === CANCELLED) return null;
+    const tunnel = await resolveTunnelForConnection(isEditing, existingConfig);
+    if (tunnel === CANCELLED) return null;
 
     const config: ConnectionConfig = {
         type,
@@ -1193,6 +1183,21 @@ export function tunnelHintLabel(tunnel: ConnectionConfig['tunnel']): string {
  * include `undefined`, so "cancelled" stays distinct from "no tunnel".
  */
 const CANCELLED = Symbol('cancelled');
+
+/**
+ * Decide the tunnel for a connection being added or edited.
+ *
+ * Editing has its own "Configure tunnel" menu entry, so editing only carries
+ * the existing value through. Carrying it through is what matters: the caller
+ * rebuilds the connection config from the answers it collected, and would
+ * otherwise drop the tunnel of any connection edited for another reason.
+ */
+async function resolveTunnelForConnection(
+    isEditing: boolean,
+    existingConfig?: ConnectionConfig
+): Promise<ConnectionConfig['tunnel'] | typeof CANCELLED> {
+    return isEditing ? existingConfig?.tunnel : promptForOptionalTunnel();
+}
 
 /**
  * Offer a tunnel while adding a connection. Most databases do not need one, so

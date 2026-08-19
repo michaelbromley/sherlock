@@ -14,7 +14,7 @@ import type { TunnelConfig } from '../tunnel/types';
 
 /** Flags accepted by `sherlock connection add`, before any validation */
 export interface ConnectionAddOptions {
-    url?: string;
+    fromUrl?: string;
     type?: string;
     host?: string;
     port?: string;
@@ -130,17 +130,19 @@ const TUNNEL_LOCAL_HOST = '127.0.0.1';
  * `--password-env` produces an environment reference.
  */
 export function buildConnectionConfig(name: string, opts: ConnectionAddOptions): ConnectionConfig {
-    if (opts.url && (opts.host || opts.port || opts.username || opts.database)) {
-        throw new Error('--url cannot be combined with --host, --port, --username or --database.');
+    if (opts.fromUrl && (opts.host || opts.port || opts.username || opts.database)) {
+        throw new Error(
+            '--from-url cannot be combined with --host, --port, --username or --database.'
+        );
     }
     if (opts.passwordStdin && opts.passwordEnv) {
         throw new Error('--password-stdin and --password-env cannot both be given.');
     }
 
-    const fromUrl = opts.url ? parseConnectionUrl(opts.url) : null;
-    if (opts.url && !fromUrl) {
+    const fromUrl = opts.fromUrl ? parseConnectionUrl(opts.fromUrl) : null;
+    if (opts.fromUrl && !fromUrl) {
         throw new Error(
-            `Could not parse --url "${opts.url}". Expected a URL such as ` +
+            `Could not parse --from-url "${opts.fromUrl}". Expected a URL such as ` +
             `postgres://user@host:5432/db.`
         );
     }
@@ -151,10 +153,24 @@ export function buildConnectionConfig(name: string, opts: ConnectionAddOptions):
     if (tunnel && type === DB_TYPES.SQLITE) {
         throw new Error('SQLite is a local file and cannot use a tunnel.');
     }
-    // Surface a bad tunnel here rather than on the first query.
+    // Report a bad tunnel here rather than on the first query.
     if (tunnel) resolveTunnelConfig(name, tunnel);
 
     if (type === DB_TYPES.SQLITE) {
+        const ignored = [
+            opts.host !== undefined && '--host',
+            opts.port !== undefined && '--port',
+            opts.username !== undefined && '--username',
+            opts.ssl !== undefined && '--ssl',
+            opts.passwordStdin && '--password-stdin',
+            opts.passwordEnv !== undefined && '--password-env',
+        ].filter(Boolean);
+        if (ignored.length > 0) {
+            throw new Error(
+                `${ignored.join(', ')} cannot be used with --type sqlite, which is a local file.`
+            );
+        }
+
         const filename = opts.database ?? fromUrl?.database;
         if (!filename) {
             throw new Error('SQLite needs --database pointing at the database file.');
@@ -170,7 +186,7 @@ export function buildConnectionConfig(name: string, opts: ConnectionAddOptions):
     // only needs a placeholder when the user has not named the real remote.
     const host = opts.host ?? fromUrl?.host ?? (tunnel ? TUNNEL_LOCAL_HOST : undefined);
     if (!host) {
-        throw new Error('Missing --host. Give the database host, or pass --url.');
+        throw new Error('Missing --host. Give the database host, or pass --from-url.');
     }
     config.host = host;
 
@@ -182,13 +198,13 @@ export function buildConnectionConfig(name: string, opts: ConnectionAddOptions):
     } else {
         const database = opts.database ?? fromUrl?.database;
         if (!database) {
-            throw new Error('Missing --database. Give the database name, or pass --url.');
+            throw new Error('Missing --database. Give the database name, or pass --from-url.');
         }
         config.database = database;
 
         const username = opts.username ?? fromUrl?.username;
         if (!username) {
-            throw new Error('Missing --username. Give the database user, or pass --url.');
+            throw new Error('Missing --username. Give the database user, or pass --from-url.');
         }
         config.username = username;
     }
@@ -196,7 +212,9 @@ export function buildConnectionConfig(name: string, opts: ConnectionAddOptions):
     const password = buildPasswordRef(name, opts);
     if (password !== undefined) config.password = password;
 
-    const ssl = parseSsl(opts.ssl) ?? fromUrl?.ssl;
+    // An explicit --ssl always wins, including --ssl off, which parses to the
+    // same `undefined` the URL fallback would otherwise fill in.
+    const ssl = opts.ssl !== undefined ? parseSsl(opts.ssl) : fromUrl?.ssl;
     if (ssl !== undefined && ssl !== false) config.ssl = ssl;
 
     if (opts.logging) config.logging = true;
@@ -224,7 +242,7 @@ function resolveType(opts: ConnectionAddOptions, urlType: DbType | undefined): D
             );
         }
         if (urlType && urlType !== opts.type) {
-            throw new Error(`--type ${opts.type} contradicts the ${urlType} URL given in --url.`);
+            throw new Error(`--type ${opts.type} contradicts the ${urlType} URL given in --from-url.`);
         }
         return opts.type;
     }

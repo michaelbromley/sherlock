@@ -14,6 +14,7 @@ import * as p from '@clack/prompts';
 import { listConnections, getConnectionConfig, detectConnectionFromCwd } from './config';
 import { DB_TYPES, isRedisConfig, detectDbTypeFromUrl, type DbType } from './db-types';
 import type { ResolvedConnectionConfig } from './config/types';
+import type { ConnectionAddOptions } from './config/connection-input';
 
 // Credentials
 import {
@@ -91,6 +92,16 @@ const MAX_SAMPLE_LIMIT = 1000;
 // ============================================================================
 // Helpers
 // ============================================================================
+
+/** Print every configured connection name as JSON */
+function listConnectionsAction(configPath?: string): void {
+    try {
+        console.log(JSON.stringify({ connections: listConnections(configPath) }, null, 2));
+    } catch (error: unknown) {
+        console.error(JSON.stringify({ error: getErrorMessage(error) }));
+        process.exit(1);
+    }
+}
 
 /** Get error message from unknown error */
 function getErrorMessage(error: unknown): string {
@@ -589,20 +600,12 @@ function setupCLI() {
     // Connection Management Commands
     // ========================================================================
 
-    // Connections list command (hidden — use `manage` instead)
+    // Hidden: `connection list` is the documented spelling, but scripts and
+    // older docs use `connections`.
     program
         .command('connections', { hidden: true })
         .description('List all configured connections')
-        .action(() => {
-            const opts = program.opts();
-            try {
-                const connections = listConnections(opts.config);
-                console.log(JSON.stringify({ connections }, null, 2));
-            } catch (error: unknown) {
-                console.error(JSON.stringify({ error: getErrorMessage(error) }));
-                process.exit(1);
-            }
-        });
+        .action(() => listConnectionsAction(program.opts().config));
 
     // Test connection command (hidden — use `manage` instead)
     program
@@ -641,9 +644,14 @@ function setupCLI() {
         .description('Add and inspect connections without the interactive wizard');
 
     connection
+        .command('list')
+        .description('List all configured connections')
+        .action(() => listConnectionsAction(program.opts().config));
+
+    connection
         .command('add <name>')
         .description('Add a connection non-interactively')
-        .option('--url <url>', 'connection URL, instead of the individual flags below')
+        .option('--from-url <url>', 'take host, port, user and database from a connection URL')
         .option('--type <type>', 'postgres, mysql, mssql, sqlite or redis')
         .option('--host <host>', 'database host')
         .option('--port <port>', 'database port')
@@ -661,16 +669,34 @@ function setupCLI() {
         .option('--tunnel-idle-timeout <duration>', 'shut the tunnel down after this long unused')
         .option('--tunnel-ready-timeout <duration>', 'how long to wait for the tunnel to accept')
         .option('--force', 'replace an existing connection of the same name')
-        .action(async (name: string, cmdOpts: Record<string, any>) => {
+        .action(async (name: string, cmdOpts: ConnectionAddOptions & { force?: boolean }) => {
             const { buildConnectionConfig } = await import('./config/connection-input');
-            const { addConnection } = await import('./config/write');
+            const { addConnection, connectionExists } = await import('./config/write');
+
+            // -u/--url is a global option meaning "connect to this URL now", so
+            // it never reaches this command. Say so rather than reporting the
+            // missing details it would have supplied.
+            if (program.opts().url) {
+                console.error(
+                    'Error: use --from-url to build a connection from a URL. ' +
+                    '-u/--url connects to a URL without saving it.'
+                );
+                process.exit(1);
+            }
 
             try {
-                const config = buildConnectionConfig(name, cmdOpts as any);
+                const config = buildConnectionConfig(name, cmdOpts);
 
-                // Read the secret before writing anything, so a failure here
-                // does not leave a connection pointing at a keychain entry
-                // that was never created.
+                // Refuse a duplicate before storing the secret. Writing the
+                // keychain entry first would replace the existing connection's
+                // password and then abandon it, leaving that connection
+                // pointing at credentials that no longer work.
+                if (connectionExists(name) && !cmdOpts.force) {
+                    throw new Error(
+                        `Connection "${name}" already exists. Pass --force to replace it.`
+                    );
+                }
+
                 if (cmdOpts.passwordStdin) {
                     const password = await readPasswordFromStdin();
                     if (password === null) {

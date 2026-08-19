@@ -18,7 +18,7 @@ describe('buildConnectionConfig — basics', () => {
 
     it('takes host, port, user and database from a URL', () => {
         const config = buildConnectionConfig('prod', {
-            url: 'postgres://alice@db.example.com:5433/app',
+            fromUrl: 'postgres://alice@db.example.com:5433/app',
         });
         expect(config).toMatchObject({
             type: DB_TYPES.POSTGRES,
@@ -31,20 +31,20 @@ describe('buildConnectionConfig — basics', () => {
 
     it('reads SSL out of the URL', () => {
         const config = buildConnectionConfig('prod', {
-            url: 'postgres://alice@db.example.com:5432/app?sslmode=require',
+            fromUrl: 'postgres://alice@db.example.com:5432/app?sslmode=require',
         });
         expect(config.ssl).toBe(true);
     });
 
     it('refuses --url alongside the flags it would contradict', () => {
         expect(() =>
-            buildConnectionConfig('prod', { url: 'postgres://a@h/db', host: 'other' })
-        ).toThrow(/--url cannot be combined/);
+            buildConnectionConfig('prod', { fromUrl: 'postgres://a@h/db', host: 'other' })
+        ).toThrow(/--from-url cannot be combined/);
     });
 
     it('refuses a type that contradicts the URL', () => {
         expect(() =>
-            buildConnectionConfig('prod', { url: 'postgres://a@h/db', type: 'mysql' })
+            buildConnectionConfig('prod', { fromUrl: 'postgres://a@h/db', type: 'mysql' })
         ).toThrow(/contradicts the postgres URL/);
     });
 
@@ -68,6 +68,19 @@ describe('buildConnectionConfig — basics', () => {
             host: 'r.example.com',
             database: '0',
         });
+    });
+
+    it('rejects network flags on sqlite rather than ignoring them', () => {
+        expect(() =>
+            buildConnectionConfig('local', { type: 'sqlite', database: '/tmp/a.db', host: 'h' })
+        ).toThrow(/--host cannot be used with --type sqlite/);
+        expect(() =>
+            buildConnectionConfig('local', {
+                type: 'sqlite',
+                database: '/tmp/a.db',
+                passwordStdin: true,
+            })
+        ).toThrow(/--password-stdin cannot be used with --type sqlite/);
     });
 
     it('builds sqlite from the database path alone', () => {
@@ -101,7 +114,7 @@ describe('buildConnectionConfig — passwords', () => {
 
     it('never copies a password out of the URL into the config', () => {
         // It was already exposed in the shell history, so it is not worth persisting.
-        const config = buildConnectionConfig('prod', { url: 'postgres://a:secret@h:5432/db' });
+        const config = buildConnectionConfig('prod', { fromUrl: 'postgres://a:secret@h:5432/db' });
         expect(JSON.stringify(config)).not.toContain('secret');
     });
 });
@@ -173,7 +186,7 @@ describe('buildConnectionConfig — tunnels', () => {
         );
     });
 
-    it('validates the tunnel now rather than on the first query', () => {
+    it('validates the tunnel at write time rather than on the first query', () => {
         expect(() =>
             buildConnectionConfig('prod', { ...BASE, tunnelCommand: 'forward --port 5432' })
         ).toThrow(/must include "\{\{port\}\}"/);
@@ -198,6 +211,23 @@ describe('buildConnectionConfig — tunnels', () => {
 });
 
 describe('buildConnectionConfig — ssl flag', () => {
+    it('lets an explicit --ssl off beat a URL that asks for SSL', () => {
+        // `off` parses to the same undefined a missing flag produces, so the
+        // URL's setting must not be allowed to fill it back in.
+        const config = buildConnectionConfig('a', {
+            fromUrl: 'postgres://u@h:5432/d?sslmode=require',
+            ssl: 'off',
+        });
+        expect(config.ssl).toBeUndefined();
+    });
+
+    it('still takes SSL from the URL when no --ssl is given', () => {
+        const config = buildConnectionConfig('a', {
+            fromUrl: 'postgres://u@h:5432/d?sslmode=require',
+        });
+        expect(config.ssl).toBe(true);
+    });
+
     it('maps the three modes', () => {
         expect(buildConnectionConfig('a', { ...BASE, ssl: 'off' }).ssl).toBeUndefined();
         expect(buildConnectionConfig('a', { ...BASE, ssl: 'require' }).ssl).toBe(true);

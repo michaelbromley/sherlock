@@ -7,7 +7,7 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import { getConfigDir, ensureConfigDir } from './paths';
+import { getConfigDir, ensureConfigDir, findConfigFile } from './paths';
 import { loadConfigFile } from './index';
 import type { SherlockConfig, ConnectionConfig } from './types';
 
@@ -15,9 +15,9 @@ import type { SherlockConfig, ConnectionConfig } from './types';
 const SECURE_FILE_MODE = 0o600;
 
 /** The config version written for a file sherlock creates itself */
-const CONFIG_VERSION = '2.0';
+export const CONFIG_VERSION = '2.0';
 
-/** Where a config sherlock writes always goes, regardless of where one was read from */
+/** Where sherlock writes config, which is not always where it read config from */
 export function writableConfigPath(): string {
     return path.join(getConfigDir(), 'config.json');
 }
@@ -30,13 +30,29 @@ export function saveConfig(config: SherlockConfig): void {
     fs.chmodSync(configPath, SECURE_FILE_MODE);
 }
 
-/** Load the existing config, or start a new one when there is nothing to load */
+/**
+ * Load the existing config, or start a new one when there is none.
+ *
+ * Only a missing config produces a new one. A config that exists but cannot be
+ * read is an error, because the alternative is writing an empty config over
+ * whatever was there and losing every connection in it.
+ */
 export function loadOrCreateConfig(): SherlockConfig {
-    try {
-        return loadConfigFile();
-    } catch {
+    if (findConfigFile() === null) {
         return { version: CONFIG_VERSION, connections: {} };
     }
+    return loadConfigFile();
+}
+
+/**
+ * Whether a connection of this name is already configured.
+ *
+ * Callers check this before doing anything irreversible, such as writing a
+ * keychain entry, so a refused add cannot damage the connection it collided
+ * with.
+ */
+export function connectionExists(name: string): boolean {
+    return loadOrCreateConfig().connections[name] !== undefined;
 }
 
 /**

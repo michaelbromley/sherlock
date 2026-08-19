@@ -72,7 +72,7 @@ printf '%s' "$PASSWORD" | sherlock connection add prod \
 
 # a plain database, no tunnel
 printf '%s' "$PASSWORD" | sherlock connection add local \
-  --url postgres://dbuser@localhost:5432/app --password-stdin
+  --from-url postgres://dbuser@localhost:5432/app --password-stdin
 
 # a tunnel through anything else; {{port}} receives a free local port
 printf '%s' "$PASSWORD" | sherlock connection add bastion \
@@ -80,7 +80,7 @@ printf '%s' "$PASSWORD" | sherlock connection add bastion \
   --tunnel-command 'ssh -N -L {{port}}:db.internal:5432 bastion.example.com'
 ```
 
-- `--url` replaces `--host`, `--port`, `--username` and `--database`. A password in the URL is ignored, since it would already be in the shell history.
+- `--from-url <url>` replaces `--host`, `--port`, `--username` and `--database`. A password in the URL is ignored, since it would already be in the shell history. This is a separate flag from the global `-u/--url`, which connects to a URL without saving it.
 - `--password-env VAR` stores only the variable name. Sherlock reads the password from that variable on each query.
 - `--ssl` takes `off`, `require` or `verify`. `require` is right for most managed databases.
 - `--tunnel-northflank <project>/<addon>` writes the full `northflank forward --skipHostnames` command, and the pattern that reads the port back out of that command's output. Ask the user for the project and addon names if you do not know them.
