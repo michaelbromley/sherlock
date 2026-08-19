@@ -8,7 +8,7 @@ import * as path from 'path';
 import { SQL, RedisClient } from 'bun';
 import { MssqlAdapter } from '../db/mssql-adapter';
 import { findConfigFile, getConfigDir, ensureConfigDir } from '../config/paths';
-import { loadConfigFile, listConnections, resolveConnection, parseConnectionUrl } from '../config';
+import { loadConfigFile, listConnections, resolveConnection, parseConnectionUrl, sortConnectionNames } from '../config';
 import type { SherlockConfig, ConnectionConfig } from '../config/types';
 import type { ParsedConnectionUrl } from '../config';
 import { DB_TYPES, DEFAULT_PORTS, isRedisConfig, type DbType } from '../db-types';
@@ -126,23 +126,21 @@ const CONNECTION_LIST_SIZE = 10;
 /**
  * Pick a connection by name. Uses autocomplete rather than a plain select
  * because a config can hold dozens of connections, which scroll the terminal
- * out of view. Returns null if the user cancelled.
+ * out of view. Returns a cancel symbol if the user backed out, so callers
+ * check the result with `p.isCancel` like any other prompt.
  */
 async function selectConnection(
     message: string,
     connections: string[],
     hintFor?: (name: string) => string | undefined,
-): Promise<string | null> {
-    const selected = await p.autocomplete({
+): Promise<string | symbol> {
+    return p.autocomplete({
         message,
         placeholder: 'Type to filter',
         maxItems: CONNECTION_LIST_SIZE,
-        options: [...connections]
-            .sort((a, b) => a.localeCompare(b))
+        options: sortConnectionNames(connections)
             .map(name => ({ value: name, label: name, hint: hintFor?.(name) })),
     });
-
-    return p.isCancel(selected) ? null : selected;
 }
 
 /**
@@ -151,7 +149,7 @@ async function selectConnection(
 async function testConnectionMenu(connections: string[]): Promise<void> {
     const selected = await selectConnection('Select connection to test', connections);
 
-    if (selected === null) return;
+    if (p.isCancel(selected)) return;
 
     p.log.info(`Testing ${selected}...`);
 
@@ -190,13 +188,14 @@ async function listConnectionsDisplay(): Promise<void> {
         return;
     }
 
-    const entries = Object.entries(config.connections).sort(([a], [b]) => a.localeCompare(b));
-    if (entries.length === 0) {
+    const names = sortConnectionNames(Object.keys(config.connections));
+    if (names.length === 0) {
         p.log.warn('No connections configured.');
         return;
     }
 
-    const lines = entries.map(([name, conn]) => {
+    const lines = names.map(name => {
+        const conn = config.connections[name];
         const type = conn.type || 'unknown';
         if (type === DB_TYPES.SQLITE) {
             const filename = conn.filename || conn.path || conn.database || '';
@@ -235,7 +234,7 @@ async function deleteConnectionWizard(): Promise<void> {
         name => config.connections[name].type,
     );
 
-    if (connName === null) return;
+    if (p.isCancel(connName)) return;
 
     const confirmDelete = await p.confirm({
         message: `Are you sure you want to delete "${connName}"?`,
@@ -509,7 +508,7 @@ async function editConnectionWizard(): Promise<void> {
         name => config.connections[name].type,
     );
 
-    if (connName === null) return;
+    if (p.isCancel(connName)) return;
 
     const existingConn = config.connections[connName];
 

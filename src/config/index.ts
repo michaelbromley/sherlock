@@ -519,11 +519,19 @@ export function detectConnectionFromCwd(configPath?: string): string | null {
 }
 
 /**
+ * Order connection names for display. Config files list connections in the
+ * order they were added, which is meaningless to anyone reading a long list.
+ */
+export function sortConnectionNames(names: string[]): string[] {
+    return [...names].sort((a, b) => a.localeCompare(b));
+}
+
+/**
  * List all available connections, sorted alphabetically
  */
 export function listConnections(configPath?: string): string[] {
     const config = loadConfigFile(configPath);
-    return Object.keys(config.connections).sort((a, b) => a.localeCompare(b));
+    return sortConnectionNames(Object.keys(config.connections));
 }
 
 /**
