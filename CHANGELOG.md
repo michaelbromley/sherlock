@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.5.0] - 2026-08-19
 
 ### Added
 
@@ -18,6 +18,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Sherlock waits for the local port to accept before connecting, so a tunnel that fails to start reports the forwarding command's own error.
   - Tunnels are ignored in a project-local `.sherlock.json`, since honouring one would let a cloned repository run a shell command.
   - "Configure tunnel" added to the connection edit menu in `sherlock manage`.
+
+### Changed
+
+- **The connection picker in `sherlock manage` filters as you type.** Start typing and the list narrows to matching connections; arrow keys still work if you would rather scroll. Ten connections are shown at a time instead of the whole list, which used to overflow the terminal once you had more than a handful.
+- Connection names are listed alphabetically everywhere: the picker, `sherlock connections`, the keychain status list, and the "List connections" view. Previously they appeared in whatever order they were written to the config file.
+- Upgraded `@clack/prompts` to 1.7.0. Every prompt now shows a keyboard hint footer, and `note()` boxes are no longer dimmed.
 
 ## [1.4.0] - 2026-05-21
 
