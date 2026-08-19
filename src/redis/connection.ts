@@ -5,6 +5,7 @@
 
 import { RedisClient } from 'bun';
 import { resolveConnection } from '../config';
+import { startTunnelKeepalive } from '../tunnel/manager';
 import type { ResolvedConnectionConfig } from '../config/types';
 
 /**
@@ -44,12 +45,15 @@ export async function withRedisConnection<T>(
     handler: (client: RedisClient) => Promise<T>
 ): Promise<T> {
     let client: RedisClient | null = null;
+    let stopKeepalive: (() => void) | null = null;
 
     try {
         const config = await resolveConnection(connectionName, configPath);
+        stopKeepalive = startTunnelKeepalive(connectionName);
         client = createRedisConnection(config);
         return await handler(client);
     } finally {
+        stopKeepalive?.();
         if (client) {
             client.close();
         }

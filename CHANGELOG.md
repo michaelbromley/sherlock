@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Automatic tunnels** for databases only reachable through a port-forwarding process (Northflank, kubectl, ssh, cloud-sql-proxy). Add a `tunnel` block to a connection and sherlock starts the forwarding command on the first query, reuses it across later commands, and shuts it down once it has gone unused.
+  - `{{port}}` in the command is replaced with a free local port, so parallel tunnels never collide. Use `localPort` instead when the forwarding tool needs a fixed port.
+  - `idleTimeout` (default `10m`) controls automatic shutdown; queries in flight keep their own tunnel alive.
+  - `sherlock tunnel status`, `sherlock tunnel stop <connection>`, `sherlock tunnel stop` to stop all.
+  - Sherlock waits for the local port to accept before connecting, so a tunnel that fails to start reports the forwarding command's own error.
+  - Tunnels are ignored in a project-local `.sherlock.json`, since honouring one would let a cloned repository run a shell command.
+  - "Configure tunnel" added to the connection edit menu in `sherlock manage`.
+
 ## [1.4.0] - 2026-05-21
 
 ### Added

@@ -60,19 +60,59 @@ export function getCacheDir(): string {
 }
 
 /**
+ * Get the directory holding tunnel state and logs
+ */
+export function getTunnelsDir(): string {
+    return path.join(getConfigDir(), 'tunnels');
+}
+
+/**
+ * Where a config file was discovered.
+ *
+ * `project` and `legacy` come from the current working directory, so their
+ * contents are attacker-controlled for anyone who clones an untrusted repo.
+ * Features that execute config-supplied commands must refuse those two.
+ */
+export type ConfigSource = 'cli' | 'env' | 'portable' | 'project' | 'user' | 'legacy';
+
+export interface FoundConfig {
+    path: string;
+    source: ConfigSource;
+}
+
+/** Human-readable description of a config source, for error messages */
+export function describeConfigSource(source: ConfigSource): string {
+    switch (source) {
+        case 'cli':
+            return '--config flag';
+        case 'env':
+            return 'SHERLOCK_CONFIG environment variable';
+        case 'portable':
+            return 'config.json next to the sherlock binary';
+        case 'project':
+            return 'project-local .sherlock.json';
+        case 'user':
+            return 'user config directory';
+        case 'legacy':
+            return 'legacy config.ts in the current directory';
+    }
+}
+
+/**
  * Config file discovery order:
  * 1. CLI flag (--config)
  * 2. SHERLOCK_CONFIG environment variable
  * 3. Portable mode: config.json next to binary
  * 4. ./.sherlock.json (project-local)
  * 5. ~/.config/sherlock/config.json (XDG standard)
+ * 6. ./config.ts (legacy, for migration)
  */
-export function findConfigFile(cliConfigPath?: string): string | null {
+export function findConfig(cliConfigPath?: string): FoundConfig | null {
     // 1. CLI flag
     if (cliConfigPath) {
         const resolved = path.resolve(cliConfigPath);
         if (fs.existsSync(resolved)) {
-            return resolved;
+            return { path: resolved, source: 'cli' };
         }
         throw new Error(`Config file not found: ${resolved}`);
     }
@@ -81,7 +121,7 @@ export function findConfigFile(cliConfigPath?: string): string | null {
     if (process.env.SHERLOCK_CONFIG) {
         const envPath = path.resolve(process.env.SHERLOCK_CONFIG);
         if (fs.existsSync(envPath)) {
-            return envPath;
+            return { path: envPath, source: 'env' };
         }
         throw new Error(`Config file not found: ${envPath} (from SHERLOCK_CONFIG env var)`);
     }
@@ -89,28 +129,33 @@ export function findConfigFile(cliConfigPath?: string): string | null {
     // 3. Portable mode: config.json next to binary
     const portableConfigPath = path.join(getBinaryDir(), 'config.json');
     if (fs.existsSync(portableConfigPath)) {
-        return portableConfigPath;
+        return { path: portableConfigPath, source: 'portable' };
     }
 
     // 4. Project-local config
     const localConfigPath = path.resolve('.sherlock.json');
     if (fs.existsSync(localConfigPath)) {
-        return localConfigPath;
+        return { path: localConfigPath, source: 'project' };
     }
 
     // 5. XDG config directory
     const xdgConfigPath = path.join(getXdgConfigDir(), 'config.json');
     if (fs.existsSync(xdgConfigPath)) {
-        return xdgConfigPath;
+        return { path: xdgConfigPath, source: 'user' };
     }
 
     // 6. Legacy config.ts in current directory (for migration)
     const legacyConfigPath = path.resolve('config.ts');
     if (fs.existsSync(legacyConfigPath)) {
-        return legacyConfigPath;
+        return { path: legacyConfigPath, source: 'legacy' };
     }
 
     return null;
+}
+
+/** Config file discovery, when the caller only needs the path */
+export function findConfigFile(cliConfigPath?: string): string | null {
+    return findConfig(cliConfigPath)?.path ?? null;
 }
 
 /**
@@ -164,5 +209,15 @@ export function ensureCacheDir(): void {
     const cacheDir = getCacheDir();
     if (!fs.existsSync(cacheDir)) {
         fs.mkdirSync(cacheDir, { recursive: true, mode: 0o700 });
+    }
+}
+
+/**
+ * Ensure the tunnels directory exists
+ */
+export function ensureTunnelsDir(): void {
+    const tunnelsDir = getTunnelsDir();
+    if (!fs.existsSync(tunnelsDir)) {
+        fs.mkdirSync(tunnelsDir, { recursive: true, mode: 0o700 });
     }
 }

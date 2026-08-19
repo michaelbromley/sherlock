@@ -10,6 +10,7 @@ A read-only database query tool for AI assistants. Single binary, secure credent
 - **Explicit connections** - Must specify which database to query (no accidental production queries)
 - **Multiple databases** - PostgreSQL, MySQL/MariaDB, SQLite, Redis
 - **SSL/TLS support** - Works with managed databases (Northflank, Supabase, Neon, RDS, Azure SQL) that require encrypted connections
+- **Automatic tunnels** - Databases behind a port-forward (Northflank, kubectl, ssh) open on first use and shut down when idle
 - **Paste a connection string** - Set up new connections by pasting a URL — sherlock parses out host, port, user, password, database, and SSL settings
 - **Claude Code integration** - Works as a skill for AI-assisted database exploration
 
@@ -167,6 +168,56 @@ The `manage` wizard offers these as three options ("No SSL" / "Require SSL (acce
 
 If you pass an `ssl` field alongside a raw `url:` (instead of individual host/port fields), sherlock overlays the SSL settings onto the URL — handy when you've stored a `DATABASE_URL` and want to enable SSL without rewriting it.
 
+### Tunnels
+
+Databases that are only reachable through a port-forwarding process — a Northflank addon, a Kubernetes service, a host behind a bastion — can carry a `tunnel` block. Sherlock starts the forwarding command on the first query, reuses it for later commands, and shuts it down once it has gone unused.
+
+```json
+{
+  "connections": {
+    "northflank-prod": {
+      "type": "postgres",
+      "username": "vendure",
+      "password": { "$keychain": "northflank-prod" },
+      "database": "vendure",
+      "ssl": true,
+      "tunnel": {
+        "command": "northflank forward addon --project my-proj --addon pg --port {{port}}",
+        "idleTimeout": "10m"
+      }
+    }
+  }
+}
+```
+
+| Field | Required | Behaviour |
+|---|---|---|
+| `command` | yes | Shell command that forwards the remote database to a local port |
+| `localPort` | no | Fixed local port. When omitted, sherlock picks a free one and substitutes it for `{{port}}` |
+| `idleTimeout` | no | Shut down after this long with no queries (default `10m`) |
+| `readyTimeout` | no | How long to wait for the port to start accepting (default `30s`) |
+
+Write `{{port}}` wherever the command takes the local port. Sherlock replaces it with the port it allocated, so parallel tunnels never collide. If the forwarding tool cannot be told which port to bind, set `localPort` instead and hard-code it in the command.
+
+The connection's `host` and `port` are replaced by the tunnel's local endpoint, so they can be left out or left pointing at the real remote address, whichever documents the connection better.
+
+Use "Configure tunnel" in the `sherlock manage` edit menu to set this up without hand-editing the config.
+
+Manage running tunnels with:
+
+```bash
+sherlock tunnel status                 # Show running tunnels
+sherlock tunnel stop northflank-prod   # Stop one tunnel
+sherlock tunnel stop                   # Stop all tunnels
+```
+
+Sherlock waits for the local port to start accepting before it connects, so a tunnel that fails to come up reports the forwarding command's own error rather than a connection refusal. Its output is kept in `~/.config/sherlock/tunnels/`.
+
+Two things are worth knowing:
+
+- **Tunnels are ignored in a project-local `.sherlock.json`.** A tunnel runs a shell command, so honouring one from the current directory would mean that cloning a repository and running any sherlock command executes whatever that repository asked for. Tunnels are read only from your user config directory, a config next to the binary, `--config`, or `SHERLOCK_CONFIG`.
+- **`{ "rejectUnauthorized": true }` cannot work through a tunnel.** Certificate verification checks the hostname, which after tunnelling is `127.0.0.1` and will never match the database's certificate. Use `"ssl": true` to keep the connection encrypted without hostname verification. Sherlock warns if you configure both.
+
 ### Credential Sources
 
 Credentials can come from:
@@ -221,9 +272,11 @@ sherlock -c <conn> command GET mykey   # Any read-only Redis command
 ### Management Commands
 
 ```bash
-sherlock manage               # Connection manager (add, edit, delete, test, keychain)
+sherlock manage               # Connection manager (add, edit, delete, test, keychain, tunnel)
 sherlock connections          # List configured connections (JSON)
 sherlock test <connection>    # Test a connection
+sherlock tunnel status        # Show running tunnels
+sherlock tunnel stop [conn]   # Stop one tunnel, or all when no name is given
 ```
 
 ### Options
