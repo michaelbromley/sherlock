@@ -62,7 +62,7 @@ sherlock -c <conn> command GET mykey    # Execute any read-only Redis command
 
 ## Tunnelled Connections
 
-Some connections reach the database through a port-forwarding process (Northflank, kubectl, ssh). Sherlock starts that tunnel automatically on the first query and reuses it for later commands — no action needed to open one.
+Some connections reach the database through a port-forwarding process (Northflank, kubectl, ssh). Sherlock starts that tunnel on the first query and reuses it for later commands. You do not need to open one yourself.
 
 ```bash
 sherlock tunnel status                  # Show running tunnels
@@ -70,9 +70,9 @@ sherlock tunnel stop <conn>             # Stop one tunnel
 sherlock tunnel stop                    # Stop all tunnels
 ```
 
-**Stop the tunnel when you have finished with a database.** It costs nothing to leave running and it shuts itself down after an idle period anyway, but stopping it promptly frees the connection and the local port.
+**Stop the tunnel when you have finished with a database.** An idle tunnel shuts itself down eventually, so leaving one running does no harm. Stopping it releases the database connection and the local port straight away.
 
-If a tunnel fails to start, the error includes the forwarding command's own output — read it before retrying, since the usual causes are a missing CLI, an expired login, or a command that needs `sudo` (which cannot work, as the tunnel runs with no terminal; the error explains the alternatives).
+If a tunnel fails to start, the error includes the forwarding command's own output. Read it before retrying. The usual causes are a missing CLI and an expired login. A command that needs `sudo` cannot work at all, because the tunnel runs with no terminal for sudo to prompt at, and the error names the alternatives.
 
 ## Constraints
 

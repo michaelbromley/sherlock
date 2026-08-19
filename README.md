@@ -170,7 +170,7 @@ If you pass an `ssl` field alongside a raw `url:` (instead of individual host/po
 
 ### Tunnels
 
-Databases that are only reachable through a port-forwarding process — a Northflank addon, a Kubernetes service, a host behind a bastion — can carry a `tunnel` block. Sherlock starts the forwarding command on the first query, reuses it for later commands, and shuts it down once it has gone unused.
+Some databases are only reachable through a port-forwarding process: a Northflank addon, a Kubernetes service, a host behind a bastion. Give the connection a `tunnel` block and sherlock starts the forwarding command on the first query, reuses it for later commands, and shuts it down once it has gone unused.
 
 ```json
 {
@@ -198,13 +198,13 @@ Databases that are only reachable through a port-forwarding process — a Northf
 | `idleTimeout` | no | Shut down after this long with no queries (default `10m`) |
 | `readyTimeout` | no | How long to wait for the port to start accepting (default `30s`) |
 
-Write `{{port}}` wherever the command takes the local port. Sherlock replaces it with the port it allocated, so parallel tunnels never collide. Tools that take a port this way include `ssh -L`, `cloud-sql-proxy`, and `kubectl port-forward`. If the forwarding tool needs a fixed port, set `localPort` instead and hard-code the same port in the command. If it takes no port at all, see the next section.
+Write `{{port}}` wherever the command takes the local port. Sherlock replaces it with the port it allocated, so parallel tunnels never collide. Tools that take a port this way include `ssh -L`, `cloud-sql-proxy`, and `kubectl port-forward`. If the forwarding command needs a fixed port, set `localPort` instead and hard-code the same port in the command. If it takes no port at all, see the next section.
 
 #### Tools that choose their own port
 
-Some forwarding tools take no port argument and pick one themselves, printing it on startup. For those, set `endpointPattern` to a regex with a named `port` group and an optional named `host` group, and sherlock reads the endpoint out of the command's output instead of dictating it.
+Some forwarding commands take no port argument and choose one themselves, printing it on startup. For those, set `endpointPattern` to a regex with a named `port` group and an optional named `host` group, and sherlock reads the endpoint out of the command's output instead of dictating it.
 
-Northflank is the main example. Its `forward` command needs root by default, because it writes the addon's hostname into `/etc/hosts`. Passing `--skipHostnames` drops that requirement (the CLI's own help says "no root permissions are required") and exposes the addon on an IP address instead, choosing the port itself:
+Northflank works this way. Its `forward` command needs root by default, because it writes the addon's hostname into `/etc/hosts`. Passing `--skipHostnames` removes that requirement, and the CLI's own help says "no root permissions are required". With that flag the addon is exposed on an IP address and northflank chooses the port:
 
 ```json
 "northflank-prod": {
@@ -227,13 +227,13 @@ Northflank is the main example. Its `forward` command needs root by default, bec
 
 #### Commands that need sudo
 
-The forwarding process runs in the background with no terminal so it can outlive the command that started it, which means `sudo` has nowhere to prompt for a password and the tunnel fails immediately. Three ways round it, best first:
+The forwarding process runs in the background with no terminal, so that it outlives the sherlock command that started it. `sudo` therefore has nowhere to prompt for a password, and the tunnel fails immediately. Three ways round it, best first:
 
 1. **Use the tool's no-root option** if it has one, such as Northflank's `--skipHostnames` above. Nothing else to configure.
 2. **Grant that one command passwordless sudo** with a `NOPASSWD` rule in `/etc/sudoers`.
 3. **Use `sudo -A`** with `SUDO_ASKPASS` pointing at a helper that supplies the password without a terminal.
 
-Sherlock detects this failure and includes these options in the error rather than leaving you to work out why sudo was unhappy.
+Sherlock detects this failure and lists these three options in the error.
 
 The connection's `host` and `port` are replaced by the tunnel's local endpoint, so they can be left out or left pointing at the real remote address, whichever documents the connection better.
 
@@ -247,11 +247,9 @@ sherlock tunnel stop northflank-prod   # Stop one tunnel
 sherlock tunnel stop                   # Stop all tunnels
 ```
 
-Sherlock waits for the local port to start accepting before it connects, so a tunnel that fails to come up reports the forwarding command's own error rather than a connection refusal. Its output is kept in `~/.config/sherlock/tunnels/`.
+Sherlock waits for the local port to start accepting before it connects, so a tunnel that fails to come up reports the forwarding command's own error rather than a connection refusal. The forwarding command's output is kept in `~/.config/sherlock/tunnels/`.
 
-Two things are worth knowing:
-
-- **Tunnels are ignored in a project-local `.sherlock.json`.** A tunnel runs a shell command, so honouring one from the current directory would mean that cloning a repository and running any sherlock command executes whatever that repository asked for. Tunnels are read only from your user config directory, a config next to the binary, `--config`, or `SHERLOCK_CONFIG`.
+- **Tunnels are ignored in a project-local `.sherlock.json`.** A tunnel runs a shell command. Reading one from the current directory would mean that cloning a repository and running any sherlock command executes the command that repository put in the file. Tunnels are read only from your user config directory, a config next to the binary, `--config`, or `SHERLOCK_CONFIG`.
 - **`{ "rejectUnauthorized": true }` cannot work through a tunnel.** Certificate verification checks the hostname, which after tunnelling is `127.0.0.1` and will never match the database's certificate. Use `"ssl": true` to keep the connection encrypted without hostname verification. Sherlock warns if you configure both.
 
 ### Credential Sources
