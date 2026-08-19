@@ -120,21 +120,43 @@ export async function connectionManagerMenu(): Promise<void> {
 // Menu Actions
 // ============================================================================
 
+/** How many connections to show at once in the connection picker */
+const CONNECTION_LIST_SIZE = 10;
+
+/**
+ * Pick a connection by name. Uses autocomplete rather than a plain select
+ * because a config can hold dozens of connections, which scroll the terminal
+ * out of view. Returns null if the user cancelled.
+ */
+async function selectConnection(
+    message: string,
+    connections: string[],
+    hintFor?: (name: string) => string | undefined,
+): Promise<string | null> {
+    const selected = await p.autocomplete({
+        message,
+        placeholder: 'Type to filter',
+        maxItems: CONNECTION_LIST_SIZE,
+        options: [...connections]
+            .sort((a, b) => a.localeCompare(b))
+            .map(name => ({ value: name, label: name, hint: hintFor?.(name) })),
+    });
+
+    return p.isCancel(selected) ? null : selected;
+}
+
 /**
  * Test a connection from the manage menu
  */
 async function testConnectionMenu(connections: string[]): Promise<void> {
-    const selected = await p.select({
-        message: 'Select connection to test',
-        options: connections.map(name => ({ value: name, label: name })),
-    });
+    const selected = await selectConnection('Select connection to test', connections);
 
-    if (p.isCancel(selected)) return;
+    if (selected === null) return;
 
     p.log.info(`Testing ${selected}...`);
 
     try {
-        const config = await resolveConnection(selected as string);
+        const config = await resolveConnection(selected);
 
         if (isRedisConfig(config)) {
             const client = new RedisClient(config.url);
@@ -168,7 +190,7 @@ async function listConnectionsDisplay(): Promise<void> {
         return;
     }
 
-    const entries = Object.entries(config.connections);
+    const entries = Object.entries(config.connections).sort(([a], [b]) => a.localeCompare(b));
     if (entries.length === 0) {
         p.log.warn('No connections configured.');
         return;
@@ -207,18 +229,14 @@ async function deleteConnectionWizard(): Promise<void> {
         return;
     }
 
-    const selected = await p.select({
-        message: 'Select connection to delete',
-        options: connectionNames.map(name => ({
-            value: name,
-            label: name,
-            hint: config.connections[name].type,
-        })),
-    });
+    const connName = await selectConnection(
+        'Select connection to delete',
+        connectionNames,
+        name => config.connections[name].type,
+    );
 
-    if (p.isCancel(selected)) return;
+    if (connName === null) return;
 
-    const connName = selected as string;
     const confirmDelete = await p.confirm({
         message: `Are you sure you want to delete "${connName}"?`,
         initialValue: false,
@@ -485,18 +503,14 @@ async function editConnectionWizard(): Promise<void> {
         return;
     }
 
-    const selected = await p.select({
-        message: 'Select connection to edit',
-        options: connectionNames.map(name => ({
-            value: name,
-            label: name,
-            hint: config.connections[name].type,
-        })),
-    });
+    const connName = await selectConnection(
+        'Select connection to edit',
+        connectionNames,
+        name => config.connections[name].type,
+    );
 
-    if (p.isCancel(selected)) return;
+    if (connName === null) return;
 
-    const connName = selected as string;
     const existingConn = config.connections[connName];
 
     const loggingStatus = existingConn.logging ? 'enabled' : 'disabled';

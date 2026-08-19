@@ -519,11 +519,11 @@ export function detectConnectionFromCwd(configPath?: string): string | null {
 }
 
 /**
- * List all available connections
+ * List all available connections, sorted alphabetically
  */
 export function listConnections(configPath?: string): string[] {
     const config = loadConfigFile(configPath);
-    return Object.keys(config.connections);
+    return Object.keys(config.connections).sort((a, b) => a.localeCompare(b));
 }
 
 /**
