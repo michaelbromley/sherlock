@@ -421,7 +421,15 @@ export function isConfigFromWorkingDirectory(configPath?: string): boolean {
     } catch {
         return false;
     }
-    return cachedConfigSource !== null && UNTRUSTED_CONFIG_SOURCES.includes(cachedConfigSource);
+    return isUntrustedSource(cachedConfigSource);
+}
+
+/**
+ * Whether a config source is one the user did not deliberately choose, and so
+ * must not be allowed to supply shell commands.
+ */
+export function isUntrustedSource(source: ConfigSource | null): boolean {
+    return source !== null && UNTRUSTED_CONFIG_SOURCES.includes(source);
 }
 
 /**
@@ -430,7 +438,7 @@ export function isConfigFromWorkingDirectory(configPath?: string): boolean {
  * `.sherlock.json` and running any sherlock command would execute it.
  */
 function assertTunnelAllowed(connectionName: string): void {
-    if (cachedConfigSource && UNTRUSTED_CONFIG_SOURCES.includes(cachedConfigSource)) {
+    if (isUntrustedSource(cachedConfigSource)) {
         throw new Error(
             `Connection "${connectionName}" defines a tunnel, but the config was loaded from ` +
             `${describeConfigSource(cachedConfigSource)}.\n\n` +
