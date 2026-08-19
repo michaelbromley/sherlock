@@ -175,14 +175,14 @@ Databases that are only reachable through a port-forwarding process — a Northf
 ```json
 {
   "connections": {
-    "northflank-prod": {
+    "prod-behind-bastion": {
       "type": "postgres",
       "username": "vendure",
-      "password": { "$keychain": "northflank-prod" },
+      "password": { "$keychain": "prod-behind-bastion" },
       "database": "vendure",
       "ssl": true,
       "tunnel": {
-        "command": "northflank forward addon --project my-proj --addon pg --port {{port}}",
+        "command": "ssh -N -L {{port}}:db.internal:5432 bastion.example.com",
         "idleTimeout": "10m"
       }
     }
@@ -198,7 +198,7 @@ Databases that are only reachable through a port-forwarding process — a Northf
 | `idleTimeout` | no | Shut down after this long with no queries (default `10m`) |
 | `readyTimeout` | no | How long to wait for the port to start accepting (default `30s`) |
 
-Write `{{port}}` wherever the command takes the local port. Sherlock replaces it with the port it allocated, so parallel tunnels never collide. If the forwarding tool cannot be told which port to bind, set `localPort` instead and hard-code it in the command.
+Write `{{port}}` wherever the command takes the local port. Sherlock replaces it with the port it allocated, so parallel tunnels never collide. Tools that take a port this way include `ssh -L`, `cloud-sql-proxy`, and `kubectl port-forward`. If the forwarding tool needs a fixed port, set `localPort` instead and hard-code the same port in the command. If it takes no port at all, see the next section.
 
 #### Tools that choose their own port
 

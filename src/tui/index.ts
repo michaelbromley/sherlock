@@ -1155,6 +1155,12 @@ async function promptForSsl(existingSsl?: ConnectionConfig['ssl']): Promise<Conn
     return sslChoiceToConfig(choice as 'off' | 'require' | 'verify');
 }
 
+/**
+ * Matches the endpoint line printed by `northflank forward --skipHostnames`:
+ *   > Addon 'pg' is exposed on 127.0.0.1:44109 (TCP)
+ */
+const NORTHFLANK_ENDPOINT_PATTERN = 'exposed on (?<host>[\\d.]+):(?<port>\\d+)';
+
 /** Short label describing the current tunnel state, used as a menu hint */
 export function tunnelHintLabel(tunnel: ConnectionConfig['tunnel']): string {
     if (!tunnel) return 'not set';
@@ -1184,14 +1190,18 @@ async function promptForTunnel(
     }
 
     p.log.info(
-        'The command must forward the remote database to a local port.\n' +
-        'Write {{port}} where the command takes the local port; sherlock fills it in.\n' +
-        'e.g. northflank forward addon --project my-proj --addon pg --port {{port}}'
+        'The command must forward the remote database to a local port.\n\n' +
+        'If it takes a port, write {{port}} and sherlock fills in a free one:\n' +
+        '  ssh -N -L {{port}}:db.internal:5432 bastion.example.com\n' +
+        '  kubectl port-forward svc/postgres {{port}}:5432\n\n' +
+        'If it picks its own port and prints it, leave {{port}} out. Sherlock\n' +
+        'then reads the port from the output, using the next answer:\n' +
+        '  northflank forward addon --project my-proj --addon pg --skipHostnames'
     );
 
     const command = await p.text({
         message: 'Tunnel command',
-        placeholder: 'northflank forward addon --project my-proj --addon pg --port {{port}}',
+        placeholder: 'ssh -N -L {{port}}:db.internal:5432 bastion.example.com',
         initialValue: existing?.command,
         validate: (value) => {
             if (!value || value.trim() === '') return 'A command is required';
@@ -1215,7 +1225,7 @@ async function promptForTunnel(
                 {
                     value: 'discover',
                     label: 'It picks a port and prints it',
-                    hint: 'northflank --skipHostnames, kubectl port-forward',
+                    hint: 'northflank forward --skipHostnames',
                 },
             ],
         });
@@ -1238,13 +1248,18 @@ async function promptForTunnel(
             localPort = Number(portValue);
         } else {
             p.log.info(
-                'Give a regular expression that matches the line the command prints.\n' +
-                'It needs a (?<port>...) group, and may have a (?<host>...) group.'
+                'Give a regular expression matching the line the command prints.\n' +
+                'It needs a (?<port>...) group, and may have a (?<host>...) group.\n\n' +
+                'northflank prints:\n' +
+                "  > Addon 'pg' is exposed on 127.0.0.1:44109 (TCP)\n" +
+                'which the suggested pattern below matches. Run your command once\n' +
+                'and copy the wording if it differs.'
             );
             const patternValue = await p.text({
                 message: 'Endpoint pattern',
-                placeholder: 'exposed on (?<host>[\\d.]+):(?<port>\\d+)',
-                initialValue: existing?.endpointPattern,
+                // Pre-filled rather than hinted: this is fiddly to type, and the
+                // default already matches northflank's output.
+                initialValue: existing?.endpointPattern ?? NORTHFLANK_ENDPOINT_PATTERN,
                 validate: (value) => {
                     if (!value || !value.includes('(?<port>')) {
                         return 'Must contain a named "port" group, e.g. (?<port>\\d+)';
