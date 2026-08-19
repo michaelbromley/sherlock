@@ -100,6 +100,22 @@ function getErrorMessage(error: unknown): string {
     return String(error);
 }
 
+/**
+ * Read a password from stdin, for non-interactive setup.
+ *
+ * Passwords are taken this way rather than as a flag so they never reach the
+ * process list or the shell history. A trailing newline from `echo` or a heredoc
+ * is stripped; anything else is passed through unchanged.
+ */
+async function readPasswordFromStdin(): Promise<string | null> {
+    const chunks: Buffer[] = [];
+    for await (const chunk of process.stdin) {
+        chunks.push(Buffer.from(chunk));
+    }
+    const value = Buffer.concat(chunks).toString('utf-8').replace(/\r?\n$/, '');
+    return value.length > 0 ? value : null;
+}
+
 /** Prompt for password input (hidden) */
 async function promptPassword(message: string): Promise<string> {
     const result = await p.password({ message });
@@ -612,6 +628,71 @@ function setupCLI() {
             } catch (error: unknown) {
                 console.error(`\x1b[31m✗ Connection "${connectionName}" failed\x1b[0m`);
                 console.error(`  Error: ${getErrorMessage(error)}`);
+                process.exit(1);
+            }
+        });
+
+    // ========================================================================
+    // Connection Setup Commands
+    // ========================================================================
+
+    const connection = program
+        .command('connection')
+        .description('Add and inspect connections without the interactive wizard');
+
+    connection
+        .command('add <name>')
+        .description('Add a connection non-interactively')
+        .option('--url <url>', 'connection URL, instead of the individual flags below')
+        .option('--type <type>', 'postgres, mysql, mssql, sqlite or redis')
+        .option('--host <host>', 'database host')
+        .option('--port <port>', 'database port')
+        .option('--username <user>', 'database user')
+        .option('--database <name>', 'database name, or file path for sqlite')
+        .option('--ssl <mode>', 'off, require, or verify')
+        .option('--logging', 'record queries for this connection')
+        .option('--directory <path>', 'auto-select this connection when inside this directory')
+        .option('--password-stdin', 'read the password from stdin and store it in the OS keychain')
+        .option('--password-env <var>', 'read the password from this environment variable at query time')
+        .option('--tunnel-command <cmd>', 'port-forwarding command; use {{port}} where it takes a local port')
+        .option('--tunnel-northflank <project/addon>', 'shorthand for a northflank addon tunnel')
+        .option('--tunnel-local-port <port>', 'fixed local port, when the command cannot be told one')
+        .option('--tunnel-endpoint-pattern <regex>', 'read the endpoint from the command output')
+        .option('--tunnel-idle-timeout <duration>', 'shut the tunnel down after this long unused')
+        .option('--tunnel-ready-timeout <duration>', 'how long to wait for the tunnel to accept')
+        .option('--force', 'replace an existing connection of the same name')
+        .action(async (name: string, cmdOpts: Record<string, any>) => {
+            const { buildConnectionConfig } = await import('./config/connection-input');
+            const { addConnection } = await import('./config/write');
+
+            try {
+                const config = buildConnectionConfig(name, cmdOpts as any);
+
+                // Read the secret before writing anything, so a failure here
+                // does not leave a connection pointing at a keychain entry
+                // that was never created.
+                if (cmdOpts.passwordStdin) {
+                    const password = await readPasswordFromStdin();
+                    if (password === null) {
+                        console.error('Error: --password-stdin was given but stdin was empty.');
+                        process.exit(1);
+                    }
+                    setKeychainPassword(name, password);
+                }
+
+                const { replaced, path: configPath } = addConnection(name, config, {
+                    force: cmdOpts.force,
+                });
+
+                console.log(JSON.stringify({
+                    connection: name,
+                    action: replaced ? 'replaced' : 'added',
+                    config: configPath,
+                    tunnel: config.tunnel ? config.tunnel.command : null,
+                    next: `sherlock -c ${name} tables`,
+                }, null, 2));
+            } catch (error: unknown) {
+                console.error(`Error: ${getErrorMessage(error)}`);
                 process.exit(1);
             }
         });

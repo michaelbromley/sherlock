@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **`sherlock connection add`** sets up a connection in one non-interactive command, for scripting and for asking an AI assistant to do it. The password is read from stdin and stored in the OS keychain, so it never appears in the process list or the shell history. `--password-env` stores a reference to an environment variable instead.
+  - `--tunnel-northflank <project>/<addon>` expands to the full `northflank forward --skipHostnames` command and the pattern that reads the port back out of its output.
+  - `--tunnel-command` and the other tunnel flags cover every other forwarding tool, and are validated as the connection is written rather than on the first query.
+  - `--url` replaces the individual host, port, username and database flags. A password in the URL is ignored.
+- The `sherlock manage` wizard asks whether a connection needs a tunnel when adding one. Previously a tunnel could only be added by editing a connection after creating it.
+
+### Fixed
+
+- "Edit connection details" in `sherlock manage` no longer discards an existing tunnel. The config was rebuilt from the answers given, and the tunnel block was not carried over.
+- Storing a password in the macOS keychain no longer passes it as a command-line argument to `security`, where any local user could read it from the process list.
+
 ## [1.5.0] - 2026-08-19
 
 ### Added

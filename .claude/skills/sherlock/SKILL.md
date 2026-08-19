@@ -60,6 +60,35 @@ sherlock -c <conn> slowlog -n 20        # Last 20 slow log entries
 sherlock -c <conn> command GET mykey    # Execute any read-only Redis command
 ```
 
+## Setting Up a Connection
+
+Add a connection without the interactive wizard. The password is read from stdin and stored in the OS keychain, so it never appears in the process list or the shell history.
+
+```bash
+# a database behind a northflank addon tunnel
+printf '%s' "$PASSWORD" | sherlock connection add prod \
+  --type postgres --host db.example.com --database app --username dbuser \
+  --password-stdin --ssl require --tunnel-northflank my-project/my-addon
+
+# a plain database, no tunnel
+printf '%s' "$PASSWORD" | sherlock connection add local \
+  --url postgres://dbuser@localhost:5432/app --password-stdin
+
+# a tunnel through anything else; {{port}} receives a free local port
+printf '%s' "$PASSWORD" | sherlock connection add bastion \
+  --type postgres --host db.internal --database app --username dbuser --password-stdin \
+  --tunnel-command 'ssh -N -L {{port}}:db.internal:5432 bastion.example.com'
+```
+
+- `--url` replaces `--host`, `--port`, `--username` and `--database`. A password in the URL is ignored, since it would already be in the shell history.
+- `--password-env VAR` stores only the variable name. Sherlock reads the password from that variable on each query.
+- `--ssl` takes `off`, `require` or `verify`. `require` is right for most managed databases.
+- `--tunnel-northflank <project>/<addon>` writes the full `northflank forward --skipHostnames` command, and the pattern that reads the port back out of that command's output. Ask the user for the project and addon names if you do not know them.
+- `--force` replaces an existing connection of the same name. Without it, an existing name is an error.
+- Bad flag combinations fail immediately with a message naming the flag, before anything is written.
+
+Ask the user for the password rather than guessing it, and never pass it as a command-line argument.
+
 ## Tunnelled Connections
 
 Some connections reach the database through a port-forwarding process (Northflank, kubectl, ssh). Sherlock starts that tunnel on the first query and reuses it for later commands. You do not need to open one yourself.
