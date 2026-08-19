@@ -1156,7 +1156,7 @@ async function promptForSsl(existingSsl?: ConnectionConfig['ssl']): Promise<Conn
 }
 
 /** Short label describing the current tunnel state, used as a menu hint */
-function tunnelHintLabel(tunnel: ConnectionConfig['tunnel']): string {
+export function tunnelHintLabel(tunnel: ConnectionConfig['tunnel']): string {
     if (!tunnel) return 'not set';
     let port = 'auto port';
     if (tunnel.localPort) port = `port ${tunnel.localPort}`;
