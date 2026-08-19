@@ -213,3 +213,19 @@ describe('applyPortPlaceholder', () => {
         expect(hasPortPlaceholder('fwd 5432')).toBe(false);
     });
 });
+
+describe('matchEndpoint — not fooled by the command itself', () => {
+    // The tunnel log opens with sherlock echoing the command it ran, so a loose
+    // pattern could otherwise read the port straight back out of that echo.
+    it('would match the echoed command if the header were scanned', () => {
+        const header = '[sherlock] ssh -L 127.0.0.1:5432 bastion\n\n';
+        const loose = /127\.0\.0\.1:(?<port>\d+)/;
+        expect(matchEndpoint(loose, header)).toEqual({ host: '127.0.0.1', port: 5432 });
+    });
+
+    it('finds the real endpoint once the header is skipped', () => {
+        const output = 'Forwarding from 127.0.0.1:61234 -> 5432\n';
+        const loose = /127\.0\.0\.1:(?<port>\d+)/;
+        expect(matchEndpoint(loose, output)).toEqual({ host: '127.0.0.1', port: 61234 });
+    });
+});

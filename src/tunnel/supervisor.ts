@@ -27,7 +27,7 @@ import {
     lockPath,
     logPath,
     readLastUsed,
-    readLogFull,
+    readLogFrom,
     readLogTail,
     writeState,
 } from './state';
@@ -47,11 +47,12 @@ const DISCOVERY_POLL_MS = 100;
 async function discoverEndpoint(
     connectionName: string,
     pattern: RegExp,
+    outputOffset: number,
     deadline: number,
     childExited: () => boolean
 ): Promise<DiscoveredEndpoint | null> {
     for (;;) {
-        const found = matchEndpoint(pattern, readLogFull(connectionName));
+        const found = matchEndpoint(pattern, readLogFrom(connectionName, outputOffset));
         if (found) return found;
 
         // Check for death only after one last read, so output flushed just
@@ -139,12 +140,16 @@ export async function runSupervisor(connectionName: string, configPath?: string)
     const logFile = logPath(connectionName);
     // Truncate on each start so the log always describes the current tunnel.
     const logFd = fs.openSync(logFile, 'w', 0o600);
-    fs.writeSync(
-        logFd,
+    const header =
         `[sherlock] starting tunnel for "${connectionName}"` +
-            (discovering ? ', reading endpoint from output\n' : ` on port ${dictatedPort}\n`)
-    );
-    fs.writeSync(logFd, `[sherlock] ${command}\n\n`);
+        (discovering ? ', reading endpoint from output\n' : ` on port ${dictatedPort}\n`) +
+        `[sherlock] ${command}\n\n`;
+    fs.writeSync(logFd, header);
+
+    // The header echoes the command, which can itself contain something that
+    // looks like an endpoint. Endpoint matching starts past it so a loose
+    // pattern cannot read the port back out of the command it was given.
+    const outputOffset = Buffer.byteLength(header, 'utf-8');
 
     // Everything known about the tunnel before the forwarding process exists.
     // `childPid` is filled in once it does; -1 marks a tunnel that never started.
@@ -222,6 +227,7 @@ export async function runSupervisor(connectionName: string, configPath?: string)
         const discovered = await discoverEndpoint(
             connectionName,
             tunnel.endpointPattern,
+            outputOffset,
             deadline,
             () => childExited
         );

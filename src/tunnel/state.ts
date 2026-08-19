@@ -136,10 +136,15 @@ export function isProcessAlive(pid: number): boolean {
     }
 }
 
-/** A tunnel's whole log, for matching against an endpoint pattern */
-export function readLogFull(connectionName: string): string {
+/**
+ * A tunnel's log from `offset` bytes onwards, for matching against an endpoint
+ * pattern. The offset skips sherlock's own header so only the forwarding
+ * command's output is considered.
+ */
+export function readLogFrom(connectionName: string, offset: number): string {
     try {
-        return fs.readFileSync(logPath(connectionName), 'utf-8');
+        const content = fs.readFileSync(logPath(connectionName));
+        return content.subarray(offset).toString('utf-8');
     } catch {
         return '';
     }
