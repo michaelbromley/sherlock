@@ -26,6 +26,12 @@ import {
 } from './state';
 import type { TunnelConfig, TunnelState } from './types';
 
+/** Where a running tunnel can be reached locally */
+export interface TunnelEndpoint {
+    host: string;
+    port: number;
+}
+
 /** Extra time beyond the tunnel's own ready timeout to allow for supervisor startup */
 const SUPERVISOR_STARTUP_GRACE_MS = 5000;
 
@@ -67,7 +73,7 @@ function selfInvocation(): { command: string; prefixArgs: string[] } {
 async function isUsable(state: TunnelState): Promise<boolean> {
     if (!state.ready || state.error) return false;
     if (!isProcessAlive(state.supervisorPid)) return false;
-    return isPortAccepting(state.port);
+    return isPortAccepting(state.port, state.host);
 }
 
 /**
@@ -162,14 +168,14 @@ function spawnSupervisor(connectionName: string, configPath?: string): void {
 }
 
 /**
- * Make sure a tunnel for this connection is up, and return the local port it
+ * Make sure a tunnel for this connection is up, and return the local endpoint it
  * forwards. Reuses a healthy existing tunnel; starts one otherwise.
  */
 export async function ensureTunnel(
     connectionName: string,
     tunnelConfig: TunnelConfig,
     configPath?: string
-): Promise<number> {
+): Promise<TunnelEndpoint> {
     const tunnel = resolveTunnelConfig(connectionName, tunnelConfig);
     const startupBudgetMs = tunnel.readyTimeoutMs + SUPERVISOR_STARTUP_GRACE_MS;
 
@@ -177,7 +183,7 @@ export async function ensureTunnel(
     if (existing) {
         if (await isUsable(existing)) {
             touchLastUsed(connectionName);
-            return existing.port;
+            return { host: existing.host, port: existing.port };
         }
         // Either a failure left over from a previous invocation, or a supervisor
         // that died. Both are worth retrying from scratch.
@@ -188,7 +194,7 @@ export async function ensureTunnel(
         // Another sherlock process is already starting this tunnel; wait for it.
         const state = await waitForReadyState(connectionName, startupBudgetMs);
         touchLastUsed(connectionName);
-        return state.port;
+        return { host: state.host, port: state.port };
     }
 
     try {
@@ -198,7 +204,7 @@ export async function ensureTunnel(
         spawnSupervisor(connectionName, configPath);
         const state = await waitForReadyState(connectionName, startupBudgetMs);
         touchLastUsed(connectionName);
-        return state.port;
+        return { host: state.host, port: state.port };
     } finally {
         releaseLock(connectionName);
     }
@@ -301,6 +307,7 @@ export async function stopAllTunnels(): Promise<StopResult[]> {
 
 export interface TunnelStatus {
     name: string;
+    host: string;
     port: number;
     running: boolean;
     ready: boolean;
@@ -318,9 +325,10 @@ export async function listTunnels(): Promise<TunnelStatus[]> {
         const running = isProcessAlive(state.supervisorPid);
         statuses.push({
             name: state.name,
+            host: state.host,
             port: state.port,
             running,
-            ready: running && state.ready && (await isPortAccepting(state.port)),
+            ready: running && state.ready && (await isPortAccepting(state.port, state.host)),
             startedAt: state.startedAt,
             command: state.command,
             logFile: state.logFile,

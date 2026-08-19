@@ -72,7 +72,7 @@ sherlock tunnel stop                    # Stop all tunnels
 
 **Stop the tunnel when you have finished with a database.** It costs nothing to leave running and it shuts itself down after an idle period anyway, but stopping it promptly frees the connection and the local port.
 
-If a tunnel fails to start, the error includes the forwarding command's own output — read it before retrying, since the usual causes are a missing CLI or an expired login.
+If a tunnel fails to start, the error includes the forwarding command's own output — read it before retrying, since the usual causes are a missing CLI, an expired login, or a command that needs `sudo` (which cannot work, as the tunnel runs with no terminal; the error explains the alternatives).
 
 ## Constraints
 

@@ -34,8 +34,12 @@ export function findFreePort(): Promise<number> {
     });
 }
 
-/** Whether something is currently accepting TCP connections on a local port */
-export function isPortAccepting(port: number, timeoutMs = PROBE_TIMEOUT_MS): Promise<boolean> {
+/** Whether something is currently accepting TCP connections on a local endpoint */
+export function isPortAccepting(
+    port: number,
+    host = TUNNEL_HOST,
+    timeoutMs = PROBE_TIMEOUT_MS
+): Promise<boolean> {
     return new Promise((resolve) => {
         const socket = new net.Socket();
         let settled = false;
@@ -51,27 +55,27 @@ export function isPortAccepting(port: number, timeoutMs = PROBE_TIMEOUT_MS): Pro
         socket.once('connect', () => finish(true));
         socket.once('timeout', () => finish(false));
         socket.once('error', () => finish(false));
-        socket.connect(port, TUNNEL_HOST);
+        socket.connect(port, host);
     });
 }
 
 /**
- * Poll a local port until something accepts on it. `shouldAbort` lets the caller
- * bail out early — the supervisor uses it to stop waiting once the forwarding
- * process has died, so a crashed tunnel reports its real error immediately
- * instead of after the full timeout.
+ * Poll a local endpoint until something accepts on it. `shouldAbort` lets the
+ * caller bail out early — the supervisor uses it to stop waiting once the
+ * forwarding process has died, so a crashed tunnel reports its real error
+ * immediately instead of after the full timeout.
  */
 export async function waitForPort(
     port: number,
-    timeoutMs: number,
+    host: string,
+    deadline: number,
     shouldAbort?: () => boolean
 ): Promise<boolean> {
-    const deadline = Date.now() + timeoutMs;
     const intervalMs = 100;
 
     while (Date.now() < deadline) {
         if (shouldAbort?.()) return false;
-        if (await isPortAccepting(port)) return true;
+        if (await isPortAccepting(port, host)) return true;
         await new Promise((resolve) => setTimeout(resolve, intervalMs));
     }
 

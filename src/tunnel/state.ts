@@ -53,6 +53,7 @@ function isTunnelState(data: unknown): data is TunnelState {
     const s = data as TunnelState;
     return (
         typeof s.name === 'string' &&
+        typeof s.host === 'string' &&
         typeof s.port === 'number' &&
         typeof s.supervisorPid === 'number' &&
         typeof s.childPid === 'number' &&
@@ -132,6 +133,15 @@ export function isProcessAlive(pid: number): boolean {
         return true;
     } catch (error) {
         return (error as NodeJS.ErrnoException).code === 'EPERM';
+    }
+}
+
+/** A tunnel's whole log, for matching against an endpoint pattern */
+export function readLogFull(connectionName: string): string {
+    try {
+        return fs.readFileSync(logPath(connectionName), 'utf-8');
+    } catch {
+        return '';
     }
 }
 

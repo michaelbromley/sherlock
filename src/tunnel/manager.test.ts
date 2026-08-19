@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'bun:test';
 import { isEmbeddedScriptPath, keepaliveIntervalFor } from './manager';
+import { withSudoHint } from './supervisor';
 
 describe('keepaliveIntervalFor', () => {
     it('signals several times per idle period for short timeouts', () => {
@@ -39,5 +40,30 @@ describe('isEmbeddedScriptPath', () => {
 
     it('does not match a directory that merely mentions bun', () => {
         expect(isEmbeddedScriptPath('/Users/someone/bun-projects/src/query-db.ts')).toBe(false);
+    });
+});
+
+describe('withSudoHint', () => {
+    it('explains the missing terminal when sudo could not prompt', () => {
+        const output = 'sudo: a terminal is required to read the password';
+        expect(withSudoHint('Tunnel command exited with code 1', output)).toMatch(
+            /no terminal, so sudo cannot prompt/
+        );
+    });
+
+    it('recognises the no-tty wording too', () => {
+        expect(withSudoHint('failed', 'sudo: no tty present and no askpass program specified')).toMatch(
+            /SUDO_ASKPASS/
+        );
+    });
+
+    it('leaves unrelated failures untouched', () => {
+        const message = 'Tunnel command exited with code 127';
+        expect(withSudoHint(message, '/bin/sh: northflank: command not found')).toBe(message);
+    });
+
+    it('does not fire on output that merely mentions sudo', () => {
+        const message = 'failed';
+        expect(withSudoHint(message, 'run this with sudo for hostname support')).toBe(message);
     });
 });

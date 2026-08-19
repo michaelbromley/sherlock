@@ -21,6 +21,19 @@ export interface TunnelConfig {
      */
     localPort?: number;
 
+    /**
+     * Regular expression that reads the local endpoint out of the forwarding
+     * command's own output, for tools that choose the address and port
+     * themselves rather than accepting one.
+     *
+     * Must contain a named `port` group, and may contain a named `host` group
+     * (defaulting to 127.0.0.1). Mutually exclusive with `localPort` and
+     * `{{port}}`, since those dictate an endpoint rather than discovering one.
+     *
+     * e.g. "exposed on (?<host>[\\d.]+):(?<port>\\d+)" for `northflank forward`.
+     */
+    endpointPattern?: string;
+
     /** Shut the tunnel down after this long with no queries. Default "10m". */
     idleTimeout?: string;
 
@@ -38,6 +51,9 @@ export interface TunnelConfig {
 export interface TunnelState {
     /** Connection name this tunnel belongs to */
     name: string;
+
+    /** Local address the forwarding process listens on */
+    host: string;
 
     /** Local port the forwarding process listens on */
     port: number;

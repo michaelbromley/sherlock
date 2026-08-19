@@ -12,7 +12,6 @@ import type { SherlockConfig, ConnectionConfig, ResolvedConnectionConfig, Creden
 import { getEnvVarForConnection } from '../credentials/providers/env';
 import { DB_TYPES, DEFAULT_PORTS, detectDbTypeFromUrl, parseBoolParam, type DbType } from '../db-types';
 import { ensureTunnel } from '../tunnel/manager';
-import { TUNNEL_HOST } from '../tunnel/net';
 
 let cachedConfig: SherlockConfig | null = null;
 let cachedConfigPath: string | null = null;
@@ -460,18 +459,18 @@ async function applyTunnel(
 
     assertTunnelAllowed(connectionName);
 
-    // Certificate verification checks the hostname, which after tunnelling is
-    // 127.0.0.1 rather than the database's real name, so it can never match.
+    // Certificate verification checks the hostname, which after tunnelling is a
+    // loopback address rather than the database's real name, so it never matches.
     if (normalizeSsl(config.ssl).verify) {
         console.warn(
-            `\x1b[33m[sherlock] Warning: connection "${connectionName}" tunnels to localhost but requests ` +
-            `full certificate verification. The server certificate will not match 127.0.0.1.\n` +
+            `\x1b[33m[sherlock] Warning: connection "${connectionName}" tunnels to a local address but ` +
+            `requests full certificate verification. The server certificate will not match it.\n` +
             `  Use "ssl": true to encrypt without hostname verification.\x1b[0m`
         );
     }
 
-    const port = await ensureTunnel(connectionName, config.tunnel, configPath);
-    return { ...resolved, url: rewriteUrlEndpoint(resolved.url, TUNNEL_HOST, port) };
+    const { host, port } = await ensureTunnel(connectionName, config.tunnel, configPath);
+    return { ...resolved, url: rewriteUrlEndpoint(resolved.url, host, port) };
 }
 
 /**

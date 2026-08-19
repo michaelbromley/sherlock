@@ -11,6 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Automatic tunnels** for databases only reachable through a port-forwarding process (Northflank, kubectl, ssh, cloud-sql-proxy). Add a `tunnel` block to a connection and sherlock starts the forwarding command on the first query, reuses it across later commands, and shuts it down once it has gone unused.
   - `{{port}}` in the command is replaced with a free local port, so parallel tunnels never collide. Use `localPort` instead when the forwarding tool needs a fixed port.
+  - `endpointPattern` reads the endpoint out of the command's own output, for tools that take no port argument and choose one themselves. Northflank's `forward --skipHostnames` and `kubectl port-forward` both work this way.
+  - A tunnel command that needs `sudo` cannot work, because the tunnel runs in the background with no terminal for sudo to prompt at. Sherlock detects this and names the alternatives in the error.
   - `idleTimeout` (default `10m`) controls automatic shutdown; queries in flight keep their own tunnel alive.
   - `sherlock tunnel status`, `sherlock tunnel stop <connection>`, `sherlock tunnel stop` to stop all.
   - Sherlock waits for the local port to accept before connecting, so a tunnel that fails to start reports the forwarding command's own error.

@@ -194,10 +194,46 @@ Databases that are only reachable through a port-forwarding process — a Northf
 |---|---|---|
 | `command` | yes | Shell command that forwards the remote database to a local port |
 | `localPort` | no | Fixed local port. When omitted, sherlock picks a free one and substitutes it for `{{port}}` |
+| `endpointPattern` | no | Regex that reads the endpoint out of the command's own output, for tools that choose their own port |
 | `idleTimeout` | no | Shut down after this long with no queries (default `10m`) |
 | `readyTimeout` | no | How long to wait for the port to start accepting (default `30s`) |
 
 Write `{{port}}` wherever the command takes the local port. Sherlock replaces it with the port it allocated, so parallel tunnels never collide. If the forwarding tool cannot be told which port to bind, set `localPort` instead and hard-code it in the command.
+
+#### Tools that choose their own port
+
+Some forwarding tools take no port argument and pick one themselves, printing it on startup. For those, set `endpointPattern` to a regex with a named `port` group and an optional named `host` group, and sherlock reads the endpoint out of the command's output instead of dictating it.
+
+Northflank is the main example. Its `forward` command needs root by default, because it writes the addon's hostname into `/etc/hosts`. Passing `--skipHostnames` drops that requirement (the CLI's own help says "no root permissions are required") and exposes the addon on an IP address instead, choosing the port itself:
+
+```json
+"northflank-prod": {
+  "type": "postgres",
+  "host": "pg.northflank.internal",
+  "username": "vendure",
+  "password": { "$keychain": "northflank-prod" },
+  "database": "vendure",
+  "ssl": true,
+  "tunnel": {
+    "command": "northflank forward addon --project my-proj --addon pg --skipHostnames",
+    "endpointPattern": "exposed on (?<host>[\\d.]+):(?<port>\\d+)"
+  }
+}
+```
+
+`kubectl port-forward svc/postgres :5432` behaves the same way, and matches `"Forwarding from 127\\.0\\.0\\.1:(?<port>\\d+)"`.
+
+`endpointPattern` cannot be combined with `localPort` or `{{port}}`, since those dictate an endpoint rather than discovering one. If the pattern never matches, the error shows the pattern alongside the command's actual output so you can see what to change.
+
+#### Commands that need sudo
+
+The forwarding process runs in the background with no terminal so it can outlive the command that started it, which means `sudo` has nowhere to prompt for a password and the tunnel fails immediately. Three ways round it, best first:
+
+1. **Use the tool's no-root option** if it has one, such as Northflank's `--skipHostnames` above. Nothing else to configure.
+2. **Grant that one command passwordless sudo** with a `NOPASSWD` rule in `/etc/sudoers`.
+3. **Use `sudo -A`** with `SUDO_ASKPASS` pointing at a helper that supplies the password without a terminal.
+
+Sherlock detects this failure and includes these options in the error rather than leaving you to work out why sudo was unhappy.
 
 The connection's `host` and `port` are replaced by the tunnel's local endpoint, so they can be left out or left pointing at the real remote address, whichever documents the connection better.
 

@@ -1158,7 +1158,9 @@ async function promptForSsl(existingSsl?: ConnectionConfig['ssl']): Promise<Conn
 /** Short label describing the current tunnel state, used as a menu hint */
 function tunnelHintLabel(tunnel: ConnectionConfig['tunnel']): string {
     if (!tunnel) return 'not set';
-    const port = tunnel.localPort ? `port ${tunnel.localPort}` : 'auto port';
+    let port = 'auto port';
+    if (tunnel.localPort) port = `port ${tunnel.localPort}`;
+    else if (tunnel.endpointPattern) port = 'port from output';
     return `${port}, idle ${tunnel.idleTimeout ?? DEFAULT_IDLE_TIMEOUT}`;
 }
 
@@ -1198,25 +1200,66 @@ async function promptForTunnel(
     });
     if (p.isCancel(command)) return null;
 
-    // A fixed port is only needed when the forwarding tool cannot be told which
-    // port to use, so offer the auto path first.
-    let localPort = existing?.localPort;
+    // With {{port}} sherlock dictates the port, so there is nothing else to ask.
+    let localPort: number | undefined;
+    let endpointPattern: string | undefined;
+
     if (!hasPortPlaceholder(command)) {
-        p.log.warn('The command has no {{port}}, so it needs a fixed local port.');
-        const portValue = await p.text({
-            message: 'Fixed local port',
-            placeholder: 'e.g. 15432',
-            initialValue: localPort ? String(localPort) : undefined,
-            validate: (value) => {
-                const n = Number(value);
-                if (!Number.isInteger(n) || n < 1 || n > 65535) return 'Enter a port between 1 and 65535';
-                return undefined;
-            },
+        p.log.warn('The command has no {{port}}, so sherlock cannot tell it which port to bind.');
+
+        const strategy = await p.select({
+            message: 'How does the command decide its local port?',
+            initialValue: existing?.endpointPattern ? 'discover' : 'fixed',
+            options: [
+                { value: 'fixed', label: 'It always uses the same port', hint: 'enter it below' },
+                {
+                    value: 'discover',
+                    label: 'It picks a port and prints it',
+                    hint: 'northflank --skipHostnames, kubectl port-forward',
+                },
+            ],
         });
-        if (p.isCancel(portValue)) return null;
-        localPort = Number(portValue);
-    } else {
-        localPort = undefined;
+        if (p.isCancel(strategy)) return null;
+
+        if (strategy === 'fixed') {
+            const portValue = await p.text({
+                message: 'Fixed local port',
+                placeholder: 'e.g. 15432',
+                initialValue: existing?.localPort ? String(existing.localPort) : undefined,
+                validate: (value) => {
+                    const n = Number(value);
+                    if (!Number.isInteger(n) || n < 1 || n > 65535) {
+                        return 'Enter a port between 1 and 65535';
+                    }
+                    return undefined;
+                },
+            });
+            if (p.isCancel(portValue)) return null;
+            localPort = Number(portValue);
+        } else {
+            p.log.info(
+                'Give a regular expression that matches the line the command prints.\n' +
+                'It needs a (?<port>...) group, and may have a (?<host>...) group.'
+            );
+            const patternValue = await p.text({
+                message: 'Endpoint pattern',
+                placeholder: 'exposed on (?<host>[\\d.]+):(?<port>\\d+)',
+                initialValue: existing?.endpointPattern,
+                validate: (value) => {
+                    if (!value || !value.includes('(?<port>')) {
+                        return 'Must contain a named "port" group, e.g. (?<port>\\d+)';
+                    }
+                    try {
+                        new RegExp(value);
+                        return undefined;
+                    } catch (error) {
+                        return error instanceof Error ? error.message : 'Invalid regular expression';
+                    }
+                },
+            });
+            if (p.isCancel(patternValue)) return null;
+            endpointPattern = patternValue;
+        }
     }
 
     const idleTimeout = await p.text({
@@ -1237,6 +1280,7 @@ async function promptForTunnel(
 
     const tunnel: ConnectionConfig['tunnel'] = { command: command.trim() };
     if (localPort !== undefined) tunnel.localPort = localPort;
+    if (endpointPattern !== undefined) tunnel.endpointPattern = endpointPattern;
     if (idleTimeout && idleTimeout !== DEFAULT_IDLE_TIMEOUT) tunnel.idleTimeout = idleTimeout;
     if (existing?.readyTimeout) tunnel.readyTimeout = existing.readyTimeout;
 
