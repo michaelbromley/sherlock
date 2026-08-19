@@ -5,6 +5,7 @@ import {
     applyPortPlaceholder,
     hasPortPlaceholder,
     matchEndpoint,
+    NORTHFLANK_ENDPOINT_PATTERN,
     DEFAULT_IDLE_TIMEOUT,
     DEFAULT_READY_TIMEOUT,
 } from './config';
@@ -124,7 +125,7 @@ describe('resolveTunnelConfig', () => {
 });
 
 describe('resolveTunnelConfig — endpoint discovery', () => {
-    const NORTHFLANK_PATTERN = 'exposed on (?<host>[\\d.]+):(?<port>\\d+)';
+    const NORTHFLANK_PATTERN = NORTHFLANK_ENDPOINT_PATTERN;
 
     it('accepts a command with no port when the endpoint is discovered', () => {
         const resolved = resolveTunnelConfig('nf', {
@@ -168,7 +169,7 @@ describe('resolveTunnelConfig — endpoint discovery', () => {
 });
 
 describe('matchEndpoint', () => {
-    const pattern = /exposed on (?<host>[\d.]+):(?<port>\d+)/;
+    const pattern = new RegExp(NORTHFLANK_ENDPOINT_PATTERN);
 
     it('reads host and port out of northflank-style output', () => {
         const output = "> Addon 'pg' is exposed on 127.0.0.2:55432 (postgres - TCP)";

@@ -21,6 +21,7 @@ import {
     listTunnelStates,
     lockPath,
     readLogTail,
+    releaseLock,
     readState,
     touchLastUsed,
 } from './state';
@@ -116,14 +117,6 @@ function acquireLock(connectionName: string, staleAfterMs: number): boolean {
     }
 
     return false;
-}
-
-function releaseLock(connectionName: string): void {
-    try {
-        fs.unlinkSync(lockPath(connectionName));
-    } catch {
-        // Already released, usually by the supervisor itself.
-    }
 }
 
 /** Wait for the supervisor to publish a ready tunnel, or fail with its error */

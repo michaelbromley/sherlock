@@ -95,6 +95,19 @@ export function clearState(connectionName: string): void {
     }
 }
 
+/**
+ * Release the startup lock, letting any command waiting on this tunnel stop
+ * polling. Both the starting command and the supervisor may do this, whichever
+ * reaches the end of startup first.
+ */
+export function releaseLock(connectionName: string): void {
+    try {
+        fs.unlinkSync(lockPath(connectionName));
+    } catch {
+        // Already released.
+    }
+}
+
 /** Record that a command just used this tunnel, resetting its idle countdown */
 export function touchLastUsed(connectionName: string): void {
     ensureTunnelsDir();

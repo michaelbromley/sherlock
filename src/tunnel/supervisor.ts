@@ -27,6 +27,7 @@ import {
     lockPath,
     logPath,
     readLastUsed,
+    releaseLock,
     readLogFrom,
     readLogTail,
     writeState,
@@ -102,15 +103,6 @@ export function withSudoHint(message: string, output: string): string {
         `Many forwarding tools also have a flag that avoids root entirely ` +
         `(northflank has --skipHostnames).`
     );
-}
-
-/** Release the startup lock, letting waiting commands stop polling */
-function releaseLock(connectionName: string): void {
-    try {
-        fs.unlinkSync(lockPath(connectionName));
-    } catch {
-        // Already released.
-    }
 }
 
 /**

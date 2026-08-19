@@ -19,7 +19,12 @@ import {
 import type { SherlockConfig, ConnectionConfig } from '../config/types';
 import type { ParsedConnectionUrl } from '../config';
 import { DB_TYPES, DEFAULT_PORTS, isRedisConfig, type DbType } from '../db-types';
-import { DEFAULT_IDLE_TIMEOUT, hasPortPlaceholder, parseDuration } from '../tunnel/config';
+import {
+    DEFAULT_IDLE_TIMEOUT,
+    NORTHFLANK_ENDPOINT_PATTERN,
+    hasPortPlaceholder,
+    parseDuration,
+} from '../tunnel/config';
 import {
     setKeychainPassword,
     hasKeychainPassword,
@@ -1154,12 +1159,6 @@ async function promptForSsl(existingSsl?: ConnectionConfig['ssl']): Promise<Conn
     if (p.isCancel(choice)) return null;
     return sslChoiceToConfig(choice as 'off' | 'require' | 'verify');
 }
-
-/**
- * Matches the endpoint line printed by `northflank forward --skipHostnames`:
- *   > Addon 'pg' is exposed on 127.0.0.1:44109 (TCP)
- */
-const NORTHFLANK_ENDPOINT_PATTERN = 'exposed on (?<host>[\\d.]+):(?<port>\\d+)';
 
 /** Short label describing the current tunnel state, used as a menu hint */
 export function tunnelHintLabel(tunnel: ConnectionConfig['tunnel']): string {
