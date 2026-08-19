@@ -13,8 +13,10 @@ dist/
 /sherlock
 /sherlock-*
 
-# Config files with credentials
-config.ts
+# Config files with credentials.
+# Anchored: the legacy config lives at the repo root, and an unanchored rule
+# also swallows source files that happen to be named config.ts.
+/config.ts
 .sherlock.json
 .env
 
