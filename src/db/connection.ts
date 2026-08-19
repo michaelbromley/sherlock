@@ -5,6 +5,7 @@
 
 import { SQL } from 'bun';
 import { resolveConnection } from '../config';
+import { startTunnelKeepalive } from '../tunnel/manager';
 import type { ResolvedConnectionConfig } from '../config/types';
 import { DB_TYPES } from '../db-types';
 import { MssqlAdapter, type SqlAdapter } from './mssql-adapter';
@@ -59,12 +60,15 @@ export async function withConnection<T>(
     handler: (sql: SqlAdapter, dbType: string) => Promise<T>
 ): Promise<T> {
     let sql: SqlAdapter | null = null;
+    let stopKeepalive: (() => void) | null = null;
 
     try {
         const config = await resolveConnection(connectionName, configPath);
+        stopKeepalive = startTunnelKeepalive(connectionName);
         sql = await createConnection(config);
         return await handler(sql, config.type);
     } finally {
+        stopKeepalive?.();
         if (sql) {
             await sql.close();
         }

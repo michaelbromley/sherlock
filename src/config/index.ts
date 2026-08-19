@@ -1,14 +1,28 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import { findConfigFile, getConfigDir, getEnvFilePath } from './paths';
+import {
+    describeConfigSource,
+    findConfig,
+    getConfigDir,
+    getEnvFilePath,
+    type ConfigSource,
+} from './paths';
 import { getCredentialResolver } from '../credentials';
 import type { SherlockConfig, ConnectionConfig, ResolvedConnectionConfig, CredentialRef, SslConfig } from './types';
 import { getEnvVarForConnection } from '../credentials/providers/env';
 import { DB_TYPES, DEFAULT_PORTS, detectDbTypeFromUrl, parseBoolParam, type DbType } from '../db-types';
+import { ensureTunnel } from '../tunnel/manager';
 
 let cachedConfig: SherlockConfig | null = null;
 let cachedConfigPath: string | null = null;
+let cachedConfigSource: ConfigSource | null = null;
 let envLoaded = false;
+
+/**
+ * Config sources that come from the current working directory, and so may
+ * belong to a repository the user has merely cloned rather than written.
+ */
+const UNTRUSTED_CONFIG_SOURCES: ConfigSource[] = ['project', 'legacy'];
 
 /**
  * Load environment variables from the Sherlock config directory's .env file
@@ -54,9 +68,9 @@ export function loadConfigFile(configPath?: string): SherlockConfig {
     // Load .env file from config directory
     loadEnvFile();
 
-    const resolvedPath = findConfigFile(configPath);
+    const found = findConfig(configPath);
 
-    if (!resolvedPath) {
+    if (!found) {
         throw new Error(
             `No configuration file found.\n\n` +
             `Run 'sherlock init' to create one, or create a config file at:\n` +
@@ -65,6 +79,9 @@ export function loadConfigFile(configPath?: string): SherlockConfig {
             `Or set SHERLOCK_CONFIG environment variable to your config file path.`
         );
     }
+
+    const resolvedPath = found.path;
+    cachedConfigSource = found.source;
 
     // Check if it's a legacy TypeScript config
     if (resolvedPath.endsWith('.ts')) {
@@ -377,13 +394,113 @@ export function applySslToUrl(url: string, type: DbType, ssl: ConnectionConfig['
 }
 
 /**
- * Resolve a connection config to a fully resolved config with connection URL
+ * Point a connection URL at a different host and port, preserving credentials,
+ * database name and query parameters.
+ */
+export function rewriteUrlEndpoint(url: string, host: string, port: number): string {
+    let parsed: URL;
+    try {
+        parsed = new URL(url);
+    } catch {
+        throw new Error(`Cannot apply tunnel: "${url}" is not a parseable connection URL`);
+    }
+
+    parsed.hostname = host;
+    parsed.port = String(port);
+    return parsed.toString();
+}
+
+/**
+ * Whether the loaded config was discovered in the current working directory,
+ * and so cannot be trusted to supply shell commands. Loads the config first,
+ * since the source is only known once discovery has run.
+ */
+export function isConfigFromWorkingDirectory(configPath?: string): boolean {
+    try {
+        loadConfigFile(configPath);
+    } catch {
+        return false;
+    }
+    return isUntrustedSource(cachedConfigSource);
+}
+
+/**
+ * Whether a config source is one the user did not deliberately choose, and so
+ * must not be allowed to supply shell commands.
+ */
+export function isUntrustedSource(source: ConfigSource | null): boolean {
+    return source !== null && UNTRUSTED_CONFIG_SOURCES.includes(source);
+}
+
+/**
+ * Refuse to run a config-supplied shell command that came from the current
+ * working directory. Otherwise cloning a repository containing a hostile
+ * `.sherlock.json` and running any sherlock command would execute it.
+ */
+function assertTunnelAllowed(connectionName: string): void {
+    if (isUntrustedSource(cachedConfigSource)) {
+        throw new Error(
+            `Connection "${connectionName}" defines a tunnel, but the config was loaded from ` +
+            `${describeConfigSource(cachedConfigSource)}.\n\n` +
+            `Tunnels run a shell command, so they are only honoured from a config you opted into ` +
+            `explicitly: your user config directory, a config next to the binary, --config, or ` +
+            `SHERLOCK_CONFIG.\n\n` +
+            `If you trust this file, re-run with --config ${cachedConfigPath ?? '<path>'}`
+        );
+    }
+}
+
+/**
+ * Start the connection's tunnel if it has one, and redirect the URL through it.
+ */
+async function applyTunnel(
+    connectionName: string,
+    config: ConnectionConfig,
+    resolved: ResolvedConnectionConfig,
+    configPath?: string
+): Promise<ResolvedConnectionConfig> {
+    if (!config.tunnel) return resolved;
+
+    if (resolved.type === DB_TYPES.SQLITE) {
+        throw new Error(`Connection "${connectionName}": SQLite is a local file and cannot use a tunnel.`);
+    }
+
+    assertTunnelAllowed(connectionName);
+
+    // Certificate verification checks the hostname, which after tunnelling is a
+    // loopback address rather than the database's real name, so it never matches.
+    if (normalizeSsl(config.ssl).verify) {
+        console.warn(
+            `\x1b[33m[sherlock] Warning: connection "${connectionName}" tunnels to a local address but ` +
+            `requests full certificate verification. The server certificate will not match it.\n` +
+            `  Use "ssl": true to encrypt without hostname verification.\x1b[0m`
+        );
+    }
+
+    const { host, port } = await ensureTunnel(connectionName, config.tunnel, configPath);
+    return { ...resolved, url: rewriteUrlEndpoint(resolved.url, host, port) };
+}
+
+/**
+ * Resolve a connection config to a fully resolved config with connection URL,
+ * starting the connection's tunnel first if it has one.
  */
 export async function resolveConnection(
     connectionName: string,
     configPath?: string
 ): Promise<ResolvedConnectionConfig> {
     const config = getConnectionConfig(connectionName, configPath);
+    const resolved = await buildResolvedConnection(connectionName, config);
+    return applyTunnel(connectionName, config, resolved, configPath);
+}
+
+/**
+ * Build the connection URL from a connection config, resolving credentials.
+ */
+async function buildResolvedConnection(
+    connectionName: string,
+    config: ConnectionConfig
+): Promise<ResolvedConnectionConfig> {
     const resolver = getCredentialResolver();
 
     // Check for connection URL first
@@ -540,4 +657,5 @@ export function listConnections(configPath?: string): string[] {
 export function clearConfigCache(): void {
     cachedConfig = null;
     cachedConfigPath = null;
+    cachedConfigSource = null;
 }

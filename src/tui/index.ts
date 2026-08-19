@@ -8,10 +8,23 @@ import * as path from 'path';
 import { SQL, RedisClient } from 'bun';
 import { MssqlAdapter } from '../db/mssql-adapter';
 import { findConfigFile, getConfigDir, ensureConfigDir } from '../config/paths';
-import { loadConfigFile, listConnections, resolveConnection, parseConnectionUrl, sortConnectionNames } from '../config';
+import {
+    loadConfigFile,
+    listConnections,
+    resolveConnection,
+    parseConnectionUrl,
+    sortConnectionNames,
+    isConfigFromWorkingDirectory,
+} from '../config';
 import type { SherlockConfig, ConnectionConfig } from '../config/types';
 import type { ParsedConnectionUrl } from '../config';
 import { DB_TYPES, DEFAULT_PORTS, isRedisConfig, type DbType } from '../db-types';
+import {
+    DEFAULT_IDLE_TIMEOUT,
+    NORTHFLANK_ENDPOINT_PATTERN,
+    hasPortPlaceholder,
+    parseDuration,
+} from '../tunnel/config';
 import {
     setKeychainPassword,
     hasKeychainPassword,
@@ -516,7 +529,7 @@ async function editConnectionWizard(): Promise<void> {
     const directoryHint = existingConn.directory || 'not set';
     const sslHint = sslHintLabel(existingConn.ssl);
     const isSqlite = existingConn.type === DB_TYPES.SQLITE;
-    type EditAction = 'edit' | 'password' | 'directory' | 'logging' | 'ssl' | 'delete';
+    type EditAction = 'edit' | 'password' | 'directory' | 'logging' | 'ssl' | 'tunnel' | 'delete';
     const editOptions: Array<{ value: EditAction; label: string; hint?: string }> = [
         { value: 'edit', label: 'Edit connection details' },
         { value: 'password', label: 'Update password' },
@@ -525,6 +538,11 @@ async function editConnectionWizard(): Promise<void> {
     ];
     if (!isSqlite) {
         editOptions.push({ value: 'ssl', label: 'Configure SSL/TLS', hint: sslHint });
+        editOptions.push({
+            value: 'tunnel',
+            label: 'Configure tunnel',
+            hint: tunnelHintLabel(existingConn.tunnel),
+        });
     }
     editOptions.push({ value: 'delete', label: 'Delete connection', hint: 'Cannot be undone' });
 
@@ -593,6 +611,34 @@ async function editConnectionWizard(): Promise<void> {
         }
         saveConfig(config);
         p.log.success(`SSL set to "${sslHintLabel(newSsl)}" for "${connName}".`);
+        return;
+    }
+
+    if (action === 'tunnel') {
+        const newTunnel = await promptForTunnel(existingConn.tunnel);
+        if (newTunnel === null) return;
+
+        if (newTunnel === undefined) {
+            delete config.connections[connName].tunnel;
+            saveConfig(config);
+            p.log.success(`Tunnel removed for "${connName}".`);
+            return;
+        }
+
+        config.connections[connName].tunnel = newTunnel;
+        saveConfig(config);
+        p.log.success(`Tunnel configured for "${connName}".`);
+        p.log.info(
+            'Sherlock starts this tunnel on the first query and shuts it down once it goes unused.\n' +
+            `Stop it now with: sherlock tunnel stop ${connName}`
+        );
+
+        if (isConfigFromWorkingDirectory()) {
+            p.log.warn(
+                'This config was loaded from the current directory, and tunnels are ignored there ' +
+                'because they run a shell command. Move it to your user config directory to use it.'
+            );
+        }
         return;
     }
 
@@ -1112,6 +1158,147 @@ async function promptForSsl(existingSsl?: ConnectionConfig['ssl']): Promise<Conn
 
     if (p.isCancel(choice)) return null;
     return sslChoiceToConfig(choice as 'off' | 'require' | 'verify');
+}
+
+/** Short label describing the current tunnel state, used as a menu hint */
+export function tunnelHintLabel(tunnel: ConnectionConfig['tunnel']): string {
+    if (!tunnel) return 'not set';
+    let port = 'auto port';
+    if (tunnel.localPort) port = `port ${tunnel.localPort}`;
+    else if (tunnel.endpointPattern) port = 'port from output';
+    return `${port}, idle ${tunnel.idleTimeout ?? DEFAULT_IDLE_TIMEOUT}`;
+}
+
+/**
+ * Prompt for tunnel settings. Returns the new tunnel config, `undefined` to
+ * remove the tunnel, or null if the user cancelled.
+ */
+async function promptForTunnel(
+    existing?: ConnectionConfig['tunnel']
+): Promise<ConnectionConfig['tunnel'] | null | undefined> {
+    if (existing) {
+        const keep = await p.select({
+            message: 'Tunnel',
+            options: [
+                { value: 'edit', label: 'Edit tunnel settings' },
+                { value: 'remove', label: 'Remove tunnel', hint: 'connect directly instead' },
+            ],
+        });
+        if (p.isCancel(keep)) return null;
+        if (keep === 'remove') return undefined;
+    }
+
+    p.log.info(
+        'The command must forward the remote database to a local port.\n\n' +
+        'If it takes a port, write {{port}} and sherlock fills in a free one:\n' +
+        '  ssh -N -L {{port}}:db.internal:5432 bastion.example.com\n' +
+        '  kubectl port-forward svc/postgres {{port}}:5432\n\n' +
+        'If it picks its own port and prints it, leave {{port}} out. Sherlock\n' +
+        'then reads the port from the output, using the next answer:\n' +
+        '  northflank forward addon --project my-proj --addon pg --skipHostnames'
+    );
+
+    const command = await p.text({
+        message: 'Tunnel command',
+        placeholder: 'ssh -N -L {{port}}:db.internal:5432 bastion.example.com',
+        initialValue: existing?.command,
+        validate: (value) => {
+            if (!value || value.trim() === '') return 'A command is required';
+            return undefined;
+        },
+    });
+    if (p.isCancel(command)) return null;
+
+    // With {{port}} sherlock dictates the port, so there is nothing else to ask.
+    let localPort: number | undefined;
+    let endpointPattern: string | undefined;
+
+    if (!hasPortPlaceholder(command)) {
+        p.log.warn('The command has no {{port}}, so sherlock cannot tell it which port to bind.');
+
+        const strategy = await p.select({
+            message: 'How does the command decide its local port?',
+            initialValue: existing?.endpointPattern ? 'discover' : 'fixed',
+            options: [
+                { value: 'fixed', label: 'It always uses the same port', hint: 'enter it below' },
+                {
+                    value: 'discover',
+                    label: 'It picks a port and prints it',
+                    hint: 'northflank forward --skipHostnames',
+                },
+            ],
+        });
+        if (p.isCancel(strategy)) return null;
+
+        if (strategy === 'fixed') {
+            const portValue = await p.text({
+                message: 'Fixed local port',
+                placeholder: 'e.g. 15432',
+                initialValue: existing?.localPort ? String(existing.localPort) : undefined,
+                validate: (value) => {
+                    const n = Number(value);
+                    if (!Number.isInteger(n) || n < 1 || n > 65535) {
+                        return 'Enter a port between 1 and 65535';
+                    }
+                    return undefined;
+                },
+            });
+            if (p.isCancel(portValue)) return null;
+            localPort = Number(portValue);
+        } else {
+            p.log.info(
+                'Give a regular expression matching the line the command prints.\n' +
+                'It needs a (?<port>...) group, and may have a (?<host>...) group.\n\n' +
+                'northflank prints:\n' +
+                "  > Addon 'pg' is exposed on 127.0.0.1:44109 (TCP)\n" +
+                'which the suggested pattern below matches. Run your command once\n' +
+                'and copy the wording if it differs.'
+            );
+            const patternValue = await p.text({
+                message: 'Endpoint pattern',
+                // Pre-filled rather than hinted: this is fiddly to type, and the
+                // default already matches northflank's output.
+                initialValue: existing?.endpointPattern ?? NORTHFLANK_ENDPOINT_PATTERN,
+                validate: (value) => {
+                    if (!value || !value.includes('(?<port>')) {
+                        return 'Must contain a named "port" group, e.g. (?<port>\\d+)';
+                    }
+                    try {
+                        new RegExp(value);
+                        return undefined;
+                    } catch (error) {
+                        return error instanceof Error ? error.message : 'Invalid regular expression';
+                    }
+                },
+            });
+            if (p.isCancel(patternValue)) return null;
+            endpointPattern = patternValue;
+        }
+    }
+
+    const idleTimeout = await p.text({
+        message: 'Shut the tunnel down after this long with no queries',
+        placeholder: DEFAULT_IDLE_TIMEOUT,
+        initialValue: existing?.idleTimeout ?? DEFAULT_IDLE_TIMEOUT,
+        validate: (value) => {
+            if (!value) return undefined;
+            try {
+                parseDuration(value);
+                return undefined;
+            } catch (error) {
+                return error instanceof Error ? error.message : 'Invalid duration';
+            }
+        },
+    });
+    if (p.isCancel(idleTimeout)) return null;
+
+    const tunnel: ConnectionConfig['tunnel'] = { command: command.trim() };
+    if (localPort !== undefined) tunnel.localPort = localPort;
+    if (endpointPattern !== undefined) tunnel.endpointPattern = endpointPattern;
+    if (idleTimeout && idleTimeout !== DEFAULT_IDLE_TIMEOUT) tunnel.idleTimeout = idleTimeout;
+    if (existing?.readyTimeout) tunnel.readyTimeout = existing.readyTimeout;
+
+    return tunnel;
 }
 
 /**
