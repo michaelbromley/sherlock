@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- **The binary and the agent skill are now installed separately.** `install.sh` puts the binary in `~/.local/bin/sherlock` (or `$SHERLOCK_BIN_DIR`), then offers to install the skill with the [skills CLI](https://skills.sh): `npx skills add michaelbromley/sherlock -g`. The skill works in any agent that supports Agent Skills (Claude Code, Codex, Cursor, Gemini CLI and more), and runs `sherlock` from PATH instead of a fixed path under `~/.claude/skills`.
+  - Running `install.sh` over an earlier install migrates it: `config.json`, `.env`, logs and cache move from `~/.claude/skills/sherlock` to `~/.config/sherlock` (an existing config there is backed up first), and the old binary, skill file, PATH line and Claude Code permission are removed or updated. A skill directory owned by a skill manager (a symlink) is left alone.
+  - The installer no longer creates a `config.json` in the skill directory. That file switched sherlock to portable mode, which kept your connections and credentials inside a directory that skill managers replace and sync.
+  - Run without a terminal, the installer asks nothing, edits no shell config and prints the skill install command instead of running it.
+  - Upgrade from 1.7.0 or earlier by running `install.sh`, not `sherlock update`. Updating a 1.7.0 binary with `sherlock update` keeps the old layout. Until you run the installer, the skill falls back to the old binary path and tells you to run it, and later runs of `sherlock update` print the install command.
+  - Log and cache files whose names are already taken in `~/.config/sherlock` are kept with a `.migrated-<time>` suffix. The old Claude Code permission is removed from both `settings.json` and `settings.local.json`, and the rest of each allow list keeps its order.
+  - `SHERLOCK_BIN_DIR` changes where the binary goes, and `SHERLOCK_NO_PROMPT=1` makes the installer ask nothing.
+  - `install.ps1` always puts its install directory on the user PATH, since the skill runs `sherlock` from PATH.
+- The skill follows the Agent Skills specification: a description that says when to use it, a `compatibility` field naming the CLI it needs, and `allowed-tools: Bash(sherlock:*)`. The walkthrough for moving connections between machines moved to `references/transfer.md`, which agents load only when needed.
+- `sherlock update` updates only the binary, and no longer writes a `SKILL.md` next to it. Update the skill with `npx skills update sherlock -g`.
+
+### Fixed
+
+- The README and website only describe platforms that have a release (macOS on Apple silicon, Linux x64), and the installer and `sherlock update` say so on other platforms instead of failing to download. They no longer refer to commands that do not exist (`sherlock setup`, `sherlock edit`), and the website's examples use the real command syntax.
+- The installer's questions work when it is run with `curl ... | bash`. They read from the terminal; before, they read from the piped script and were always answered no.
+
 ## [1.7.0] - 2026-09-28
 
 ### Added

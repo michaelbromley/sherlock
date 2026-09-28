@@ -157,7 +157,7 @@ function requireConnection(opts: Record<string, any>): asserts opts is { connect
     if (opts.url) {
         const detectedType = detectDbTypeFromUrl(opts.url);
         if (!detectedType) {
-            console.error(`Error: Cannot detect database type from URL. Supported prefixes: postgres://, mysql://, sqlite://, redis://`);
+            console.error(`Error: Cannot detect database type from URL. Supported prefixes: postgres://, mysql://, mssql://, sqlserver://, sqlite://, redis://, rediss://`);
             process.exit(1);
         }
         opts._resolvedConfig = { type: detectedType, url: opts.url } as ResolvedConnectionConfig;

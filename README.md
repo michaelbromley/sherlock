@@ -1,18 +1,24 @@
 # Sherlock
 
-A read-only database query tool for AI assistants. Single binary, secure credential management, works with PostgreSQL, MySQL, SQLite, and Redis.
+A read-only database query tool for AI agents. A single binary with secure credential management, for PostgreSQL, MySQL/MariaDB, SQL Server, SQLite and Redis.
+
+Sherlock comes in two parts:
+
+- **The `sherlock` CLI**, a standalone binary that runs the queries.
+- **The `sherlock` agent skill**, a [SKILL.md](.claude/skills/sherlock/SKILL.md) that teaches your AI agent how to use the CLI. It follows the [Agent Skills](https://agentskills.io) format, so it works in Claude Code, Codex, Cursor, Gemini CLI and other agents that support skills.
 
 ## Features
 
-- **Single binary** - 57MB standalone executable, no runtime dependencies
-- **Secure credentials** - OS keychain or environment variables, never plaintext in config
-- **Read-only enforced** - SQL: only SELECT/SHOW/DESCRIBE/EXPLAIN. Redis: read-only command whitelist
-- **Explicit connections** - Must specify which database to query (no accidental production queries)
-- **Multiple databases** - PostgreSQL, MySQL/MariaDB, SQLite, Redis
+- **Single binary** - Standalone executable, no runtime dependencies
+- **Secure credentials** - Passwords in the OS keychain or environment variables. Plaintext in config is possible but warned about on every query.
+- **Read-only enforced** - SQL: only SELECT/SHOW/DESCRIBE/EXPLAIN/WITH. Redis: read-only command whitelist
+- **Explicit connections** - Name the database to query, or let a project directory select it. There is no default connection, so no accidental production queries.
+- **Multiple databases** - PostgreSQL, MySQL/MariaDB, SQL Server, SQLite, Redis
 - **SSL/TLS support** - Works with managed databases (Northflank, Supabase, Neon, RDS, Azure SQL) that require encrypted connections
 - **Automatic tunnels** - Databases behind a port-forward (Northflank, kubectl, ssh) open on first use and shut down when idle
 - **Paste a connection string** - Set up new connections by pasting a URL — sherlock parses out host, port, user, password, database, and SSL settings
-- **Claude Code integration** - Works as a skill for AI-assisted database exploration
+- **Move connections between machines** - Export connections, passwords included, to a passphrase-encrypted file and import them elsewhere
+- **Works with any skills-capable agent** - Claude Code, Codex, Cursor, Gemini CLI and more, through the agent skill
 
 ## Quick Start
 
@@ -22,21 +28,29 @@ A read-only database query tool for AI assistants. Single binary, secure credent
 curl -fsSL https://raw.githubusercontent.com/michaelbromley/sherlock/main/install.sh | bash
 ```
 
-This installs the `sherlock` binary and the Claude Code skill.
+This installs the `sherlock` binary to `~/.local/bin`, then offers to install the agent skill for you (step 2). Prebuilt binaries exist for **macOS on Apple silicon** and **Linux x64**. On any other platform, [build from source](#from-source).
 
-#### Windows (PowerShell)
+The installer reads two optional environment variables, set on the `bash` side of the pipe:
 
-From sourcecode:
+- `SHERLOCK_BIN_DIR` installs the binary somewhere other than `~/.local/bin`, e.g. `curl ... | SHERLOCK_BIN_DIR=$HOME/bin bash`. The directory must be writable without sudo.
+- `SHERLOCK_NO_PROMPT=1` asks nothing, as when there is no terminal: the shell config is not edited and the skill install command is printed instead of run.
 
-```powershell
-npm run build:windows   # build dist/sherlock-windows.exe first
-.\install.ps1           # installs from local dist/
-```
+### 2. Install the agent skill
 
-### 2. Set up a connection
+If you skipped it during install, or want it for more agents:
 
 ```bash
-sherlock setup
+npx skills add michaelbromley/sherlock -g
+```
+
+The [skills CLI](https://skills.sh) asks which agents to install the skill for. The skill runs `sherlock` from your PATH, so any agent that can run shell commands can use it.
+
+In Claude Code, the installer also allows `Bash(sherlock:*)` in your settings, so Claude does not ask before every sherlock command. This works around [a Claude Code bug](https://github.com/anthropics/claude-code/issues/14956) where a skill's `allowed-tools` are not applied.
+
+### 3. Set up a connection
+
+```bash
+sherlock manage
 ```
 
 The interactive wizard offers two ways to add a connection:
@@ -48,7 +62,7 @@ After the details, you'll choose secure password storage (OS keychain or env fil
 
 #### Without the wizard
 
-`sherlock connection add` sets up a connection in one command, for scripting or for asking Claude to do it. The password is read from stdin and stored in the OS keychain, so it never appears in the process list or the shell history.
+`sherlock connection add` sets up a connection in one command, for scripting or for asking your agent to do it. The password is read from stdin and stored in the OS keychain, so it never appears in the process list or the shell history.
 
 ```bash
 printf '%s' "$PASSWORD" | sherlock connection add prod \
@@ -58,9 +72,9 @@ printf '%s' "$PASSWORD" | sherlock connection add prod \
 
 `--from-url postgres://dbuser@host:5432/app` replaces the individual flags. `--password-env VAR` stores a reference to an environment variable instead of a keychain entry. `--tunnel-command`, `--tunnel-northflank` and the other tunnel flags are covered under [Tunnels](#tunnels). Run `sherlock connection add --help` for the full list.
 
-### 3. Use with Claude Code
+### 4. Ask your agent
 
-Once configured, just ask Claude Code questions about your data:
+Once configured, ask your agent questions about your data:
 
 > "Show me the top 10 customers by order value from prod-db"
 
@@ -68,28 +82,26 @@ Once configured, just ask Claude Code questions about your data:
 
 > "How many users signed up last week?"
 
-Claude will use Sherlock to explore schemas and run queries on your behalf.
+The agent uses sherlock to explore schemas and run read-only queries on your behalf.
 
 ## Upgrading
 
-Run the same install command to upgrade to the latest version:
-
 ```bash
-curl -fsSL https://raw.githubusercontent.com/michaelbromley/sherlock/main/install.sh | bash
+sherlock update                   # the binary
+npx skills update sherlock -g     # the agent skill
 ```
 
-On Windows:
+Running the install command again also upgrades the binary.
 
-```powershell
-irm https://raw.githubusercontent.com/michaelbromley/sherlock/main/install.ps1 | iex
-```
+### Upgrading from 1.7.0 or earlier
 
-The installer will detect your existing installation, preserve your `config.json`, and show the version change:
+Earlier installers put the binary, the skill and your config together in `~/.claude/skills/sherlock`. **Upgrade by running the install command, not `sherlock update`.** `sherlock update` replaces the binary where it is and keeps the old layout. The install command moves to the new layout. It:
 
-```
-==> Existing installation found (v0.0.1) - upgrading...
-==> Upgrade complete! (v0.0.1 -> v0.0.3)
-```
+- installs the binary to `~/.local/bin/sherlock`
+- moves `config.json`, `.env`, logs and cache to `~/.config/sherlock`, backing up any config already there
+- removes the old binary, skill file and PATH line, and updates the Claude Code permission to `Bash(sherlock:*)`
+
+Then install the skill with `npx skills add michaelbromley/sherlock -g`. If a skill manager (the skills CLI, Ferry, a plugin) already manages `~/.claude/skills/sherlock`, the installer leaves that directory alone.
 
 ---
 
@@ -97,20 +109,36 @@ The installer will detect your existing installation, preserve your `config.json
 
 ### From Binary
 
-Download from [GitHub Releases](https://github.com/michaelbromley/sherlock/releases) and add to your PATH:
+Download `sherlock-darwin-arm64` or `sherlock-linux-x64` from [GitHub Releases](https://github.com/michaelbromley/sherlock/releases) and put it on your PATH:
 
 ```bash
-chmod +x sherlock
-mv sherlock ~/.local/bin/
+chmod +x sherlock-darwin-arm64
+mv sherlock-darwin-arm64 ~/.local/bin/sherlock
 ```
 
-### From Source (requires Bun 1.3+)
+Then install the skill with `npx skills add michaelbromley/sherlock -g`.
+
+### From Source
+
+Requires [Bun](https://bun.sh). This is also the way to run sherlock on platforms without a prebuilt binary, such as Intel Macs.
 
 ```bash
 git clone https://github.com/michaelbromley/sherlock
 cd sherlock
 bun install
 bun build ./src/query-db.ts --compile --outfile sherlock
+mv sherlock ~/.local/bin/
+```
+
+`sherlock update` cannot update a binary built from source; pull and rebuild instead.
+
+#### Windows
+
+There is no Windows release. On Windows, build the binary and install it with the PowerShell script, which puts it on your PATH:
+
+```powershell
+npm run build:windows   # builds dist/sherlock-windows.exe
+.\install.ps1           # installs the local build
 ```
 
 ## Commands
@@ -360,8 +388,9 @@ sherlock -c <conn> command GET mykey   # Any read-only Redis command
 
 ```bash
 sherlock manage               # Connection manager (add, edit, delete, test, keychain, tunnel)
-sherlock connections          # List configured connections (JSON)
-sherlock test <connection>    # Test a connection
+sherlock connection list      # List configured connections (JSON)
+sherlock connection add <n>   # Add a connection non-interactively (see --help)
+sherlock update               # Update the binary to the latest release
 sherlock tunnel status        # Show running tunnels
 sherlock tunnel stop [conn]   # Stop one tunnel, or all when no name is given
 sherlock config export [conn] # Write connections and passwords to an encrypted file
@@ -371,7 +400,8 @@ sherlock config import <file> # Add the connections from an export file
 ### Options
 
 ```bash
--c, --connection <name>    # Required for DB commands
+-c, --connection <name>    # Connection to use (required unless -u is given or a project directory selects one)
+-u, --url <url>            # Connect to a database URL without saving it
 --config <path>            # Override config file location
 --no-log                   # Disable query logging (overrides config)
 -f, --format <format>      # Output format: json (default) or markdown
@@ -399,21 +429,22 @@ Enable logging per-connection in your config:
 Or toggle it via the interactive wizard:
 
 ```bash
-sherlock edit
-# Select connection → Toggle query logging
+sherlock manage
+# Edit connection → Toggle query logging
 ```
 
 The `--no-log` CLI flag can override to force logging off even if enabled in config.
 
-## Claude Code Skill
+## Agent Skill
 
-Sherlock integrates with Claude Code as the `sherlock` skill. Once configured, ask questions like:
+The `sherlock` skill lives in [.claude/skills/sherlock](.claude/skills/sherlock) and follows the [Agent Skills](https://agentskills.io) format. Install it for any supported agent with the [skills CLI](https://skills.sh):
 
-- "Show me the top 10 customers by order value"
-- "What's the schema of the users table?"
-- "How many orders were placed last month?"
+```bash
+npx skills add michaelbromley/sherlock -g          # choose agents interactively
+npx skills add michaelbromley/sherlock -g -a codex # or name them
+```
 
-Claude will use Sherlock to introspect schemas, run queries, and inspect Redis data.
+The skill expects `sherlock` on your PATH and says so in its `compatibility` field. It covers querying, connection setup and tunnels. Moving connections between machines is in [references/transfer.md](.claude/skills/sherlock/references/transfer.md), which agents read only when needed.
 
 ## Demo Database
 
@@ -424,19 +455,16 @@ Test with the included Chinook sample database:
 bun run setup:demo
 docker-compose up -d
 
-# Add the demo connection
-sherlock setup  # or manually add to config
-
-# Try some queries
-sherlock -c chinook tables
-sherlock -c chinook query "SELECT Name FROM Artist LIMIT 5"
+# Query it by URL, no connection setup needed
+sherlock -u "postgres://dbuser:password@localhost:5432/chinook" tables
+sherlock -u "postgres://dbuser:password@localhost:5432/chinook" query "SELECT name FROM artist LIMIT 5"
 ```
 
 ## Security
 
 - **Read-only enforced** - SQL: INSERT, UPDATE, DELETE, DROP etc. are blocked. Redis: SET, DEL, FLUSHDB etc. are blocked
-- **No default connection** - Must explicitly specify `-c` to prevent accidents
-- **Secure credential storage** - Keychain or env vars, never plaintext
+- **No default connection** - A query names its connection with `-c`, or runs inside a directory configured for one
+- **Secure credential storage** - Keychain or env vars. A plaintext password in config works but is warned about on every query
 - **Config permissions** - Files created with 0600 (owner read/write only)
 - **Query validation** - SQL: dangerous keywords blocked even in subqueries. Redis: whitelist of allowed commands with subcommand validation
 
@@ -481,7 +509,7 @@ bun build ./src/query-db.ts --compile --target=bun-linux-x64 --outfile sherlock-
    git push origin main --tags
    ```
 
-The GitHub Actions workflow will automatically build binaries for all platforms and create a release.
+The GitHub Actions workflow builds the macOS (Apple silicon) and Linux x64 binaries and creates a release.
 
 ## License
 
