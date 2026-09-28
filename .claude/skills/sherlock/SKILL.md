@@ -89,6 +89,23 @@ printf '%s' "$PASSWORD" | sherlock connection add bastion \
 
 Ask the user for the password rather than guessing it, and never pass it as a command-line argument.
 
+`connection add --password-stdin` stores the password in the OS keychain. Connections created in other ways may keep it elsewhere: `{ "$env": "VAR" }` (read from the environment or the sherlock `.env` file), `{ "$keychain": "name" }`, or a plaintext string in config.json. Sherlock warns about the plaintext form on every query.
+
+## Moving Connections to Another Machine
+
+```bash
+sherlock config export                  # every connection -> ./sherlock-connections.enc
+sherlock config export <conn> -o f.enc  # one connection
+sherlock config import f.enc            # on the other machine
+sherlock config import f.enc --force    # also replace connections with the same name
+```
+
+Both commands prompt for a passphrase and **need an interactive terminal**. They refuse piped input and take no passphrase flag. Do not try to run them yourself. Give the user the command to run, and copying the file between machines is up to them.
+
+- Export reads each password from wherever it is stored and encrypts everything with the passphrase (scrypt + AES-256-GCM).
+- Import stores the passwords in the OS keychain. On a machine without one, it asks before writing them in plaintext into config.json.
+- Import skips a connection whose name already exists unless `--force` is given, and reports each connection it skipped.
+
 ## Tunnelled Connections
 
 Some connections reach the database through a port-forwarding process (Northflank, kubectl, ssh). Sherlock starts that tunnel on the first query and reuses it for later commands. You do not need to open one yourself.

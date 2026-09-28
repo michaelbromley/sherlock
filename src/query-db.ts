@@ -243,6 +243,176 @@ async function runWithRedisConnection<T>(
 }
 
 // ============================================================================
+// Config Transfer
+// ============================================================================
+
+/** Where `config export` writes when no --output is given */
+const DEFAULT_EXPORT_FILE = 'sherlock-connections.enc';
+
+/** An export file is small; anything far larger is not one */
+const MAX_EXPORT_FILE_BYTES = 10 * 1024 * 1024;
+
+/** Passphrase attempts allowed on import before giving up */
+const IMPORT_PASSPHRASE_ATTEMPTS = 3;
+
+/** The passphrase is only ever typed at a prompt, so both commands need a terminal */
+function requireTerminal(command: string): void {
+    if (!process.stdin.isTTY) {
+        console.error(
+            `Error: 'sherlock config ${command}' prompts for a passphrase and needs an ` +
+            `interactive terminal. The passphrase cannot be passed as an argument or piped in.`
+        );
+        process.exit(1);
+    }
+}
+
+async function exportConfigAction(
+    configPath: string | undefined,
+    name: string | undefined,
+    cmdOpts: { output: string; force?: boolean }
+): Promise<void> {
+    const fs = await import('fs');
+    const path = await import('path');
+    const { loadConfigFile } = await import('./config');
+    const { findConfigFile } = await import('./config/paths');
+    const { buildExportPayload, sealPayload } = await import('./config/transfer');
+    const { MIN_PASSPHRASE_LENGTH } = await import('./config/transfer-crypto');
+
+    requireTerminal('export');
+    const outputPath = path.resolve(cmdOpts.output);
+
+    try {
+        if (fs.existsSync(outputPath) && !cmdOpts.force) {
+            throw new Error(`${outputPath} already exists. Pass --force to overwrite it.`);
+        }
+
+        const config = loadConfigFile(configPath);
+        p.intro(`Exporting from ${findConfigFile(configPath)}`);
+
+        const { payload, exported, skipped, notes } = await buildExportPayload(
+            config.connections, name ? [name] : undefined
+        );
+        for (const s of skipped) p.log.warn(`Skipped ${s.name}: ${s.reason}.`);
+        for (const n of notes) p.log.info(`${n.name}: ${n.message}`);
+        if (exported.length === 0) {
+            throw new Error('Nothing to export.');
+        }
+
+        const passphrase = await promptPassword(
+            `Passphrase to encrypt the file (at least ${MIN_PASSPHRASE_LENGTH} characters)`
+        );
+        if (passphrase.length < MIN_PASSPHRASE_LENGTH) {
+            throw new Error(`The passphrase must be at least ${MIN_PASSPHRASE_LENGTH} characters.`);
+        }
+        const confirmation = await promptPassword('Repeat the passphrase');
+        if (confirmation !== passphrase) {
+            throw new Error('The passphrases do not match. Nothing was written.');
+        }
+
+        const spinner = p.spinner();
+        spinner.start('Encrypting');
+        const sealed = sealPayload(payload, passphrase);
+        // The contents are encrypted, but there is still no reason for anyone
+        // else to read them.
+        fs.writeFileSync(outputPath, sealed, { mode: 0o600, flag: cmdOpts.force ? 'w' : 'wx' });
+        fs.chmodSync(outputPath, 0o600);
+        spinner.stop(`Wrote ${outputPath}`);
+
+        p.note(
+            exported.map(n => Object.keys(payload.connections[n].secrets).length > 0
+                ? `${n}  (with password)`
+                : `${n}  (no stored password)`).join('\n'),
+            `Exported ${exported.length} connection${exported.length === 1 ? '' : 's'}`
+        );
+        p.outro(
+            `Copy the file to the other machine, run 'sherlock config import ${path.basename(outputPath)}' ` +
+            `there, then delete it.`
+        );
+        if (skipped.length > 0) process.exitCode = 1;
+    } catch (error: unknown) {
+        p.cancel(getErrorMessage(error));
+        process.exit(1);
+    }
+}
+
+async function importConfigAction(file: string, cmdOpts: { force?: boolean }): Promise<void> {
+    const fs = await import('fs');
+    const { openPayload, planImport, planHasSecrets, applyImport } = await import('./config/transfer');
+    const { ExportFileError } = await import('./config/transfer-crypto');
+    const { isKeychainAvailable } = await import('./credentials/providers/keychain');
+
+    requireTerminal('import');
+
+    try {
+        const stat = fs.statSync(file, { throwIfNoEntry: false });
+        if (!stat?.isFile()) throw new Error(`${file} does not exist or is not a file.`);
+        if (stat.size > MAX_EXPORT_FILE_BYTES) throw new Error(`${file} is too large to be a sherlock export file.`);
+        const contents = fs.readFileSync(file, 'utf-8');
+
+        p.intro(`Importing ${file}`);
+
+        let payload: ReturnType<typeof openPayload> | undefined;
+        for (let attempt = 1; payload === undefined; attempt++) {
+            const passphrase = await promptPassword('Passphrase the file was exported with');
+            const spinner = p.spinner();
+            spinner.start('Decrypting');
+            try {
+                payload = openPayload(contents, passphrase);
+                spinner.stop('Decrypted');
+            } catch (error) {
+                spinner.error(getErrorMessage(error));
+                if (!(error instanceof ExportFileError)) throw error;
+                if (attempt >= IMPORT_PASSPHRASE_ATTEMPTS) {
+                    throw new Error(`Giving up after ${attempt} attempts. Nothing was imported.`);
+                }
+            }
+        }
+
+        const plan = planImport(payload, { force: cmdOpts.force });
+        for (const s of plan.skipped) p.log.warn(`Skipped ${s.name}: ${s.reason}.`);
+        if (plan.toImport.length === 0) {
+            p.outro('Nothing imported.');
+            if (plan.skipped.length > 0) process.exitCode = 1;
+            return;
+        }
+
+        let storage: Parameters<typeof applyImport>[1] = { kind: 'keychain', set: setKeychainPassword };
+        if (planHasSecrets(plan) && !isKeychainAvailable()) {
+            p.log.warn(
+                'This machine has no usable OS keychain, so passwords can only be stored in ' +
+                'plaintext in config.json (readable by your user only).'
+            );
+            const accept = await p.confirm({
+                message: 'Store the imported passwords in config.json?',
+                initialValue: false,
+            });
+            if (p.isCancel(accept) || !accept) {
+                p.cancel('Nothing was imported.');
+                process.exit(1);
+            }
+            storage = { kind: 'inline' };
+        }
+
+        const { imported, path: configPath } = applyImport(plan, storage);
+
+        const where = { keychain: 'password in OS keychain', inline: 'password inline in config.json', none: 'no stored password' };
+        p.note(
+            imported.map(c => `${c.action === 'replaced' ? '↻' : '+'} ${c.name}  (${where[c.secrets]})` +
+                (c.tunnel ? `\n    tunnel: ${c.tunnel}` : '')).join('\n'),
+            `Imported ${imported.length} connection${imported.length === 1 ? '' : 's'} into ${configPath}`
+        );
+        if (imported.some(c => c.tunnel)) {
+            p.log.info('Tunnel commands run on this machine when you query. Check they are what you expect.');
+        }
+        p.outro(`Delete ${file} now that it has been imported. Try: sherlock -c ${imported[0].name} tables`);
+        if (plan.skipped.length > 0) process.exitCode = 1;
+    } catch (error: unknown) {
+        p.cancel(getErrorMessage(error));
+        process.exit(1);
+    }
+}
+
+// ============================================================================
 // CLI Setup
 // ============================================================================
 
@@ -721,6 +891,44 @@ function setupCLI() {
                 console.error(`Error: ${getErrorMessage(error)}`);
                 process.exit(1);
             }
+        });
+
+    // ========================================================================
+    // Config Transfer Commands
+    // ========================================================================
+
+    const configCmd = program
+        .command('config')
+        .description('Move connections, credentials included, to another machine');
+
+    configCmd
+        .command('export [name]')
+        .description('Write connections and their credentials to a passphrase-encrypted file')
+        .option('-o, --output <file>', 'file to write', DEFAULT_EXPORT_FILE)
+        .option('--force', 'overwrite the output file if it exists')
+        .addHelpText('after', `
+Exports every connection, or only [name]. Passwords are read from wherever
+they are stored (keychain, .env or config.json) and encrypted with a
+passphrase you are prompted for. The passphrase is never taken as an argument.
+
+Move the file to the other machine yourself (scp, USB) and run
+'sherlock config import <file>' there.`)
+        .action(async (name: string | undefined, cmdOpts: { output: string; force?: boolean }) => {
+            await exportConfigAction(program.opts().config, name, cmdOpts);
+        });
+
+    configCmd
+        .command('import <file>')
+        .description('Add the connections in an export file to this machine')
+        .option('--force', 'replace connections that already exist with the same name')
+        .addHelpText('after', `
+Prompts for the passphrase the file was exported with. Passwords are stored in
+the OS keychain, as 'connection add --password-stdin' does. On a machine with
+no keychain you are asked before any password is written to config.json.
+
+A connection whose name already exists is skipped unless --force is given.`)
+        .action(async (file: string, cmdOpts: { force?: boolean }) => {
+            await importConfigAction(file, cmdOpts);
         });
 
     // ========================================================================

@@ -245,6 +245,31 @@ export function deleteKeychainPassword(account: string, service: string = SERVIC
     passwordCache.delete(getCacheKey(service, account));
 }
 
+/** Account used only to check that the keychain works; never left behind */
+const PROBE_ACCOUNT = '__sherlock_keychain_probe__';
+
+/**
+ * Whether this machine has a usable keychain, found by storing, reading back
+ * and deleting a throwaway entry. A headless Linux box usually has no Secret
+ * Service running, and then the store step throws.
+ */
+export function isKeychainAvailable(): boolean {
+    const probe = `probe-${Date.now()}`;
+    try {
+        setPasswordViaSecurity(SERVICE_NAME, PROBE_ACCOUNT, probe);
+        const readBack = getPasswordViaSecurity(SERVICE_NAME, PROBE_ACCOUNT);
+        return readBack === probe;
+    } catch {
+        return false;
+    } finally {
+        try {
+            deletePasswordViaSecurity(SERVICE_NAME, PROBE_ACCOUNT);
+        } catch {
+            // Nothing was stored, or there is no keychain to delete from
+        }
+    }
+}
+
 /**
  * Check if a password exists in the keychain (uses cache to avoid multiple prompts)
  */
