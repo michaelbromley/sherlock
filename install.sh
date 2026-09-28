@@ -51,7 +51,7 @@ error() {
 # terminal directly. With no terminal, every question is answered no, so an
 # unattended install never edits shell config or runs anything extra.
 can_prompt() {
-    [ -z "$SHERLOCK_NO_PROMPT" ] && (: </dev/tty) 2>/dev/null
+    [ "$SHERLOCK_NO_PROMPT" != "1" ] && (: </dev/tty) 2>/dev/null
 }
 
 # ask "question" default(y|n) -> returns 0 for yes
@@ -120,26 +120,27 @@ move_config_file() {
     success "Moved $name to $dest"
 }
 
-# Merge a directory into the config directory. A file whose name is already
-# taken there is kept under a ".migrated-<time>" name, never overwritten or
-# dropped. The source is only removed once every file has moved.
+# Merge a directory into the config directory. Every entry that is not a
+# directory (files and symlinks) is moved; one whose name is already taken
+# there is kept under a ".migrated-<time>" name instead of being overwritten.
+# Afterwards only emptied directories are removed, so anything that could not
+# be moved stays where it was.
 move_config_dir() {
     local name="$1"
     local src="$OLD_DIR/$name" dest="$CONFIG_DIR/$name"
-    local suffix=".migrated-$(date +%Y%m%d%H%M%S)" moved_all=true file target
+    local suffix=".migrated-$(date +%Y%m%d%H%M%S)" entry target
 
     [ -d "$src" ] || return 0
     mkdir -p "$dest"
-    while IFS= read -r -d '' file; do
-        target="$dest/${file#./}"
-        [ -e "$target" ] && target="$target$suffix"
+    while IFS= read -r -d '' entry; do
+        target="$dest/${entry#./}"
+        { [ -e "$target" ] || [ -L "$target" ]; } && target="$target$suffix"
         mkdir -p "$(dirname "$target")"
-        mv "$src/${file#./}" "$target" || moved_all=false
-    done < <(cd "$src" && find . -type f -print0)
+        mv "$src/${entry#./}" "$target" || true
+    done < <(cd "$src" && find . ! -type d -print0 2>/dev/null)
 
-    if [ "$moved_all" = true ]; then
-        rm -rf "$src"
-    else
+    find "$src" -depth -type d -exec rmdir {} \; 2>/dev/null || true
+    if [ -e "$src" ]; then
         warn "Some files in $src could not be moved to $dest and were left in place."
     fi
 }
@@ -313,7 +314,9 @@ update_claude_permission() {
         fi
     done
 
-    has_rule "$settings_file" "$PERMISSION" && return 0
+    for file in "${claude_files[@]}"; do
+        [ -f "$file" ] && has_rule "$file" "$PERMISSION" && return 0
+    done
     if edit_settings "$settings_file" '.permissions.allow = ((.permissions.allow // []) + [$p])'; then
         info "Allowed $PERMISSION in $settings_file"
         echo "  This works around https://github.com/anthropics/claude-code/issues/14956, so Claude Code"
