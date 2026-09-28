@@ -800,7 +800,7 @@ footer .footer-links {
             <li>Add, edit, and delete connections</li>
             <li>Store passwords in OS keychain</li>
             <li>Set project directories for auto-detection</li>
-            <li>Test connections before saving</li>
+            <li>Test saved connections</li>
           </ul>
         </div>
       </div>
@@ -853,10 +853,10 @@ footer .footer-links {
           <div class="msg msg-ai">
             <div class="label">AI Assistant</div>
             <p>Let me investigate the checkout performance. I'll start by checking the indexes on order-related tables and looking at table statistics.</p>
-            <code>sherlock indexes -c prod-db -t orders</code>
-            <code>sherlock stats -c prod-db -t orders</code>
+            <code>sherlock -c prod-db indexes orders</code>
+            <code>sherlock -c prod-db stats orders</code>
             <p>The <strong>orders</strong> table has 2.3M rows but no index on <strong>customer_id</strong> &mdash; which is used in every checkout lookup. Sequential scans are taking ~1,200ms. Let me verify with the query plan:</p>
-            <code>sherlock query -c prod-db "EXPLAIN SELECT * FROM orders WHERE customer_id = 42"</code>
+            <code>sherlock -c prod-db query "EXPLAIN SELECT * FROM orders WHERE customer_id = 42"</code>
             <p>Confirmed &mdash; it's a sequential scan. Adding an index on <strong>orders.customer_id</strong> should bring that down to under 5ms.</p>
           </div>
         </div>
@@ -869,10 +869,10 @@ footer .footer-links {
           <div class="msg msg-ai">
             <div class="label">AI Assistant</div>
             <p>I'll map out the schema first to understand the relationship between orders and line items, then build the report.</p>
-            <code>sherlock introspect -c prod-db</code>
-            <code>sherlock fk -c prod-db -t order_items</code>
+            <code>sherlock -c prod-db introspect</code>
+            <code>sherlock -c prod-db fk order_items</code>
             <p>Got it &mdash; <strong>order_items</strong> joins to <strong>orders</strong> via <strong>order_id</strong>, and <strong>products</strong> via <strong>product_id</strong>. Now I can aggregate:</p>
-            <code>sherlock query -c prod-db "SELECT DATE_TRUNC('month', o.created_at) AS month, SUM(oi.quantity * oi.unit_price) AS revenue, COUNT(DISTINCT o.id) AS order_count FROM orders o JOIN order_items oi ON o.id = oi.order_id WHERE o.created_at >= '2025-10-01' AND o.created_at < '2026-01-01' GROUP BY month ORDER BY month"</code>
+            <code>sherlock -c prod-db query "SELECT DATE_TRUNC('month', o.created_at) AS month, SUM(oi.quantity * oi.unit_price) AS revenue, COUNT(DISTINCT o.id) AS order_count FROM orders o JOIN order_items oi ON o.id = oi.order_id WHERE o.created_at >= '2025-10-01' AND o.created_at < '2026-01-01' GROUP BY month ORDER BY month"</code>
             <p>Here's your Q4 breakdown: October did &pound;142k across 1,847 orders, November &pound;218k (Black Friday bump), and December &pound;195k. November was up 53% month-over-month.</p>
           </div>
         </div>
@@ -885,9 +885,9 @@ footer .footer-links {
           <div class="msg msg-ai">
             <div class="label">AI Assistant</div>
             <p>Let me look up her account and check for anything that might block checkout.</p>
-            <code>sherlock query -c prod-db "SELECT id, email, status, suspended_at, suspension_reason FROM users WHERE email = 'jane@example.com'"</code>
+            <code>sherlock -c prod-db query "SELECT id, email, status, suspended_at, suspension_reason FROM users WHERE email = 'jane@example.com'"</code>
             <p>Found it &mdash; her account was <strong>suspended</strong> on 2026-02-14 with reason: "payment_dispute". Let me check the audit trail:</p>
-            <code>sherlock query -c prod-db "SELECT action, details, created_at, performed_by FROM audit_log WHERE user_id = 4872 ORDER BY created_at DESC LIMIT 5"</code>
+            <code>sherlock -c prod-db query "SELECT action, details, created_at, performed_by FROM audit_log WHERE user_id = 4872 ORDER BY created_at DESC LIMIT 5"</code>
             <p>The suspension was triggered automatically by the payment dispute system. Her PayPal dispute from order #8891 was resolved in her favour 3 days ago, but the account was never reinstated. This looks like a bug in the auto-reinstatement flow.</p>
           </div>
         </div>
@@ -900,8 +900,8 @@ footer .footer-links {
           <div class="msg msg-ai">
             <div class="label">AI Assistant</div>
             <p>Welcome aboard! Let me map out the entire schema and the relationships between tables.</p>
-            <code>sherlock introspect -c prod-db</code>
-            <code>sherlock fk -c prod-db</code>
+            <code>sherlock -c prod-db introspect</code>
+            <code>sherlock -c prod-db fk orders</code>
             <p>Here's the lay of the land. You've got <strong>23 tables</strong> organised into four domains:</p>
             <p><strong>Users &amp; Auth:</strong> users, sessions, password_resets, roles, user_roles</p>
             <p><strong>Products:</strong> products, categories, product_categories, inventory</p>
@@ -919,11 +919,11 @@ footer .footer-links {
           <div class="msg msg-ai">
             <div class="label">AI Assistant</div>
             <p>Let me check the Redis server stats and see what's going on in the cache.</p>
-            <code>sherlock info -c redis-prod</code>
-            <code>sherlock keys -c redis-prod "sess:*"</code>
+            <code>sherlock -c redis-prod info</code>
+            <code>sherlock -c redis-prod keys "sess:*"</code>
             <p>Hit rate is only <strong>60%</strong> &mdash; that's low. You've got 12,400 session keys with a 30-minute TTL, but product caches are expiring every 60 seconds. Let me check for slow operations:</p>
-            <code>sherlock slowlog -c redis-prod</code>
-            <code>sherlock inspect -c redis-prod "product:catalog:all"</code>
+            <code>sherlock -c redis-prod slowlog</code>
+            <code>sherlock -c redis-prod inspect "product:catalog:all"</code>
             <p>Found it. The slow log shows <strong>KEYS *</strong> being called every 10 seconds &mdash; that's a full keyspace scan in production with 48k keys. It's coming from the health check endpoint. The product catalog key is 4.2MB of serialised JSON being re-fetched every minute. Two fixes needed: replace KEYS with SCAN in the health check, and bump the product cache TTL to at least 5 minutes.</p>
           </div>
         </div>
@@ -980,21 +980,21 @@ footer .footer-links {
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/><circle cx="12" cy="16" r="1"/></svg>
         </div>
         <h3>OS keychain storage</h3>
-        <p>Passwords stored in macOS Keychain, Windows Credential Manager, or Linux Secret Service.</p>
+        <p>Passwords stored in the macOS Keychain or the Linux Secret Service, not in a config file.</p>
       </div>
       <div class="feature-card">
         <div class="feature-icon">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
         </div>
-        <h3>Zero network exposure</h3>
-        <p>No server, no open ports. Sherlock connects outbound only, never listens for inbound traffic.</p>
+        <h3>No server</h3>
+        <p>Sherlock runs nothing in the background except the tunnels you configure. It connects out to your databases, and to GitHub only when you run <code>sherlock update</code>.</p>
       </div>
       <div class="feature-card">
         <div class="feature-icon">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="2" y="3" width="20" height="18" rx="2"/><polyline points="8 10 8 16"/><polyline points="12 8 12 16"/><polyline points="16 12 16 16"/></svg>
         </div>
         <h3>Single binary</h3>
-        <p>~57MB standalone executable. Zero runtime dependencies. Download and run.</p>
+        <p>Standalone executable for macOS (Apple silicon) and Linux x64. Zero runtime dependencies.</p>
       </div>
       <div class="feature-card">
         <div class="feature-icon">
@@ -1018,13 +1018,13 @@ footer .footer-links {
 <section id="quick-start">
   <div class="container">
     <h2 class="section-title">Get Started in 60 Seconds</h2>
-    <p class="section-subtitle">Three steps from zero to database investigation.</p>
+    <p class="section-subtitle">Four steps from zero to database investigation.</p>
     <div class="steps">
       <div class="step">
         <div class="step-number">1</div>
         <div class="step-content">
-          <h3>Install</h3>
-          <p>One command, no dependencies.</p>
+          <h3>Install the CLI</h3>
+          <p>One command. Installs <code>sherlock</code> to <code>~/.local/bin</code> on macOS (Apple silicon) and Linux x64.</p>
           <div class="step-code-block">
             <code>curl -fsSL https://raw.githubusercontent.com/michaelbromley/sherlock/main/install.sh | bash</code>
             <button class="copy-btn" data-copy="curl -fsSL https://raw.githubusercontent.com/michaelbromley/sherlock/main/install.sh | bash" aria-label="Copy install command">
@@ -1035,6 +1035,19 @@ footer .footer-links {
       </div>
       <div class="step">
         <div class="step-number">2</div>
+        <div class="step-content">
+          <h3>Add the skill to your agent</h3>
+          <p>Teaches Claude Code, Codex, Cursor, Gemini CLI or any skills-capable agent to use sherlock. The installer offers to do this for you.</p>
+          <div class="step-code-block">
+            <code>npx skills add michaelbromley/sherlock -g</code>
+            <button class="copy-btn" data-copy="npx skills add michaelbromley/sherlock -g" aria-label="Copy command">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+            </button>
+          </div>
+        </div>
+      </div>
+      <div class="step">
+        <div class="step-number">3</div>
         <div class="step-content">
           <h3>Configure</h3>
           <p>Interactive wizard sets up your connection and stores credentials securely.</p>
@@ -1047,10 +1060,10 @@ footer .footer-links {
         </div>
       </div>
       <div class="step">
-        <div class="step-number">3</div>
+        <div class="step-number">4</div>
         <div class="step-content">
           <h3>Investigate</h3>
-          <p>Ask your AI questions about your data.</p>
+          <p>Ask your agent questions about your data.</p>
           <div class="step-code-block">
             <code>"Show me the top customers by order value from prod-db"</code>
           </div>

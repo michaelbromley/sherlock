@@ -1,13 +1,21 @@
 ---
 name: sherlock
-description: Allows read-only access to SQL databases and Redis for querying and analysis using natural language
-allowed-tools:
-   - Bash(~/.claude/skills/sherlock/sherlock:*)
+description: Read-only access to PostgreSQL, MySQL/MariaDB, SQL Server, SQLite and Redis through the sherlock CLI. Use when the user asks about data in a database, wants to explore tables, a schema or foreign keys, needs a SELECT query written and run, wants to inspect Redis keys, or wants a database connection set up, tunnelled or moved to another machine.
+license: MIT
+compatibility: Requires the sherlock CLI on PATH. Install it with `curl -fsSL https://raw.githubusercontent.com/michaelbromley/sherlock/main/install.sh | bash` (macOS on Apple silicon, Linux x64).
+allowed-tools: Bash(sherlock:*)
 ---
 
 # Sherlock
 
-Read-only database access for SQL and Redis. Binary: `~/.claude/skills/sherlock/sherlock`
+Read-only database access for SQL and Redis, through the `sherlock` command.
+
+If `sherlock` is not found, try these paths in order, and use the first that works as the full path for this session:
+
+1. `~/.local/bin/sherlock`, where the installer puts it. It is installed but `~/.local/bin` is not on PATH. Tell the user once to add `export PATH="$HOME/.local/bin:$PATH"` to their shell config.
+2. `~/.claude/skills/sherlock/sherlock`, where versions up to 1.7.0 put it. Tell the user once to run the installer from this skill's `compatibility` field. It moves the old installation to the current layout and keeps their connections.
+
+If neither exists, sherlock is not installed. Ask the user to run that installer.
 
 ## Ad Hoc Connections (`--url`)
 
@@ -20,7 +28,7 @@ sherlock -u "redis://localhost:6379" info
 ```
 
 - `--url` and `-c` are mutually exclusive — use one or the other
-- Database type is auto-detected from the URL prefix (`postgres://`, `mysql://`, `sqlite://`, `redis://`)
+- Database type is auto-detected from the URL prefix (`postgres://`, `mysql://`, `mssql://`, `sqlserver://`, `sqlite://`, `redis://`, `rediss://`)
 - Schema caching and introspection work normally (cached under a synthetic name derived from the URL)
 - Query logging is disabled for ad hoc connections
 
@@ -31,7 +39,7 @@ sherlock -u "redis://localhost:6379" info
 All SQL commands require `-c <connection>` or `-u <url>`. Output is JSON by default, use `-f markdown` for tables.
 
 ```bash
-sherlock connections                    # List available connections
+sherlock connection list                # List available connections
 sherlock -c <conn> tables               # List tables
 sherlock -c <conn> describe <table>     # Table schema
 sherlock -c <conn> introspect           # Full schema (cached)
@@ -89,6 +97,12 @@ printf '%s' "$PASSWORD" | sherlock connection add bastion \
 
 Ask the user for the password rather than guessing it, and never pass it as a command-line argument.
 
+`connection add --password-stdin` stores the password in the OS keychain. Connections created in other ways may keep it elsewhere: `{ "$env": "VAR" }` (read from the environment or the sherlock `.env` file), `{ "$keychain": "name" }`, or a plaintext string in config.json. Sherlock warns about the plaintext form on every query.
+
+## Moving Connections to Another Machine
+
+`sherlock config export` and `sherlock config import` move connections, passwords included, in a passphrase-encrypted file. Both need the user to type the passphrase in their own terminal, so you cannot run them yourself. When the user wants their connections on another machine, read [references/transfer.md](references/transfer.md) and follow it. It has you do all the checks and give the user one command to paste.
+
 ## Tunnelled Connections
 
 Some connections reach the database through a port-forwarding process (Northflank, kubectl, ssh). Sherlock starts that tunnel on the first query and reuses it for later commands. You do not need to open one yourself.
@@ -106,13 +120,13 @@ If a tunnel fails to start, the error includes the forwarding command's own outp
 ## Constraints
 
 - **Read-only**: SQL allows SELECT, SHOW, DESCRIBE, EXPLAIN, WITH only. Redis allows read commands only (GET, HGETALL, SCAN, etc.) — mutations (SET, DEL, HSET, etc.) are blocked.
-- **Connection required**: Always specify `-c <connection>` or `-u <url>` (no default)
+- **Connection required**: Always specify `-c <connection>` or `-u <url>`, unless the current directory is inside a connection's configured `directory`, which selects that connection.
 - **Type-aware**: SQL commands only work with SQL connections, Redis commands only work with Redis connections
-- **Quoting**: PostgreSQL/SQLite use `"identifier"`, MySQL uses `` `identifier` ``
+- **Quoting**: PostgreSQL/SQLite use `"identifier"`, MySQL uses `` `identifier` ``, SQL Server uses `[identifier]`
 
 ## SQL Workflow
 
-1. Run `connections` to see available databases
+1. Run `connection list` to see available databases
 2. Use `tables` or `introspect` to understand schema (introspect is cached per-connection)
 3. Use `fk` to understand table relationships before writing JOINs
 4. Use `sample` to see real data examples before writing queries
@@ -121,7 +135,7 @@ If a tunnel fails to start, the error includes the forwarding command's own outp
 
 ## Redis Workflow
 
-1. Run `connections` to see available connections
+1. Run `connection list` to see available connections
 2. Use `info` to understand the Redis instance (version, memory, keyspace)
 3. Use `keys "pattern:*"` to find keys of interest
 4. Use `get <key>` to retrieve values (auto-detects string/hash/list/set/zset)
@@ -135,4 +149,4 @@ If a tunnel fails to start, the error includes the forwarding command's own outp
 - Use `-f markdown` for human-readable table output
 - For Redis, use `keys` with specific patterns rather than `*` on large databases
 - Use `--no-types` with `keys` for faster scanning when type info isn't needed
-- Config: `~/.claude/skills/sherlock/config.json`
+- Config: `~/.config/sherlock/config.json`, unless a `.sherlock.json` in the current directory or `SHERLOCK_CONFIG` points elsewhere

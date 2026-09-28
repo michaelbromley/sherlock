@@ -65,7 +65,7 @@ function Invoke-Download {
 }
 
 # ---------------------------------------------------------------------------
-# PATH setup - optionally add sherlock to user PATH
+# PATH setup - the skill runs `sherlock` from PATH
 # ---------------------------------------------------------------------------
 function Add-ToPath {
     $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
@@ -92,7 +92,7 @@ function Add-ToPath {
 # https://github.com/anthropics/claude-code/issues/14956
 # ---------------------------------------------------------------------------
 function Add-ClaudePermission {
-    $permission = 'Bash(~/.claude/skills/sherlock/sherlock:*)'
+    $permission = 'Bash(sherlock:*)'
     $settingsFile = $null
 
     $localSettings = Join-Path $env:USERPROFILE '.claude\settings.local.json'
@@ -220,12 +220,9 @@ function Main {
         }
     }
 
-    # Create config for portable mode
-    $configFile = Join-Path $SkillDir 'config.json'
-    if (-not (Test-Path $configFile)) {
-        '{"version":"2.0","connections":{}}' | Set-Content $configFile -Encoding UTF8
-        Write-Success 'Created config.json (portable mode enabled)'
-    }
+    # Connections are kept in the user config directory (%APPDATA%\sherlock),
+    # not here: a config.json next to the binary would switch sherlock to
+    # portable mode and keep credentials inside the skill directory.
 
     # Add permission to Claude Code settings (workaround)
     Add-ClaudePermission
@@ -249,25 +246,16 @@ function Main {
     Write-Host "  Installed to: $SkillDir"
     Write-Host ''
 
+    # The skill runs `sherlock` from PATH, so this is not optional. Add-ToPath
+    # does nothing when the directory is already there.
+    Add-ToPath
+
     if (-not $upgrading) {
         Write-Host '  Next steps:'
         Write-Host '  -----------'
-        Write-Host "  1. Run '$sherlockExe setup' to configure your database connections"
-        Write-Host "  2. Use '/sherlock' in Claude Code to query your databases"
+        Write-Host "  1. Run 'sherlock manage' in a new terminal to configure your database connections"
+        Write-Host "  2. Ask your agent about your data; the sherlock skill is in $SkillDir"
         Write-Host ''
-
-        # Ask about PATH setup
-        $reply = Read-Host '  Add sherlock to your PATH for easier command-line access? [y/N]'
-        if ($reply -match '^[Yy]$') {
-            Add-ToPath
-        }
-        else {
-            Write-Host ''
-            Write-Host '  Tip: You can add sherlock to your PATH later from PowerShell:'
-            Write-Host "    `$userPath = [Environment]::GetEnvironmentVariable('Path', 'User')"
-            Write-Host "    [Environment]::SetEnvironmentVariable('Path', `"$SkillDir;`$userPath`", 'User')"
-            Write-Host ''
-        }
     }
 
     Write-Host '  To uninstall:'

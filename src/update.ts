@@ -4,28 +4,57 @@
 
 import * as path from 'path';
 import * as fs from 'fs';
+import * as os from 'os';
 import * as p from '@clack/prompts';
 import pkg from '../package.json';
-import { isPortableMode, getBinaryDir } from './config/paths';
 
 const REPO = 'michaelbromley/sherlock';
 const RELEASES_API = `https://api.github.com/repos/${REPO}/releases/latest`;
 const CHANGELOG_URL = `https://raw.githubusercontent.com/${REPO}/main/CHANGELOG.md`;
-const SKILL_URL = `https://raw.githubusercontent.com/${REPO}/main/.claude/skills/sherlock/SKILL.md`;
+const INSTALL_COMMAND = `curl -fsSL https://raw.githubusercontent.com/${REPO}/main/install.sh | bash`;
 
 // ============================================================================
 // Platform helpers
 // ============================================================================
 
-/** Map process.platform + process.arch to the GitHub release asset name */
+/**
+ * Map process.platform + process.arch to the GitHub release asset name. Only
+ * platforms the release workflow builds are listed; keep the two in step.
+ */
 function getAssetName(): string | null {
     const { platform, arch } = process;
     const map: Record<string, Record<string, string>> = {
-        darwin: { arm64: 'sherlock-darwin-arm64', x64: 'sherlock-darwin-x64' },
+        darwin: { arm64: 'sherlock-darwin-arm64' },
         linux: { x64: 'sherlock-linux-x64' },
-        win32: { x64: 'sherlock-windows.exe' },
     };
     return map[platform]?.[arch] ?? null;
+}
+
+/**
+ * Whether this binary sits in ~/.claude/skills/sherlock, where installers up to
+ * 1.7.0 put it together with the skill and the config. Updating the binary in
+ * place keeps that layout; the installer moves out of it.
+ */
+function isOldLayout(): boolean {
+    // Compare resolved paths: either side may reach the same directory through
+    // a symlink, such as /tmp -> /private/tmp on macOS.
+    const resolve = (dir: string) => {
+        try {
+            return fs.realpathSync(dir);
+        } catch {
+            return dir;
+        }
+    };
+    return resolve(path.dirname(process.execPath)) === resolve(path.join(os.homedir(), '.claude', 'skills', 'sherlock'));
+}
+
+/** Tell the user how to leave the old layout */
+function warnOldLayout(): void {
+    p.log.warn(
+        `This sherlock is installed in ${path.dirname(process.execPath)}, the layout used up to 1.7.0. ` +
+        `Run the installer to move to the current layout. It keeps your connections, puts sherlock ` +
+        `on PATH, and removes the old copy:\n  ${INSTALL_COMMAND}`
+    );
 }
 
 /** Returns true when running as a compiled binary (not `bun run src/...`) */
@@ -158,26 +187,6 @@ async function downloadAndReplace(url: string, targetPath: string): Promise<void
 }
 
 // ============================================================================
-// SKILL.md update
-// ============================================================================
-
-async function updateSkillFile(): Promise<boolean> {
-    try {
-        const res = await fetch(SKILL_URL, {
-            headers: { 'User-Agent': `sherlock/${pkg.version}` },
-        });
-        if (!res.ok) return false;
-
-        const content = await res.text();
-        const skillPath = path.join(getBinaryDir(), 'SKILL.md');
-        fs.writeFileSync(skillPath, content);
-        return true;
-    } catch {
-        return false;
-    }
-}
-
-// ============================================================================
 // Main
 // ============================================================================
 
@@ -192,7 +201,8 @@ export async function runUpdate(): Promise<void> {
     const assetName = getAssetName();
     if (!assetName) {
         p.log.error(
-            `Unsupported platform (${process.platform}/${process.arch}). Download manually from https://github.com/${REPO}/releases`,
+            `No prebuilt binary for ${process.platform}/${process.arch}, so sherlock cannot update itself here. ` +
+                `Pull and rebuild from source: https://github.com/${REPO}#from-source`,
         );
         return;
     }
@@ -222,6 +232,7 @@ export async function runUpdate(): Promise<void> {
     // 4. Already up to date?
     if (compareSemver(currentVersion, latestVersion) >= 0) {
         p.log.success(`You're on the latest version (${currentVersion}).`);
+        if (isOldLayout()) warnOldLayout();
         return;
     }
 
@@ -271,17 +282,13 @@ export async function runUpdate(): Promise<void> {
     spin.stop('');
     p.log.success('Binary updated');
 
-    // 10. Update SKILL.md in portable mode
-    if (isPortableMode()) {
-        const skillOk = await updateSkillFile();
-        if (skillOk) {
-            p.log.success('Skill definition updated');
-        } else {
-            p.log.warn('Could not update SKILL.md — you can update it manually.');
-        }
-    }
-
-    // 11. Done
+    // 10. Done. The skill is installed and updated by the skills CLI (or
+    // whichever skill manager the user chose), not by the binary.
     console.log('');
     p.log.info(`Restart sherlock to use v${latestVersion}.`);
+    if (isOldLayout()) {
+        warnOldLayout();
+    } else {
+        p.log.info('To update the agent skill as well, run: npx skills update sherlock -g');
+    }
 }
