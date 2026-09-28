@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `sherlock connection add` no longer copies a project's `.sherlock.json` into your user config. It read connections from whichever config applied in the current directory but wrote them to the user config, so adding a connection inside a project with a `.sherlock.json` replaced your user config with the project's connections, tunnel commands included.
 - Storing a password in the macOS keychain no longer hangs when sherlock runs in a terminal. `security` read the password from the terminal rather than from sherlock, so `connection add --password-stdin` and the keychain option in `sherlock manage` waited for input that never came.
 
 ## [1.6.0] - 2026-08-19

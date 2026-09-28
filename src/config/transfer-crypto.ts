@@ -16,8 +16,13 @@ export const EXPORT_FORMAT_VERSION = 1;
 const SCRYPT_N = 2 ** 17;
 const SCRYPT_R = 8;
 const SCRYPT_P = 1;
-/** Upper bound accepted on import, so a hostile file cannot ask for gigabytes */
-const MAX_SCRYPT_N = 2 ** 20;
+/**
+ * Largest N accepted on import. r and p must match what export writes, so the
+ * most a file can make import allocate is 128 * N * r = 256 MiB. The file's
+ * header is only authenticated after the key has been derived, so these limits
+ * are all that stands between a hostile file and an exhausted machine.
+ */
+const MAX_SCRYPT_N = 2 ** 18;
 
 const KEY_LENGTH = 32;
 const SALT_LENGTH = 16;
@@ -38,8 +43,14 @@ interface EncryptedEnvelope {
 
 type EnvelopeHeader = Omit<EncryptedEnvelope, 'ciphertext' | 'tag'>;
 
-/** Thrown for any failure a user can fix by checking the passphrase or the file */
+/** The file is not a readable export file. Retyping the passphrase will not help */
 export class ExportFileError extends Error {}
+
+/**
+ * The file is well formed but did not decrypt: either the passphrase is wrong
+ * or the encrypted contents were changed. GCM cannot tell the two apart.
+ */
+export class DecryptionFailedError extends ExportFileError {}
 
 const DECRYPT_FAILED =
     'Could not decrypt the file. Either the passphrase is wrong, or the file has been ' +
@@ -94,46 +105,26 @@ export function encryptPayload(plaintext: Buffer, passphrase: string, scryptN: n
     }
 }
 
+/** An export file whose structure has been checked, ready to decrypt */
+export interface SealedFile {
+    header: EnvelopeHeader;
+    salt: Buffer;
+    iv: Buffer;
+    tag: Buffer;
+    ciphertext: Buffer;
+}
+
 /**
- * Decrypt file contents produced by `encryptPayload`. Throws `ExportFileError`
- * for anything that is not a well-formed file sealed under this passphrase.
+ * Check an export file's structure without the passphrase. Anything wrong here
+ * is a problem with the file, so the caller can report it before asking for a
+ * passphrase at all.
  */
-export function decryptPayload(fileContents: string, passphrase: string): Buffer {
-    const envelope = parseEnvelope(fileContents);
-    const { kdf, cipher } = envelope;
-
-    const key = deriveKey(passphrase, decodeBase64(kdf.salt, 'salt'), kdf.N, kdf.r, kdf.p);
-    try {
-        const decipher = createDecipheriv(
-            'aes-256-gcm', key, decodeBase64(cipher.iv, 'iv'), { authTagLength: TAG_LENGTH }
-        );
-        decipher.setAAD(headerAad(envelope));
-        decipher.setAuthTag(decodeBase64(envelope.tag, 'tag'));
-        return Buffer.concat([
-            decipher.update(decodeBase64(envelope.ciphertext, 'ciphertext')),
-            decipher.final(),
-        ]);
-    } catch {
-        throw new ExportFileError(DECRYPT_FAILED);
-    } finally {
-        key.fill(0);
-    }
-}
-
-function decodeBase64(value: string, field: string): Buffer {
-    if (!/^[A-Za-z0-9+/]*={0,2}$/.test(value)) {
-        throw new ExportFileError(`The file is corrupted: "${field}" is not valid base64.`);
-    }
-    return Buffer.from(value, 'base64');
-}
-
-/** Check the envelope's shape before any of it reaches the KDF or the cipher */
-function parseEnvelope(fileContents: string): EncryptedEnvelope {
+export function readSealedFile(fileContents: string): SealedFile {
     let raw: any;
     try {
         raw = JSON.parse(fileContents);
     } catch {
-        throw new ExportFileError('This is not a sherlock export file: it is not valid JSON.');
+        throw new ExportFileError('This is not a sherlock export file, or it is incomplete: it is not valid JSON.');
     }
 
     if (raw?.format !== EXPORT_FORMAT) {
@@ -149,8 +140,7 @@ function parseEnvelope(fileContents: string): EncryptedEnvelope {
     const { kdf, cipher } = raw;
     const kdfValid = kdf?.name === 'scrypt'
         && Number.isInteger(kdf.N) && kdf.N > 1 && kdf.N <= MAX_SCRYPT_N && (kdf.N & (kdf.N - 1)) === 0
-        && Number.isInteger(kdf.r) && kdf.r >= 1 && kdf.r <= 32
-        && Number.isInteger(kdf.p) && kdf.p >= 1 && kdf.p <= 16
+        && kdf.r === SCRYPT_R && kdf.p === SCRYPT_P
         && typeof kdf.salt === 'string';
     const cipherValid = cipher?.name === 'aes-256-gcm' && typeof cipher.iv === 'string';
 
@@ -158,5 +148,44 @@ function parseEnvelope(fileContents: string): EncryptedEnvelope {
         throw new ExportFileError('The export file is corrupted: its header is missing or invalid.');
     }
 
-    return raw as EncryptedEnvelope;
+    const sealed: SealedFile = {
+        header: { format: raw.format, version: raw.version, kdf, cipher },
+        salt: decodeBase64(kdf.salt, 'salt'),
+        iv: decodeBase64(cipher.iv, 'iv'),
+        tag: decodeBase64(raw.tag, 'tag'),
+        ciphertext: decodeBase64(raw.ciphertext, 'ciphertext'),
+    };
+    if (sealed.salt.length < SALT_LENGTH || sealed.iv.length !== IV_LENGTH
+        || sealed.tag.length !== TAG_LENGTH || sealed.ciphertext.length === 0) {
+        throw new ExportFileError('The export file is corrupted: a field has the wrong length.');
+    }
+    return sealed;
+}
+
+/**
+ * Decrypt an export file. Throws `DecryptionFailedError` when the passphrase is
+ * wrong or the contents were modified, and `ExportFileError` for a malformed file.
+ */
+export function decryptPayload(file: string | SealedFile, passphrase: string): Buffer {
+    const sealed = typeof file === 'string' ? readSealedFile(file) : file;
+    const { kdf } = sealed.header;
+
+    const key = deriveKey(passphrase, sealed.salt, kdf.N, kdf.r, kdf.p);
+    try {
+        const decipher = createDecipheriv('aes-256-gcm', key, sealed.iv, { authTagLength: TAG_LENGTH });
+        decipher.setAAD(headerAad(sealed.header));
+        decipher.setAuthTag(sealed.tag);
+        return Buffer.concat([decipher.update(sealed.ciphertext), decipher.final()]);
+    } catch {
+        throw new DecryptionFailedError(DECRYPT_FAILED);
+    } finally {
+        key.fill(0);
+    }
+}
+
+function decodeBase64(value: string, field: string): Buffer {
+    if (!/^[A-Za-z0-9+/]*={0,2}$/.test(value)) {
+        throw new ExportFileError(`The export file is corrupted: "${field}" is not valid base64.`);
+    }
+    return Buffer.from(value, 'base64');
 }

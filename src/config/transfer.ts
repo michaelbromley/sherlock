@@ -19,7 +19,7 @@ import { getCredentialResolver } from '../credentials';
 import { getEnvVarForConnection } from '../credentials/providers/env';
 import { DB_TYPES, isValidDbType } from '../db-types';
 import { resolveTunnelConfig } from '../tunnel/config';
-import { decryptPayload, encryptPayload, ExportFileError } from './transfer-crypto';
+import { decryptPayload, encryptPayload, ExportFileError, type SealedFile } from './transfer-crypto';
 import { loadOrCreateConfig, saveConfig, writableConfigPath } from './write';
 
 const PAYLOAD_FORMAT = 'sherlock-connections-payload';
@@ -231,9 +231,12 @@ export function sealPayload(payload: ExportPayload, passphrase: string, scryptN?
     }
 }
 
-/** Decrypt export file contents and check the payload inside */
-export function openPayload(fileContents: string, passphrase: string): ExportPayload {
-    const plaintext = decryptPayload(fileContents, passphrase);
+/**
+ * Decrypt an export file and check the payload inside. Pass the result of
+ * `readSealedFile` to check the file's structure before asking for a passphrase.
+ */
+export function openPayload(file: string | SealedFile, passphrase: string): ExportPayload {
+    const plaintext = decryptPayload(file, passphrase);
     let raw: any;
     try {
         raw = JSON.parse(plaintext.toString('utf-8'));
@@ -358,9 +361,16 @@ export function planHasSecrets(plan: ImportPlan): boolean {
     return plan.toImport.some(({ entry }) => Object.keys(entry.secrets).length > 0);
 }
 
+/** Keychain operations import needs; the real keychain in the CLI, a fake in tests */
+export interface KeychainAccess {
+    get: (account: string, service?: string) => string | null;
+    set: (account: string, value: string, service?: string) => void;
+    delete: (account: string, service?: string) => void;
+}
+
 /** Where imported secrets go */
 export type SecretStorage =
-    | { kind: 'keychain'; set: (account: string, value: string, service?: string) => void }
+    | ({ kind: 'keychain' } & KeychainAccess)
     | { kind: 'inline' };
 
 export interface ImportedConnection {
@@ -371,48 +381,133 @@ export interface ImportedConnection {
     tunnel?: string;
 }
 
+/** The service sherlock's own keychain entries use when a reference names none */
+const DEFAULT_KEYCHAIN_SERVICE = 'sherlock';
+
+interface KeychainEntry {
+    service: string;
+    account: string;
+}
+
+/** The keychain entries a connection reads, from its password and URL */
+function keychainEntries(connection: ConnectionConfig | undefined): KeychainEntry[] {
+    const entries: KeychainEntry[] = [];
+    for (const ref of [connection?.password, connection?.url]) {
+        if (typeof ref !== 'object' || ref === null || !('$keychain' in ref)) continue;
+        const target = ref.$keychain;
+        entries.push(typeof target === 'string'
+            ? { service: DEFAULT_KEYCHAIN_SERVICE, account: target }
+            : { service: target.service ?? DEFAULT_KEYCHAIN_SERVICE, account: target.account });
+    }
+    return entries;
+}
+
+const entryKey = (entry: KeychainEntry) => `${entry.service}\0${entry.account}`;
+
 /**
  * Store each connection's secrets and write the config, once, at the end.
  *
- * Secrets go to the keychain before the config is written, so a keychain
- * failure part-way leaves config.json untouched rather than pointing at
- * entries that were never stored.
+ * If a keychain write or the config write fails, every keychain entry this
+ * import wrote is put back as it was, so connections replaced with --force keep
+ * working with their old settings rather than pairing them with new passwords.
+ *
+ * Once the config is written, keychain entries that only a replaced connection
+ * used, and that nothing in the config refers to any more, are deleted.
  */
 export function applyImport(plan: ImportPlan, storage: SecretStorage): {
     imported: ImportedConnection[];
     path: string;
 } {
     const config = loadOrCreateConfig();
+    const incoming: Record<string, ConnectionConfig> = {};
     const imported: ImportedConnection[] = [];
+    /** Keychain entries overwritten so far, with what they held before */
+    const written: { entry: KeychainEntry; previous: string | null }[] = [];
 
-    for (const { name, entry, replaces } of plan.toImport) {
-        const connection: ConnectionConfig = structuredClone(entry.config);
-        const { password, url } = entry.secrets;
-        const hasSecrets = password !== undefined || url !== undefined;
+    const store = (keychain: KeychainAccess, entry: KeychainEntry, value: string) => {
+        const previous = keychain.get(entry.account, entry.service);
+        written.push({ entry, previous });
+        keychain.set(entry.account, value, entry.service);
+    };
 
-        if (storage.kind === 'keychain') {
-            if (password !== undefined) {
-                storage.set(name, password);
-                connection.password = { $keychain: name };
+    try {
+        for (const { name, entry, replaces } of plan.toImport) {
+            const connection: ConnectionConfig = structuredClone(entry.config);
+            const { password, url } = entry.secrets;
+            const hasSecrets = password !== undefined || url !== undefined;
+
+            if (storage.kind === 'keychain') {
+                if (password !== undefined) {
+                    store(storage, { service: DEFAULT_KEYCHAIN_SERVICE, account: name }, password);
+                    connection.password = { $keychain: name };
+                }
+                if (url !== undefined) {
+                    store(storage, { service: URL_KEYCHAIN_SERVICE, account: name }, url);
+                    connection.url = { $keychain: { service: URL_KEYCHAIN_SERVICE, account: name } };
+                }
+            } else {
+                if (password !== undefined) connection.password = password;
+                if (url !== undefined) connection.url = url;
             }
-            if (url !== undefined) {
-                storage.set(name, url, URL_KEYCHAIN_SERVICE);
-                connection.url = { $keychain: { service: URL_KEYCHAIN_SERVICE, account: name } };
-            }
-        } else {
-            if (password !== undefined) connection.password = password;
-            if (url !== undefined) connection.url = url;
+
+            incoming[name] = connection;
+            imported.push({
+                name,
+                action: replaces ? 'replaced' : 'added',
+                secrets: hasSecrets ? storage.kind : 'none',
+                ...(connection.tunnel ? { tunnel: connection.tunnel.command } : {}),
+            });
         }
 
-        config.connections[name] = connection;
-        imported.push({
-            name,
-            action: replaces ? 'replaced' : 'added',
-            secrets: hasSecrets ? storage.kind : 'none',
-            ...(connection.tunnel ? { tunnel: connection.tunnel.command } : {}),
-        });
+        if (imported.length > 0) {
+            // Built separately and merged only now: the loaded config is cached,
+            // and a failure above must not leave half an import in it.
+            const replaced = imported
+                .filter(c => c.action === 'replaced')
+                .map(c => config.connections[c.name]);
+            saveConfig({ ...config, connections: { ...config.connections, ...incoming } });
+            Object.assign(config.connections, incoming);
+            if (storage.kind === 'keychain') removeUnusedEntries(storage, replaced, config.connections);
+        }
+    } catch (error) {
+        if (storage.kind === 'keychain') restoreEntries(storage, written);
+        throw error;
     }
 
-    if (imported.length > 0) saveConfig(config);
     return { imported, path: writableConfigPath() };
+}
+
+/** Put back every keychain entry an import wrote, newest first */
+function restoreEntries(
+    keychain: KeychainAccess,
+    written: { entry: KeychainEntry; previous: string | null }[]
+): void {
+    for (const { entry, previous } of [...written].reverse()) {
+        try {
+            if (previous === null) keychain.delete(entry.account, entry.service);
+            else keychain.set(entry.account, previous, entry.service);
+        } catch {
+            // Keep restoring the rest; the original error is what gets reported
+        }
+    }
+}
+
+/**
+ * Delete keychain entries the replaced connections used that no connection
+ * refers to any more, such as the URL secret of a connection that now has none.
+ */
+function removeUnusedEntries(
+    keychain: KeychainAccess,
+    replaced: ConnectionConfig[],
+    connections: Record<string, ConnectionConfig>
+): void {
+    const inUse = new Set(Object.values(connections).flatMap(keychainEntries).map(entryKey));
+    for (const entry of replaced.flatMap(keychainEntries)) {
+        if (inUse.has(entryKey(entry))) continue;
+        try {
+            keychain.delete(entry.account, entry.service);
+        } catch {
+            // A stale entry left behind is untidy but harmless; the import worked
+        }
+    }
 }

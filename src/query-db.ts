@@ -335,11 +335,26 @@ async function exportConfigAction(
     }
 }
 
-async function importConfigAction(file: string, cmdOpts: { force?: boolean }): Promise<void> {
+async function importConfigAction(
+    file: string,
+    cmdOpts: { force?: boolean },
+    configPath: string | undefined
+): Promise<void> {
     const fs = await import('fs');
     const { openPayload, planImport, planHasSecrets, applyImport } = await import('./config/transfer');
-    const { ExportFileError } = await import('./config/transfer-crypto');
+    const { readSealedFile, DecryptionFailedError } = await import('./config/transfer-crypto');
     const { isKeychainAvailable } = await import('./credentials/providers/keychain');
+    const { writableConfigPath } = await import('./config/write');
+
+    // Import writes to the user config, like `connection add`. Saying so beats
+    // quietly writing somewhere other than the file the user named.
+    if (configPath) {
+        console.error(
+            `Error: --config cannot be used with import. Connections are always imported into ` +
+            `${writableConfigPath()}.`
+        );
+        process.exit(1);
+    }
 
     requireTerminal('import');
 
@@ -347,7 +362,9 @@ async function importConfigAction(file: string, cmdOpts: { force?: boolean }): P
         const stat = fs.statSync(file, { throwIfNoEntry: false });
         if (!stat?.isFile()) throw new Error(`${file} does not exist or is not a file.`);
         if (stat.size > MAX_EXPORT_FILE_BYTES) throw new Error(`${file} is too large to be a sherlock export file.`);
-        const contents = fs.readFileSync(file, 'utf-8');
+        // Check the file before asking for a passphrase, so a truncated or wrong
+        // file is reported as such instead of as a mistyped passphrase.
+        const sealed = readSealedFile(fs.readFileSync(file, 'utf-8'));
 
         p.intro(`Importing ${file}`);
 
@@ -357,13 +374,16 @@ async function importConfigAction(file: string, cmdOpts: { force?: boolean }): P
             const spinner = p.spinner();
             spinner.start('Decrypting');
             try {
-                payload = openPayload(contents, passphrase);
+                payload = openPayload(sealed, passphrase);
                 spinner.stop('Decrypted');
             } catch (error) {
                 spinner.error(getErrorMessage(error));
-                if (!(error instanceof ExportFileError)) throw error;
+                if (!(error instanceof DecryptionFailedError)) throw error;
                 if (attempt >= IMPORT_PASSPHRASE_ATTEMPTS) {
-                    throw new Error(`Giving up after ${attempt} attempts. Nothing was imported.`);
+                    throw new Error(
+                        `Giving up after ${attempt} attempts. Nothing was imported. If you are sure ` +
+                        `of the passphrase, the file was changed after it was exported: export it again.`
+                    );
                 }
             }
         }
@@ -376,11 +396,22 @@ async function importConfigAction(file: string, cmdOpts: { force?: boolean }): P
             return;
         }
 
-        let storage: Parameters<typeof applyImport>[1] = { kind: 'keychain', set: setKeychainPassword };
+        let storage: Parameters<typeof applyImport>[1] = {
+            kind: 'keychain',
+            get: getKeychainPassword,
+            set: setKeychainPassword,
+            delete: deleteKeychainPassword,
+        };
         if (planHasSecrets(plan) && !isKeychainAvailable()) {
-            p.log.warn(
-                'This machine has no usable OS keychain, so passwords can only be stored in ' +
-                'plaintext in config.json (readable by your user only).'
+            // A Mac always has a keychain; over SSH it is usually just locked,
+            // and unlocking it beats settling for plaintext.
+            p.log.warn(process.platform === 'darwin'
+                ? 'The macOS keychain could not be written. Over SSH the login keychain is ' +
+                  'usually locked: answer no, run `security unlock-keychain`, and import again. ' +
+                  'Otherwise passwords can only be stored in plaintext in config.json ' +
+                  '(readable by your user only).'
+                : 'This machine has no usable OS keychain, so passwords can only be stored in ' +
+                  'plaintext in config.json (readable by your user only).'
             );
             const accept = await p.confirm({
                 message: 'Store the imported passwords in config.json?',
@@ -928,7 +959,7 @@ no keychain you are asked before any password is written to config.json.
 
 A connection whose name already exists is skipped unless --force is given.`)
         .action(async (file: string, cmdOpts: { force?: boolean }) => {
-            await importConfigAction(file, cmdOpts);
+            await importConfigAction(file, cmdOpts, program.opts().config);
         });
 
     // ========================================================================

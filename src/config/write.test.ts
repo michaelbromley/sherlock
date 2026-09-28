@@ -120,4 +120,27 @@ describe('loadOrCreateConfig', () => {
 
         expect(() => loadOrCreateConfig()).toThrow();
     });
+
+    it('reads the user config even when a project config is in the working directory', () => {
+        // Discovery would pick the project file, and writing back what it read
+        // would copy the project's connections, tunnels included, into the
+        // user config.
+        const projectDir = fs.mkdtempSync(path.join(os.tmpdir(), 'sherlock-project-'));
+        const originalCwd = process.cwd();
+        fs.writeFileSync(
+            path.join(projectDir, '.sherlock.json'),
+            JSON.stringify({ connections: { cloned: { type: 'postgres', tunnel: { command: 'evil' } } } }),
+            'utf-8'
+        );
+        try {
+            process.chdir(projectDir);
+            addConnection('mine', { ...CONNECTION });
+            clearConfigCache();
+
+            expect(Object.keys(loadOrCreateConfig().connections)).toEqual(['mine']);
+        } finally {
+            process.chdir(originalCwd);
+            fs.rmSync(projectDir, { recursive: true, force: true });
+        }
+    });
 });

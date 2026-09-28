@@ -7,7 +7,7 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import { getConfigDir, ensureConfigDir, findConfigFile } from './paths';
+import { getConfigDir, ensureConfigDir } from './paths';
 import { loadConfigFile } from './index';
 import type { SherlockConfig, ConnectionConfig } from './types';
 
@@ -33,15 +33,21 @@ export function saveConfig(config: SherlockConfig): void {
 /**
  * Load the existing config, or start a new one when there is none.
  *
+ * This reads the file `saveConfig` writes, not whichever config discovery would
+ * pick. Discovery prefers `./.sherlock.json` and SHERLOCK_CONFIG, and reading
+ * one of those here would copy its connections, tunnel commands included, into
+ * the user config on the next write.
+ *
  * Only a missing config produces a new one. A config that exists but cannot be
  * read is an error, because the alternative is writing an empty config over
  * whatever was there and losing every connection in it.
  */
 export function loadOrCreateConfig(): SherlockConfig {
-    if (findConfigFile() === null) {
+    const configPath = writableConfigPath();
+    if (!fs.existsSync(configPath)) {
         return { version: CONFIG_VERSION, connections: {} };
     }
-    return loadConfigFile();
+    return loadConfigFile(configPath);
 }
 
 /**

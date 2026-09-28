@@ -136,7 +136,9 @@ It exports, copies the file, imports on the remote, and deletes the file on both
 
 1. A new passphrase, twice. They only need it for the next minute, so a long random phrase is fine.
 2. The same passphrase once more, on the remote.
-3. Possibly "Store the imported passwords in config.json?". This appears when the remote has no OS keychain, which is usual on a headless Linux server. Answering yes stores the passwords in plaintext in a file only their user can read. Answering no imports nothing.
+3. Possibly "Store the imported passwords in config.json?". This appears when the remote has no usable OS keychain, which is usual on a headless Linux server. Answering yes stores the passwords in plaintext in a file only their user can read. Answering no imports nothing.
+
+**A Mac as the remote** (check with `ssh <host> uname`, which prints `Darwin`): its login keychain is usually locked over SSH, and import would then offer plaintext. Put `security unlock-keychain; ` at the start of the quoted remote command, before `<remote-sherlock>`, and tell the user they will be asked for their Mac login password there.
 
 Then ask them to tell you when it has finished. You do not need them to paste the output back.
 
@@ -152,7 +154,7 @@ Compare the remote list with what you meant to export. A connection is missing w
 - **Skipped on export:** its keychain entry could not be read on this machine. Fix that entry locally, then repeat step 2 for that connection alone.
 - **Skipped on import:** the name already existed and `--force` was not given. This is expected if the user chose to keep the remote connections.
 
-Report what arrived, what was skipped and why, and anything still missing on the remote, such as a tunnel tool that is not installed. If the command failed with "Giving up after 3 attempts", the passphrase was mistyped. Give them the same command again.
+Report what arrived, what was skipped and why, and anything still missing on the remote, such as a tunnel tool that is not installed. If import stopped with "Giving up after 3 attempts", the passphrase was mistyped on the remote. Give them the same command again. Any other import error, such as "not valid JSON" or "corrupted", means the file did not arrive intact, and running the command again makes a fresh file.
 
 Two things do not carry over in a useful form. The `directory` auto-select paths are local-machine paths. A `$env` password whose variable was not set here arrives as a reference to that variable, which must then be set on the remote.
 
@@ -164,7 +166,8 @@ sherlock config import <file> [--force]             # --force replaces same-name
 ```
 
 - Export reads each password from wherever it is stored and encrypts the file with the passphrase (scrypt + AES-256-GCM). A wrong passphrase and a modified file are both refused.
-- Import stores passwords in the OS keychain, and falls back to config.json only after the user agrees.
+- Import stores passwords in the OS keychain, and falls back to config.json only after the user agrees. It always writes to the user config, never a project `.sherlock.json`, and does not accept `--config`.
+- If an import fails part-way, it puts back every keychain entry it wrote and leaves config.json unchanged, so running it again is safe.
 - Export exits 1 if it skipped any connection, even though the file was still written.
 
 ## Tunnelled Connections

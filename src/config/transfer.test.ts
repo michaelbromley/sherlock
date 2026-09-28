@@ -13,7 +13,7 @@ import {
     type ExportPayload,
     type SecretStorage,
 } from './transfer';
-import { ExportFileError } from './transfer-crypto';
+import { DecryptionFailedError, ExportFileError, readSealedFile } from './transfer-crypto';
 import { addConnection } from './write';
 import { clearConfigCache } from './index';
 import type { ConnectionConfig, CredentialRef } from './types';
@@ -50,12 +50,27 @@ async function fakeResolve(ref: CredentialRef): Promise<string> {
     throw new Error('unexpected ref');
 }
 
-/** A keychain that records what was stored in it */
-function recordingKeychain(): { storage: SecretStorage; stored: Map<string, string> } {
-    const stored = new Map<string, string>();
+/**
+ * An in-memory keychain, keyed "service/account". `failOn` makes storing to
+ * that key throw, to test what a failed import leaves behind.
+ */
+function recordingKeychain(
+    initial: Record<string, string> = {},
+    failOn?: string
+): { storage: SecretStorage; stored: Map<string, string> } {
+    const stored = new Map(Object.entries(initial));
+    const key = (account: string, service = 'sherlock') => `${service}/${account}`;
     return {
         stored,
-        storage: { kind: 'keychain', set: (account: string, value: string, service = 'sherlock') => stored.set(`${service}/${account}`, value) },
+        storage: {
+            kind: 'keychain',
+            get: (account, service) => stored.get(key(account, service)) ?? null,
+            set: (account, value, service) => {
+                if (key(account, service) === failOn) throw new Error('keychain locked');
+                stored.set(key(account, service), value);
+            },
+            delete: (account, service) => { stored.delete(key(account, service)); },
+        },
     };
 }
 
@@ -211,7 +226,7 @@ describe('the encrypted file', () => {
         } catch (e) {
             error = e;
         }
-        expect(error).toBeInstanceOf(ExportFileError);
+        expect(error).toBeInstanceOf(DecryptionFailedError);
         expect((error as Error).message).toContain('passphrase is wrong');
     });
 
@@ -221,7 +236,15 @@ describe('the encrypted file', () => {
         bytes[bytes.length >> 1] ^= 0x01;
         envelope.ciphertext = bytes.toString('base64');
 
-        expect(() => openPayload(JSON.stringify(envelope), PASSPHRASE)).toThrow('modified or corrupted');
+        expect(() => openPayload(JSON.stringify(envelope), PASSPHRASE)).toThrow(DecryptionFailedError);
+    });
+
+    it('detects a truncated ciphertext inside an otherwise valid file', () => {
+        const envelope = JSON.parse(sealed);
+        const bytes = Buffer.from(envelope.ciphertext, 'base64');
+        envelope.ciphertext = bytes.subarray(0, bytes.length - 8).toString('base64');
+
+        expect(() => openPayload(JSON.stringify(envelope), PASSPHRASE)).toThrow(DecryptionFailedError);
     });
 
     it('detects a modified authentication tag', () => {
@@ -230,7 +253,7 @@ describe('the encrypted file', () => {
         tag[0] ^= 0xff;
         envelope.tag = tag.toString('base64');
 
-        expect(() => openPayload(JSON.stringify(envelope), PASSPHRASE)).toThrow(ExportFileError);
+        expect(() => openPayload(JSON.stringify(envelope), PASSPHRASE)).toThrow(DecryptionFailedError);
     });
 
     it('detects a modified header, which is authenticated too', () => {
@@ -239,22 +262,46 @@ describe('the encrypted file', () => {
         iv[0] ^= 0x01;
         envelope.cipher.iv = iv.toString('base64');
 
-        expect(() => openPayload(JSON.stringify(envelope), PASSPHRASE)).toThrow(ExportFileError);
+        expect(() => openPayload(JSON.stringify(envelope), PASSPHRASE)).toThrow(DecryptionFailedError);
     });
 
-    it('detects a truncated file', () => {
-        expect(() => openPayload(sealed.slice(0, sealed.length / 2), PASSPHRASE)).toThrow('not valid JSON');
-    });
+    /** Expect a problem with the file itself, found before any passphrase is needed */
+    function expectFileProblem(contents: string, message: string) {
+        let error: unknown;
+        try {
+            readSealedFile(contents);
+        } catch (e) {
+            error = e;
+        }
+        expect(error).toBeInstanceOf(ExportFileError);
+        // Not a decryption failure, so import does not ask for the passphrase again
+        expect(error).not.toBeInstanceOf(DecryptionFailedError);
+        expect((error as Error).message).toContain(message);
+    }
 
-    it('refuses scrypt parameters that would exhaust memory', () => {
-        const envelope = JSON.parse(sealed);
-        envelope.kdf.N = 2 ** 30;
-        expect(() => openPayload(JSON.stringify(envelope), PASSPHRASE)).toThrow('header is missing or invalid');
+    it('reports a file cut short as a problem with the file, not the passphrase', () => {
+        expectFileProblem(sealed.slice(0, sealed.length / 2), 'not valid JSON');
     });
 
     it('refuses a file that is not an export', () => {
-        expect(() => openPayload('{"connections":{}}', PASSPHRASE)).toThrow('not a sherlock export file');
+        expectFileProblem('{"connections":{}}', 'not a sherlock export file');
     });
+
+    it('refuses a field with the wrong length', () => {
+        const envelope = JSON.parse(sealed);
+        envelope.cipher.iv = Buffer.alloc(4).toString('base64');
+        expectFileProblem(JSON.stringify(envelope), 'wrong length');
+    });
+
+    // The header is only authenticated after the key is derived, so scrypt's
+    // cost must be bounded before anything else happens.
+    for (const [field, value] of [['N', 2 ** 20], ['r', 32], ['p', 16]] as const) {
+        it(`refuses a scrypt ${field} that would exhaust memory or time`, () => {
+            const envelope = JSON.parse(sealed);
+            envelope.kdf[field] = value;
+            expectFileProblem(JSON.stringify(envelope), 'header is missing or invalid');
+        });
+    }
 });
 
 describe('import', () => {
@@ -313,8 +360,45 @@ describe('import', () => {
     });
 
     it('writes nothing when a keychain write fails', () => {
-        const failing: SecretStorage = { kind: 'keychain', set: () => { throw new Error('keychain locked'); } };
-        expect(() => applyImport(planImport(payloadOf({ a: entry })), failing)).toThrow('keychain locked');
+        const { storage } = recordingKeychain({}, 'sherlock/a');
+        expect(() => applyImport(planImport(payloadOf({ a: entry })), storage)).toThrow('keychain locked');
         expect(fs.existsSync(path.join(tempDir, 'sherlock', 'config.json'))).toBe(false);
+    });
+
+    it('puts back every keychain entry it wrote when a --force import fails part-way', () => {
+        // "a" is replaced and its password overwritten before "b" fails. Keeping
+        // the new password would pair it with a's old host in config.json.
+        addConnection('a', { type: 'postgres', host: 'old-a', database: 'd', username: 'u', password: { $keychain: 'a' } });
+        clearConfigCache();
+        const { storage, stored } = recordingKeychain({ 'sherlock/a': 'old-a-secret' }, 'sherlock/b');
+
+        const plan = planImport(payloadOf({ a: entry, b: entry, 'a-new': entry }), { force: true });
+        expect(() => applyImport(plan, storage)).toThrow('keychain locked');
+
+        expect(Object.fromEntries(stored)).toEqual({ 'sherlock/a': 'old-a-secret' });
+        expect(writtenConfig().a.host).toBe('old-a');
+        expect(Object.keys(writtenConfig())).toEqual(['a']);
+    });
+
+    it('deletes keychain entries only a replaced connection used', () => {
+        addConnection('a', {
+            type: 'postgres',
+            url: { $keychain: { service: URL_KEYCHAIN_SERVICE, account: 'a' } },
+            password: { $keychain: 'shared' },
+        });
+        addConnection('other', { type: 'postgres', host: 'h', database: 'd', username: 'u', password: { $keychain: 'shared' } });
+        clearConfigCache();
+        const { storage, stored } = recordingKeychain({
+            [`${URL_KEYCHAIN_SERVICE}/a`]: 'postgres://u:old@h/d',
+            'sherlock/shared': 'shared-secret',
+        });
+
+        applyImport(planImport(payloadOf({ a: entry }), { force: true }), storage);
+
+        // The old URL secret is gone; the entry "other" still reads is kept
+        expect(Object.fromEntries(stored)).toEqual({
+            'sherlock/a': 'p',
+            'sherlock/shared': 'shared-secret',
+        });
     });
 });
