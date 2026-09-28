@@ -19,6 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `install.ps1` always puts its install directory on the user PATH, since the skill runs `sherlock` from PATH.
 - The skill follows the Agent Skills specification: a description that says when to use it, a `compatibility` field naming the CLI it needs, and `allowed-tools: Bash(sherlock:*)`. The walkthrough for moving connections between machines moved to `references/transfer.md`, which agents load only when needed.
 - `sherlock update` updates only the binary, and no longer writes a `SKILL.md` next to it. Update the skill with `npx skills update sherlock -g`.
+- The password prompts in `sherlock manage` now say they ask for the database password, and name the connection it belongs to.
 
 ### Fixed
 

@@ -645,7 +645,7 @@ async function editConnectionWizard(): Promise<void> {
 
     if (action === 'password') {
         const newPassword = await p.password({
-            message: 'Enter new password',
+            message: `New database password for "${connName}"`,
         });
 
         if (p.isCancel(newPassword)) return;
@@ -816,8 +816,10 @@ async function promptForUsername(initial?: string): Promise<string | null> {
     return p.isCancel(v) ? null : v;
 }
 
-async function promptForOptionalPassword(): Promise<string | null> {
-    const v = await p.password({ message: 'Password (leave empty if none)' });
+async function promptForOptionalPassword(connectionName: string): Promise<string | null> {
+    const v = await p.password({
+        message: `Database password for "${connectionName}" (leave empty if none)`,
+    });
     if (p.isCancel(v)) return null;
     return (v as string) || '';
 }
@@ -935,7 +937,7 @@ async function promptForConnection(
             if (prefill?.password != null) {
                 password = prefill.password;
             } else {
-                const v = await promptForOptionalPassword();
+                const v = await promptForOptionalPassword(name);
                 if (v === null) return null;
                 password = v;
             }
@@ -1020,7 +1022,7 @@ async function promptForConnection(
         if (prefill?.password != null) {
             password = prefill.password;
         } else {
-            const v = await promptForOptionalPassword();
+            const v = await promptForOptionalPassword(name);
             if (v === null) return null;
             password = v;
         }
