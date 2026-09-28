@@ -167,7 +167,7 @@ sherlock config import <file> [--force]             # --force replaces same-name
 
 - Export reads each password from wherever it is stored and encrypts the file with the passphrase (scrypt + AES-256-GCM). A wrong passphrase and a modified file are both refused.
 - Import stores passwords in the OS keychain, and falls back to config.json only after the user agrees. It always writes to the user config, never a project `.sherlock.json`, and does not accept `--config`.
-- If an import fails part-way, it puts back every keychain entry it wrote and leaves config.json unchanged, so running it again is safe.
+- If an import fails part-way, it leaves config.json unchanged and puts back the keychain entries it wrote. Running it again is safe. If the error also names keychain entries it "could not put back", tell the user, and re-run the import with `--force` so config.json matches those entries.
 - Export exits 1 if it skipped any connection, even though the file was still written.
 
 ## Tunnelled Connections

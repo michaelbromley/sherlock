@@ -7,7 +7,7 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import { getConfigDir, ensureConfigDir } from './paths';
+import { getConfigDir, ensureConfigDir, findConfigFile } from './paths';
 import { loadConfigFile } from './index';
 import type { SherlockConfig, ConnectionConfig } from './types';
 
@@ -20,6 +20,23 @@ export const CONFIG_VERSION = '2.0';
 /** Where sherlock writes config, which is not always where it read config from */
 export function writableConfigPath(): string {
     return path.join(getConfigDir(), 'config.json');
+}
+
+/**
+ * The config sherlock reads from the current directory and environment, when
+ * that is not the config it writes to. Discovery picks one file and does not
+ * merge, so a connection just written there is invisible to queries run here.
+ */
+export function shadowingConfigPath(): string | null {
+    let found: string | null;
+    try {
+        found = findConfigFile();
+    } catch {
+        // SHERLOCK_CONFIG names a missing file; queries report that themselves
+        return null;
+    }
+    if (found === null || path.resolve(found) === path.resolve(writableConfigPath())) return null;
+    return found;
 }
 
 /** Write the config, replacing whatever was there */

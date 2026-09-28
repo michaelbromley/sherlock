@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { addConnection, connectionExists, loadOrCreateConfig } from './write';
+import { addConnection, connectionExists, loadOrCreateConfig, shadowingConfigPath } from './write';
 import { clearConfigCache } from './index';
 
 /**
@@ -141,6 +141,24 @@ describe('loadOrCreateConfig', () => {
         } finally {
             process.chdir(originalCwd);
             fs.rmSync(projectDir, { recursive: true, force: true });
+        }
+    });
+});
+
+describe('shadowingConfigPath', () => {
+    it('is null when sherlock reads the config it writes', () => {
+        addConnection('prod', { ...CONNECTION });
+        expect(shadowingConfigPath()).toBeNull();
+    });
+
+    it('names SHERLOCK_CONFIG when it points elsewhere', () => {
+        const other = path.join(tempDir, 'other.json');
+        fs.writeFileSync(other, JSON.stringify({ connections: {} }), 'utf-8');
+        process.env.SHERLOCK_CONFIG = other;
+        try {
+            expect(shadowingConfigPath()).toBe(other);
+        } finally {
+            delete process.env.SHERLOCK_CONFIG;
         }
     });
 });

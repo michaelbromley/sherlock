@@ -344,7 +344,7 @@ async function importConfigAction(
     const { openPayload, planImport, planHasSecrets, applyImport } = await import('./config/transfer');
     const { readSealedFile, DecryptionFailedError } = await import('./config/transfer-crypto');
     const { isKeychainAvailable } = await import('./credentials/providers/keychain');
-    const { writableConfigPath } = await import('./config/write');
+    const { writableConfigPath, shadowingConfigPath } = await import('./config/write');
 
     // Import writes to the user config, like `connection add`. Saying so beats
     // quietly writing somewhere other than the file the user named.
@@ -424,7 +424,7 @@ async function importConfigAction(
             storage = { kind: 'inline' };
         }
 
-        const { imported, path: configPath } = applyImport(plan, storage);
+        const { imported, path: configPath, removedEntries } = applyImport(plan, storage);
 
         const where = { keychain: 'password in OS keychain', inline: 'password inline in config.json', none: 'no stored password' };
         p.note(
@@ -434,6 +434,16 @@ async function importConfigAction(
         );
         if (imported.some(c => c.tunnel)) {
             p.log.info('Tunnel commands run on this machine when you query. Check they are what you expect.');
+        }
+        if (removedEntries.length > 0) {
+            p.log.info(`Deleted keychain entries the replaced connections no longer use: ${removedEntries.join(', ')}`);
+        }
+        const shadowing = shadowingConfigPath();
+        if (shadowing) {
+            p.log.warn(
+                `Sherlock commands run here read ${shadowing}, not ${configPath}, so they will not ` +
+                `see these connections. Run them from another directory, or unset SHERLOCK_CONFIG.`
+            );
         }
         p.outro(`Delete ${file} now that it has been imported. Try: sherlock -c ${imported[0].name} tables`);
         if (plan.skipped.length > 0) process.exitCode = 1;
@@ -872,7 +882,7 @@ function setupCLI() {
         .option('--force', 'replace an existing connection of the same name')
         .action(async (name: string, cmdOpts: ConnectionAddOptions & { force?: boolean }) => {
             const { buildConnectionConfig } = await import('./config/connection-input');
-            const { addConnection, connectionExists } = await import('./config/write');
+            const { addConnection, connectionExists, shadowingConfigPath } = await import('./config/write');
 
             // -u/--url is a global option meaning "connect to this URL now", so
             // it never reaches this command. Say so rather than reporting the
@@ -910,6 +920,14 @@ function setupCLI() {
                 const { replaced, path: configPath } = addConnection(name, config, {
                     force: cmdOpts.force,
                 });
+
+                const shadowing = shadowingConfigPath();
+                if (shadowing) {
+                    console.error(
+                        `Warning: sherlock commands run here read ${shadowing}, not ${configPath}, ` +
+                        `so they will not see "${name}".`
+                    );
+                }
 
                 console.log(JSON.stringify({
                     connection: name,

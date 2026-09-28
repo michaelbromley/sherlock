@@ -11,6 +11,10 @@ import {
     applyImport,
     URL_KEYCHAIN_SERVICE,
     type ExportPayload,
+    type ImportedConnection,
+    type ImportPlan,
+    type KeychainAccess,
+    type Skipped,
     type SecretStorage,
 } from './transfer';
 import { DecryptionFailedError, ExportFileError, readSealedFile } from './transfer-crypto';
@@ -51,27 +55,30 @@ async function fakeResolve(ref: CredentialRef): Promise<string> {
 }
 
 /**
- * An in-memory keychain, keyed "service/account". `failOn` makes storing to
- * that key throw, to test what a failed import leaves behind.
+ * An in-memory keychain, keyed "service/account". Any operation on a key in
+ * `failOn` throws, to test what a failed import leaves behind.
  */
 function recordingKeychain(
     initial: Record<string, string> = {},
-    failOn?: string
+    failOn: string[] = []
 ): { storage: SecretStorage; stored: Map<string, string> } {
     const stored = new Map(Object.entries(initial));
     const key = (account: string, service = 'sherlock') => `${service}/${account}`;
-    return {
-        stored,
-        storage: {
-            kind: 'keychain',
-            get: (account, service) => stored.get(key(account, service)) ?? null,
-            set: (account, value, service) => {
-                if (key(account, service) === failOn) throw new Error('keychain locked');
-                stored.set(key(account, service), value);
-            },
-            delete: (account, service) => { stored.delete(key(account, service)); },
+    const check = (k: string) => {
+        if (failOn.includes(k)) throw new Error('keychain locked');
+    };
+    const keychain: KeychainAccess = {
+        get: (account: string, service?: string) => stored.get(key(account, service)) ?? null,
+        set: (account: string, value: string, service?: string) => {
+            check(key(account, service));
+            stored.set(key(account, service), value);
+        },
+        delete: (account: string, service?: string) => {
+            check(key(account, service));
+            stored.delete(key(account, service));
         },
     };
+    return { stored, storage: { kind: 'keychain', ...keychain } };
 }
 
 const PASSPHRASE = 'correct horse battery staple';
@@ -122,7 +129,7 @@ describe('export then import', () => {
         const { storage, stored } = recordingKeychain();
         const { imported } = applyImport(plan, storage);
 
-        expect(imported.map(c => c.name)).toEqual(Object.keys(SOURCE).sort((a, b) => a.localeCompare(b)));
+        expect(imported.map((c: ImportedConnection) => c.name)).toEqual(Object.keys(SOURCE).sort((a, b) => a.localeCompare(b)));
         expect(plan.skipped).toEqual([]);
 
         const config = writtenConfig();
@@ -158,7 +165,7 @@ describe('export then import', () => {
         const payload = await exportAndOpen(['in-keychain', 'with-url']);
         const { imported } = applyImport(planImport(payload), { kind: 'inline' });
 
-        expect(imported.every(c => c.secrets === 'inline')).toBe(true);
+        expect(imported.every((c: ImportedConnection) => c.secrets === 'inline')).toBe(true);
         const config = writtenConfig();
         expect(config['in-keychain'].password).toBe('keychain-secret');
         expect(config['with-url'].url).toBe('postgres://u:url-secret@h:5432/d');
@@ -348,8 +355,8 @@ describe('import', () => {
             ...JSON.parse(`{"__proto__": ${JSON.stringify(entry)}}`),
         }));
 
-        expect(plan.toImport.map(i => i.name)).toEqual(['good']);
-        expect(plan.skipped.map(s => s.name).sort()).toEqual(
+        expect(plan.toImport.map((i: ImportPlan['toImport'][number]) => i.name)).toEqual(['good']);
+        expect(plan.skipped.map((s: Skipped) => s.name).sort()).toEqual(
             ['__proto__', 'bad name!', 'bad-secret', 'bad-tunnel', 'bad-type', 'sqlite-tunnel'].sort()
         );
     });
@@ -360,7 +367,7 @@ describe('import', () => {
     });
 
     it('writes nothing when a keychain write fails', () => {
-        const { storage } = recordingKeychain({}, 'sherlock/a');
+        const { storage } = recordingKeychain({}, ['sherlock/a']);
         expect(() => applyImport(planImport(payloadOf({ a: entry })), storage)).toThrow('keychain locked');
         expect(fs.existsSync(path.join(tempDir, 'sherlock', 'config.json'))).toBe(false);
     });
@@ -370,7 +377,7 @@ describe('import', () => {
         // the new password would pair it with a's old host in config.json.
         addConnection('a', { type: 'postgres', host: 'old-a', database: 'd', username: 'u', password: { $keychain: 'a' } });
         clearConfigCache();
-        const { storage, stored } = recordingKeychain({ 'sherlock/a': 'old-a-secret' }, 'sherlock/b');
+        const { storage, stored } = recordingKeychain({ 'sherlock/a': 'old-a-secret' }, ['sherlock/b']);
 
         const plan = planImport(payloadOf({ a: entry, b: entry, 'a-new': entry }), { force: true });
         expect(() => applyImport(plan, storage)).toThrow('keychain locked');
@@ -380,25 +387,65 @@ describe('import', () => {
         expect(Object.keys(writtenConfig())).toEqual(['a']);
     });
 
-    it('deletes keychain entries only a replaced connection used', () => {
+    it('names the keychain entries it could not put back', () => {
+        // "a" is written, then "b" fails, and putting "a" back fails too
+        const { storage } = recordingKeychain({}, ['sherlock/b']);
+        const keychain = storage as { kind: 'keychain' } & KeychainAccess;
+        const failingRestore: SecretStorage = {
+            ...keychain,
+            delete: () => { throw new Error('still locked'); },
+        };
+
+        expect(() => applyImport(planImport(payloadOf({ a: entry, b: entry })), failingRestore))
+            .toThrow(/keychain locked\n.*could not be put back.*sherlock\/a/s);
+    });
+
+    it("deletes a replaced connection's own keychain entry once nothing uses it", () => {
+        addConnection('a', { type: 'postgres', url: { $keychain: { service: URL_KEYCHAIN_SERVICE, account: 'a' } } });
+        clearConfigCache();
+        const { storage, stored } = recordingKeychain({ [`${URL_KEYCHAIN_SERVICE}/a`]: 'postgres://u:old@h/d' });
+
+        const { removedEntries } = applyImport(planImport(payloadOf({ a: entry }), { force: true }), storage);
+
+        expect(removedEntries).toEqual([`${URL_KEYCHAIN_SERVICE}/a`]);
+        expect(Object.fromEntries(stored)).toEqual({ 'sherlock/a': 'p' });
+    });
+
+    it('never deletes keychain entries that import does not manage, or that another connection uses', () => {
+        // A hand-written reference into another tool's service, and a shared
+        // entry: neither belongs to import, so replacing "a" must leave both.
         addConnection('a', {
             type: 'postgres',
-            url: { $keychain: { service: URL_KEYCHAIN_SERVICE, account: 'a' } },
+            url: { $keychain: { service: 'corp-vault', account: 'prod' } },
             password: { $keychain: 'shared' },
         });
-        addConnection('other', { type: 'postgres', host: 'h', database: 'd', username: 'u', password: { $keychain: 'shared' } });
+        addConnection('b', { type: 'postgres', host: 'h', database: 'd', username: 'u', password: { $keychain: 'a' } });
         clearConfigCache();
-        const { storage, stored } = recordingKeychain({
-            [`${URL_KEYCHAIN_SERVICE}/a`]: 'postgres://u:old@h/d',
-            'sherlock/shared': 'shared-secret',
-        });
+        const initial = { 'corp-vault/prod': 'vault-secret', 'sherlock/shared': 'shared-secret' };
+        const { storage, stored } = recordingKeychain(initial);
+
+        const noSecrets = { ...entry, secrets: {} };
+        const { removedEntries } = applyImport(planImport(payloadOf({ a: noSecrets }), { force: true }), storage);
+
+        expect(removedEntries).toEqual([]);
+        expect(Object.fromEntries(stored)).toEqual(initial);
+    });
+
+    it('is not thrown by a malformed keychain reference elsewhere in the config', () => {
+        const configDir = path.join(tempDir, 'sherlock');
+        fs.mkdirSync(configDir, { recursive: true });
+        fs.writeFileSync(path.join(configDir, 'config.json'), JSON.stringify({
+            connections: {
+                a: { type: 'postgres', password: { $keychain: 'a' } },
+                odd: { type: 'postgres', password: { $keychain: null } },
+            },
+        }), 'utf-8');
+        clearConfigCache();
+        const { storage, stored } = recordingKeychain({ 'sherlock/a': 'old' });
 
         applyImport(planImport(payloadOf({ a: entry }), { force: true }), storage);
 
-        // The old URL secret is gone; the entry "other" still reads is kept
-        expect(Object.fromEntries(stored)).toEqual({
-            'sherlock/a': 'p',
-            'sherlock/shared': 'shared-secret',
-        });
+        expect(stored.get('sherlock/a')).toBe('p');
+        expect(writtenConfig().a.host).toBe('new');
     });
 });
