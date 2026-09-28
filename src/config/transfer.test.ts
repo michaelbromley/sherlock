@@ -397,7 +397,7 @@ describe('import', () => {
         };
 
         expect(() => applyImport(planImport(payloadOf({ a: entry, b: entry })), failingRestore))
-            .toThrow(/keychain locked\n.*could not be put back.*sherlock\/a/s);
+            .toThrow(/keychain locked\n.*could not be put back.*sherlock\/a.*run exactly the same import command again/s);
     });
 
     it("deletes a replaced connection's own keychain entry once nothing uses it", () => {
@@ -429,6 +429,20 @@ describe('import', () => {
 
         expect(removedEntries).toEqual([]);
         expect(Object.fromEntries(stored)).toEqual(initial);
+    });
+
+    it("keeps a replaced connection's own entry while another connection still uses it", () => {
+        // "a" used sherlock/a and no longer does, but "b" reads it too
+        addConnection('a', { type: 'postgres', host: 'h', database: 'd', username: 'u', password: { $keychain: 'a' } });
+        addConnection('b', { type: 'postgres', host: 'h', database: 'd', username: 'u', password: { $keychain: 'a' } });
+        clearConfigCache();
+        const { storage, stored } = recordingKeychain({ 'sherlock/a': 'shared-secret' });
+
+        const noSecrets = { ...entry, secrets: {} };
+        const { removedEntries } = applyImport(planImport(payloadOf({ a: noSecrets }), { force: true }), storage);
+
+        expect(removedEntries).toEqual([]);
+        expect(stored.get('sherlock/a')).toBe('shared-secret');
     });
 
     it('is not thrown by a malformed keychain reference elsewhere in the config', () => {

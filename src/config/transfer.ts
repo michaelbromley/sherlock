@@ -433,10 +433,10 @@ export interface ImportResult {
  * --force keep their old settings and old passwords together. Entries it could
  * not put back are named in the error.
  *
- * Once the config is written, the entries import itself manages for a replaced
- * connection (`sherlock/<name>` and `sherlock.url/<name>`) are deleted if the
- * connection no longer uses them. Entries in any other service or account may
- * belong to other tools and are never touched.
+ * Once the config is written, `sherlock/<name>` and `sherlock.url/<name>` are
+ * deleted for a replaced connection that used them, when nothing in the user
+ * config still does. Entries in any other service or account may belong to
+ * other tools and are never touched.
  */
 export function applyImport(plan: ImportPlan, storage: SecretStorage): ImportResult {
     const config = loadOrCreateConfig();
@@ -492,8 +492,8 @@ export function applyImport(plan: ImportPlan, storage: SecretStorage): ImportRes
         throw new Error(
             `${error instanceof Error ? error.message : String(error)}\n` +
             `These keychain entries could not be put back and now hold the imported ` +
-            `password: ${notRestored.join(', ')}. Re-run the import with --force to make ` +
-            `config.json match them.`
+            `secret, while config.json still has the old connections: ${notRestored.join(', ')}. ` +
+            `Once the keychain is usable, run exactly the same import command again.`
         );
     }
 
@@ -530,11 +530,11 @@ function restoreEntries(
 }
 
 /**
- * Delete the entries a replaced connection used that no connection in the
- * config uses any more, such as the URL secret of a connection that no longer
- * has one. Only entries named the way import names them are candidates, and
- * only if the replaced connection referred to them. Returns the entries deleted. A failed delete leaves a stale
- * entry behind, which is untidy but harmless, so it is not an error.
+ * Delete `sherlock/<name>` and `sherlock.url/<name>` for each replaced
+ * connection that used them, when nothing in the user config still does. This
+ * removes, for example, the URL secret of a connection that no longer has one.
+ * Returns the entries deleted. A failed delete leaves a stale entry behind,
+ * which is untidy but harmless, so it is not an error.
  */
 function removeUnusedEntries(
     keychain: KeychainAccess,

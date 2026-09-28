@@ -344,7 +344,7 @@ async function importConfigAction(
     const { openPayload, planImport, planHasSecrets, applyImport } = await import('./config/transfer');
     const { readSealedFile, DecryptionFailedError } = await import('./config/transfer-crypto');
     const { isKeychainAvailable } = await import('./credentials/providers/keychain');
-    const { writableConfigPath, shadowingConfigPath } = await import('./config/write');
+    const { writableConfigPath, shadowingWarning } = await import('./config/write');
 
     // Import writes to the user config, like `connection add`. Saying so beats
     // quietly writing somewhere other than the file the user named.
@@ -438,13 +438,8 @@ async function importConfigAction(
         if (removedEntries.length > 0) {
             p.log.info(`Deleted keychain entries the replaced connections no longer use: ${removedEntries.join(', ')}`);
         }
-        const shadowing = shadowingConfigPath();
-        if (shadowing) {
-            p.log.warn(
-                `Sherlock commands run here read ${shadowing}, not ${configPath}, so they will not ` +
-                `see these connections. Run them from another directory, or unset SHERLOCK_CONFIG.`
-            );
-        }
+        const shadowed = shadowingWarning();
+        if (shadowed) p.log.warn(shadowed);
         p.outro(`Delete ${file} now that it has been imported. Try: sherlock -c ${imported[0].name} tables`);
         if (plan.skipped.length > 0) process.exitCode = 1;
     } catch (error: unknown) {
@@ -882,7 +877,7 @@ function setupCLI() {
         .option('--force', 'replace an existing connection of the same name')
         .action(async (name: string, cmdOpts: ConnectionAddOptions & { force?: boolean }) => {
             const { buildConnectionConfig } = await import('./config/connection-input');
-            const { addConnection, connectionExists, shadowingConfigPath } = await import('./config/write');
+            const { addConnection, connectionExists, shadowingWarning } = await import('./config/write');
 
             // -u/--url is a global option meaning "connect to this URL now", so
             // it never reaches this command. Say so rather than reporting the
@@ -921,13 +916,8 @@ function setupCLI() {
                     force: cmdOpts.force,
                 });
 
-                const shadowing = shadowingConfigPath();
-                if (shadowing) {
-                    console.error(
-                        `Warning: sherlock commands run here read ${shadowing}, not ${configPath}, ` +
-                        `so they will not see "${name}".`
-                    );
-                }
+                const shadowed = shadowingWarning();
+                if (shadowed) console.error(`Warning: ${shadowed}`);
 
                 console.log(JSON.stringify({
                     connection: name,
