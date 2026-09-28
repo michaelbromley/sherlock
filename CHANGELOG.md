@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **`sherlock config export` and `sherlock config import`** move connections, passwords included, to another machine in a single passphrase-encrypted file. The key is derived with scrypt and the file is encrypted with AES-256-GCM. A wrong passphrase and a modified or corrupted file are both refused.
+  - Export reads each password from wherever it is stored: the keychain, the `.env` file, an environment variable or config.json. `sherlock config export <name>` exports one connection.
+  - Import stores passwords in the OS keychain, as `connection add --password-stdin` does. On a machine with no keychain it asks before writing them into config.json.
+  - A connection whose name already exists is skipped unless `--force` is given.
+  - The passphrase is only ever read from a prompt.
+
+### Fixed
+
+- `sherlock connection add` no longer copies a project's `.sherlock.json` into your user config. It read connections from whichever config applied in the current directory but wrote them to the user config, so adding a connection inside a project with a `.sherlock.json` replaced your user config with the project's connections, tunnel commands included.
+- Storing a password in the macOS keychain no longer hangs when sherlock runs in a terminal. `security` read the password from the terminal rather than from sherlock, so `connection add --password-stdin` and the keychain option in `sherlock manage` waited for input that never came.
+
 ## [1.6.0] - 2026-08-19
 
 ### Added

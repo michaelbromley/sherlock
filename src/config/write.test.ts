@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { addConnection, connectionExists, loadOrCreateConfig } from './write';
+import { addConnection, connectionExists, loadOrCreateConfig, shadowingWarning } from './write';
 import { clearConfigCache } from './index';
 
 /**
@@ -119,5 +119,64 @@ describe('loadOrCreateConfig', () => {
         clearConfigCache();
 
         expect(() => loadOrCreateConfig()).toThrow();
+    });
+
+    it('reads the user config even when a project config is in the working directory', () => {
+        // Discovery would pick the project file, and writing back what it read
+        // would copy the project's connections, tunnels included, into the
+        // user config.
+        const projectDir = fs.mkdtempSync(path.join(os.tmpdir(), 'sherlock-project-'));
+        const originalCwd = process.cwd();
+        fs.writeFileSync(
+            path.join(projectDir, '.sherlock.json'),
+            JSON.stringify({ connections: { cloned: { type: 'postgres', tunnel: { command: 'evil' } } } }),
+            'utf-8'
+        );
+        try {
+            process.chdir(projectDir);
+            addConnection('mine', { ...CONNECTION });
+            clearConfigCache();
+
+            expect(Object.keys(loadOrCreateConfig().connections)).toEqual(['mine']);
+        } finally {
+            process.chdir(originalCwd);
+            fs.rmSync(projectDir, { recursive: true, force: true });
+        }
+    });
+});
+
+describe('shadowingWarning', () => {
+    it('is null when sherlock reads the config it writes', () => {
+        addConnection('prod', { ...CONNECTION });
+        expect(shadowingWarning()).toBeNull();
+    });
+
+    it('names SHERLOCK_CONFIG, and says to unset it, when it points elsewhere', () => {
+        const other = path.join(tempDir, 'other.json');
+        fs.writeFileSync(other, JSON.stringify({ connections: {} }), 'utf-8');
+        process.env.SHERLOCK_CONFIG = other;
+        try {
+            const warning = shadowingWarning();
+            expect(warning).toContain(other);
+            expect(warning).toContain('Unset SHERLOCK_CONFIG');
+        } finally {
+            delete process.env.SHERLOCK_CONFIG;
+        }
+    });
+
+    it('names a project .sherlock.json, and says to run elsewhere, when one is in the working directory', () => {
+        const projectDir = fs.mkdtempSync(path.join(os.tmpdir(), 'sherlock-project-'));
+        const originalCwd = process.cwd();
+        fs.writeFileSync(path.join(projectDir, '.sherlock.json'), JSON.stringify({ connections: {} }), 'utf-8');
+        try {
+            process.chdir(projectDir);
+            const warning = shadowingWarning();
+            expect(warning).toContain('.sherlock.json');
+            expect(warning).toContain('without a .sherlock.json');
+            expect(warning).not.toContain('SHERLOCK_CONFIG');
+        } finally {
+            process.chdir(originalCwd);
+            fs.rmSync(projectDir, { recursive: true, force: true });
+        }
     });
 });

@@ -302,6 +302,31 @@ sherlock keychain list
 sherlock keychain delete prod-db
 ```
 
+### Moving Connections to Another Machine
+
+`sherlock config export` writes your connections, passwords included, to one file encrypted with a passphrase. `sherlock config import` adds them on the other machine.
+
+```bash
+# on your laptop
+sherlock config export                  # every connection, to ./sherlock-connections.enc
+sherlock config export prod -o prod.enc # only "prod"
+scp sherlock-connections.enc server:
+
+# on the server
+sherlock config import sherlock-connections.enc
+rm sherlock-connections.enc
+```
+
+- **Every storage method is exported.** Sherlock reads each password from the keychain, the `.env` file, an environment variable or config.json, whichever holds it. A `$env` reference whose variable is not set on the exporting machine is exported as the reference, not a value.
+- **Import stores passwords in the OS keychain**, the same way `connection add --password-stdin` does. A plaintext password in the source config.json arrives in the keychain, not in plaintext.
+- **With no keychain** (a headless Linux server usually has none), import asks before writing passwords in plaintext into config.json. That file is readable by your user only. Answer no and nothing is imported. On a Mac reached over SSH, the keychain is usually locked rather than missing: answer no, run `security unlock-keychain`, and import again.
+- **Existing connections are skipped.** A connection whose name already exists is left alone and reported. Pass `--force` to replace it. If an import fails part-way, config.json is not changed and sherlock puts back the keychain entries it had written, naming any it could not. With `--force`, a replaced connection's `sherlock/<name>` or `sherlock.url/<name>` keychain entry is deleted if it used that entry and nothing in your user config still does. Keychain entries under any other name are never deleted.
+- **Import always writes to your user config** (`~/.config/sherlock/config.json`), even when run in a directory with a `.sherlock.json`. `--config` cannot be combined with import. If commands run in that directory, or with `SHERLOCK_CONFIG` set, read a different config, import warns that they will not see the imported connections.
+- **The passphrase is always typed at a prompt**, never passed as an argument or piped in, so it stays out of the shell history and the process list. It must be at least 12 characters.
+- **Encryption:** scrypt (N=2¹⁷, r=8, p=1) derives the key and AES-256-GCM encrypts the file. The GCM tag covers the file's header as well as its contents. A wrong passphrase, a corrupted file and an edited file all fail to decrypt, and nothing is imported. A file that is incomplete or not an export at all is reported before you are asked for the passphrase. No plaintext copy of a password is written to disk at any point.
+- **Check tunnels after import.** A tunnel command runs on the machine that imports it, so import lists every tunnel command it added.
+- Delete the export file once it has been imported. It is only as safe as its passphrase.
+
 ## Commands
 
 ### SQL Commands (require `-c <connection>`)
@@ -339,6 +364,8 @@ sherlock connections          # List configured connections (JSON)
 sherlock test <connection>    # Test a connection
 sherlock tunnel status        # Show running tunnels
 sherlock tunnel stop [conn]   # Stop one tunnel, or all when no name is given
+sherlock config export [conn] # Write connections and passwords to an encrypted file
+sherlock config import <file> # Add the connections from an export file
 ```
 
 ### Options
