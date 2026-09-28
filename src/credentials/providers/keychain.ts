@@ -1,4 +1,4 @@
-import { execSync } from 'child_process';
+import { execSync, spawnSync, type SpawnSyncOptions } from 'child_process';
 import type { CredentialProvider } from '../types';
 import type { CredentialRef } from '../../config/types';
 
@@ -96,10 +96,23 @@ function setPasswordViaSecurity(service: string, account: string, password: stri
 
     // -A allows any app to read the entry, which avoids a keychain prompt on
     // every query from a differently-signed binary.
-    execSync(
-        `security add-generic-password -s ${shellEscape(service)} -a ${shellEscape(account)} -A -w`,
-        { input: `${password}\n${password}\n`, stdio: ['pipe', 'pipe', 'pipe'] }
+    //
+    // `security` reads the password from the controlling terminal when there is
+    // one, ignoring stdin, and would wait there for input nobody can see.
+    // Detaching starts it in a new session with no terminal, so it reads stdin.
+    const result = spawnSync(
+        'security',
+        ['add-generic-password', '-s', service, '-a', account, '-A', '-w'],
+        // Node's types omit `detached` for spawnSync, but Bun honours it.
+        { input: `${password}\n${password}\n`, stdio: ['pipe', 'pipe', 'pipe'], detached: true } as SpawnSyncOptions
     );
+    if (result.error) throw result.error;
+    if (result.status !== 0) {
+        throw new Error(
+            `Could not store the password in the macOS keychain: ` +
+            `${String(result.stderr).trim() || `security exited with status ${result.status}`}`
+        );
+    }
 }
 
 /**
