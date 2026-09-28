@@ -92,7 +92,7 @@ function Add-ToPath {
 # https://github.com/anthropics/claude-code/issues/14956
 # ---------------------------------------------------------------------------
 function Add-ClaudePermission {
-    $permission = 'Bash(~/.claude/skills/sherlock/sherlock:*)'
+    $permission = 'Bash(sherlock:*)'
     $settingsFile = $null
 
     $localSettings = Join-Path $env:USERPROFILE '.claude\settings.local.json'
@@ -220,12 +220,9 @@ function Main {
         }
     }
 
-    # Create config for portable mode
-    $configFile = Join-Path $SkillDir 'config.json'
-    if (-not (Test-Path $configFile)) {
-        '{"version":"2.0","connections":{}}' | Set-Content $configFile -Encoding UTF8
-        Write-Success 'Created config.json (portable mode enabled)'
-    }
+    # Connections are kept in the user config directory (%APPDATA%\sherlock),
+    # not here: a config.json next to the binary would switch sherlock to
+    # portable mode and keep credentials inside the skill directory.
 
     # Add permission to Claude Code settings (workaround)
     Add-ClaudePermission
@@ -252,7 +249,7 @@ function Main {
     if (-not $upgrading) {
         Write-Host '  Next steps:'
         Write-Host '  -----------'
-        Write-Host "  1. Run '$sherlockExe setup' to configure your database connections"
+        Write-Host "  1. Run '$sherlockExe manage' to configure your database connections"
         Write-Host "  2. Use '/sherlock' in Claude Code to query your databases"
         Write-Host ''
 
