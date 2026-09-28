@@ -65,7 +65,7 @@ function Invoke-Download {
 }
 
 # ---------------------------------------------------------------------------
-# PATH setup - optionally add sherlock to user PATH
+# PATH setup - the skill runs `sherlock` from PATH
 # ---------------------------------------------------------------------------
 function Add-ToPath {
     $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
@@ -246,25 +246,16 @@ function Main {
     Write-Host "  Installed to: $SkillDir"
     Write-Host ''
 
+    # The skill runs `sherlock` from PATH, so this is not optional. Add-ToPath
+    # does nothing when the directory is already there.
+    Add-ToPath
+
     if (-not $upgrading) {
         Write-Host '  Next steps:'
         Write-Host '  -----------'
-        Write-Host "  1. Run '$sherlockExe manage' to configure your database connections"
-        Write-Host "  2. Use '/sherlock' in Claude Code to query your databases"
+        Write-Host "  1. Run 'sherlock manage' in a new terminal to configure your database connections"
+        Write-Host "  2. Ask your agent about your data; the sherlock skill is in $SkillDir"
         Write-Host ''
-
-        # Ask about PATH setup
-        $reply = Read-Host '  Add sherlock to your PATH for easier command-line access? [y/N]'
-        if ($reply -match '^[Yy]$') {
-            Add-ToPath
-        }
-        else {
-            Write-Host ''
-            Write-Host '  Tip: You can add sherlock to your PATH later from PowerShell:'
-            Write-Host "    `$userPath = [Environment]::GetEnvironmentVariable('Path', 'User')"
-            Write-Host "    [Environment]::SetEnvironmentVariable('Path', `"$SkillDir;`$userPath`", 'User')"
-            Write-Host ''
-        }
     }
 
     Write-Host '  To uninstall:'

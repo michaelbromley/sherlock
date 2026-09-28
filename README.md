@@ -30,6 +30,11 @@ curl -fsSL https://raw.githubusercontent.com/michaelbromley/sherlock/main/instal
 
 This installs the `sherlock` binary to `~/.local/bin`, then offers to install the agent skill for you (step 2). Prebuilt binaries exist for **macOS on Apple silicon** and **Linux x64**. On any other platform, [build from source](#from-source).
 
+The installer reads two optional environment variables, set on the `bash` side of the pipe:
+
+- `SHERLOCK_BIN_DIR` installs the binary somewhere other than `~/.local/bin`, e.g. `curl ... | SHERLOCK_BIN_DIR=$HOME/bin bash`. The directory must be writable without sudo.
+- `SHERLOCK_NO_PROMPT=1` asks nothing, as when there is no terminal: the shell config is not edited and the skill install command is printed instead of run.
+
 ### 2. Install the agent skill
 
 If you skipped it during install, or want it for more agents:
@@ -90,7 +95,7 @@ Running the install command again also upgrades the binary.
 
 ### Upgrading from 1.7.0 or earlier
 
-Earlier installers put the binary, the skill and your config together in `~/.claude/skills/sherlock`. Run the install command once to move to the new layout. It:
+Earlier installers put the binary, the skill and your config together in `~/.claude/skills/sherlock`. **Upgrade by running the install command, not `sherlock update`.** `sherlock update` replaces the binary where it is and keeps the old layout. The install command moves to the new layout. It:
 
 - installs the binary to `~/.local/bin/sherlock`
 - moves `config.json`, `.env`, logs and cache to `~/.config/sherlock`, backing up any config already there

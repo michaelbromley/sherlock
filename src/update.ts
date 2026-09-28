@@ -4,12 +4,14 @@
 
 import * as path from 'path';
 import * as fs from 'fs';
+import * as os from 'os';
 import * as p from '@clack/prompts';
 import pkg from '../package.json';
 
 const REPO = 'michaelbromley/sherlock';
 const RELEASES_API = `https://api.github.com/repos/${REPO}/releases/latest`;
 const CHANGELOG_URL = `https://raw.githubusercontent.com/${REPO}/main/CHANGELOG.md`;
+const INSTALL_COMMAND = `curl -fsSL https://raw.githubusercontent.com/${REPO}/main/install.sh | bash`;
 
 // ============================================================================
 // Platform helpers
@@ -26,6 +28,33 @@ function getAssetName(): string | null {
         linux: { x64: 'sherlock-linux-x64' },
     };
     return map[platform]?.[arch] ?? null;
+}
+
+/**
+ * Whether this binary sits in ~/.claude/skills/sherlock, where installers up to
+ * 1.7.0 put it together with the skill and the config. Updating the binary in
+ * place keeps that layout; the installer moves out of it.
+ */
+function isOldLayout(): boolean {
+    // Compare resolved paths: either side may reach the same directory through
+    // a symlink, such as /tmp -> /private/tmp on macOS.
+    const resolve = (dir: string) => {
+        try {
+            return fs.realpathSync(dir);
+        } catch {
+            return dir;
+        }
+    };
+    return resolve(path.dirname(process.execPath)) === resolve(path.join(os.homedir(), '.claude', 'skills', 'sherlock'));
+}
+
+/** Tell the user how to leave the old layout */
+function warnOldLayout(): void {
+    p.log.warn(
+        `This sherlock is installed in ${path.dirname(process.execPath)}, the layout used up to 1.7.0. ` +
+        `Run the installer to move to the current layout. It keeps your connections, puts sherlock ` +
+        `on PATH, and removes the old copy:\n  ${INSTALL_COMMAND}`
+    );
 }
 
 /** Returns true when running as a compiled binary (not `bun run src/...`) */
@@ -203,6 +232,7 @@ export async function runUpdate(): Promise<void> {
     // 4. Already up to date?
     if (compareSemver(currentVersion, latestVersion) >= 0) {
         p.log.success(`You're on the latest version (${currentVersion}).`);
+        if (isOldLayout()) warnOldLayout();
         return;
     }
 
@@ -256,5 +286,9 @@ export async function runUpdate(): Promise<void> {
     // whichever skill manager the user chose), not by the binary.
     console.log('');
     p.log.info(`Restart sherlock to use v${latestVersion}.`);
-    p.log.info('To update the agent skill as well, run: npx skills update sherlock -g');
+    if (isOldLayout()) {
+        warnOldLayout();
+    } else {
+        p.log.info('To update the agent skill as well, run: npx skills update sherlock -g');
+    }
 }

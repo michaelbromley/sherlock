@@ -120,15 +120,28 @@ move_config_file() {
     success "Moved $name to $dest"
 }
 
-# Merge a directory into the config directory without overwriting anything
+# Merge a directory into the config directory. A file whose name is already
+# taken there is kept under a ".migrated-<time>" name, never overwritten or
+# dropped. The source is only removed once every file has moved.
 move_config_dir() {
     local name="$1"
     local src="$OLD_DIR/$name" dest="$CONFIG_DIR/$name"
+    local suffix=".migrated-$(date +%Y%m%d%H%M%S)" moved_all=true file target
 
     [ -d "$src" ] || return 0
     mkdir -p "$dest"
-    cp -Rpn "$src/." "$dest/" 2>/dev/null || true
-    rm -rf "$src"
+    while IFS= read -r -d '' file; do
+        target="$dest/${file#./}"
+        [ -e "$target" ] && target="$target$suffix"
+        mkdir -p "$(dirname "$target")"
+        mv "$src/${file#./}" "$target" || moved_all=false
+    done < <(cd "$src" && find . -type f -print0)
+
+    if [ "$moved_all" = true ]; then
+        rm -rf "$src"
+    else
+        warn "Some files in $src could not be moved to $dest and were left in place."
+    fi
 }
 
 # Remove the lines an earlier installer added to a shell config
@@ -252,14 +265,34 @@ add_to_path() {
 # https://github.com/anthropics/claude-code/issues/14956
 # Once that is fixed, this section can be removed.
 # =============================================================================
-update_claude_permission() {
-    local settings_file=""
-
-    if [ -f "$HOME/.claude/settings.local.json" ]; then
-        settings_file="$HOME/.claude/settings.local.json"
-    elif [ -f "$HOME/.claude/settings.json" ]; then
-        settings_file="$HOME/.claude/settings.json"
+# Edit a Claude Code settings file with a jq filter, keeping the file (and
+# any symlink to it) in place. Returns non-zero if jq fails.
+edit_settings() {
+    local file="$1" filter="$2" tmp
+    tmp=$(mktemp)
+    if jq --arg p "$PERMISSION" --arg o "$OLD_PERMISSION" "$filter" "$file" > "$tmp" 2>/dev/null; then
+        cat "$tmp" > "$file"
+        rm -f "$tmp"
+    else
+        rm -f "$tmp"
+        return 1
     fi
+}
+
+has_rule() {
+    jq -e --arg r "$2" '(.permissions.allow // []) | index($r)' "$1" > /dev/null 2>&1
+}
+
+update_claude_permission() {
+    local settings_file="" file
+    local claude_files=("$HOME/.claude/settings.local.json" "$HOME/.claude/settings.json")
+
+    for file in "${claude_files[@]}"; do
+        if [ -f "$file" ]; then
+            settings_file="$file"
+            break
+        fi
+    done
     [ -n "$settings_file" ] || return 0
 
     if ! command -v jq &> /dev/null; then
@@ -268,23 +301,24 @@ update_claude_permission() {
         return 0
     fi
 
-    if jq -e --arg p "$PERMISSION" '(.permissions.allow // []) | index($p)' "$settings_file" > /dev/null 2>&1 \
-        && ! jq -e --arg o "$OLD_PERMISSION" '(.permissions.allow // []) | index($o)' "$settings_file" > /dev/null 2>&1; then
-        return 0
-    fi
+    # The old rule names a binary that no longer exists; remove it wherever it
+    # is, leaving the rest of each allow list in its original order.
+    for file in "${claude_files[@]}"; do
+        if [ -f "$file" ] && has_rule "$file" "$OLD_PERMISSION"; then
+            if edit_settings "$file" '.permissions.allow -= [$o]'; then
+                info "Removed the old sherlock permission from $file"
+            else
+                warn "Could not remove $OLD_PERMISSION from $file"
+            fi
+        fi
+    done
 
-    local tmp
-    tmp=$(mktemp)
-    if jq --arg p "$PERMISSION" --arg o "$OLD_PERMISSION" \
-        '.permissions.allow = (((.permissions.allow // []) - [$o]) + [$p] | unique)' \
-        "$settings_file" > "$tmp" 2>/dev/null; then
-        cat "$tmp" > "$settings_file"
-        rm -f "$tmp"
+    has_rule "$settings_file" "$PERMISSION" && return 0
+    if edit_settings "$settings_file" '.permissions.allow = ((.permissions.allow // []) + [$p])'; then
         info "Allowed $PERMISSION in $settings_file"
         echo "  This works around https://github.com/anthropics/claude-code/issues/14956, so Claude Code"
         echo "  runs sherlock without asking each time."
     else
-        rm -f "$tmp"
         warn "Could not update $settings_file. Claude Code may ask before each sherlock command."
     fi
 }

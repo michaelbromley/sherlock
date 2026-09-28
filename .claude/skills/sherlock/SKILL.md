@@ -10,7 +10,7 @@ allowed-tools: Bash(sherlock:*)
 
 Read-only database access for SQL and Redis, through the `sherlock` command.
 
-If `sherlock` is not found, it is not installed or not on PATH. The installer puts it in `~/.local/bin/sherlock`, so try that path before asking the user to install it with the command in this skill's `compatibility` field.
+If `sherlock` is not found, try `~/.local/bin/sherlock` (where the installer puts it), then `~/.claude/skills/sherlock/sherlock` (where versions up to 1.7.0 put it). If one of those works, use that full path for this session and tell the user once to run the installer from this skill's `compatibility` field. It puts `sherlock` on PATH, moves an old installation to the current layout, and lets Claude Code run sherlock without asking each time. If neither works, sherlock is not installed; ask the user to run that same installer.
 
 ## Ad Hoc Connections (`--url`)
 
