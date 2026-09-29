@@ -495,6 +495,8 @@ bun build ./src/query-db.ts --compile --target=bun-linux-x64 --outfile sherlock-
 bun build ./src/query-db.ts --compile --target=bun-linux-arm64 --outfile sherlock-linux-arm64
 ```
 
+A Linux binary only stores passwords in the OS keychain if you build it on a Linux machine with the same architecture. Sherlock reaches the Linux keychain through `@napi-rs/keyring`, a native module, and `bun install` only installs the copy for the machine it runs on. A cross-compiled Linux binary works with passwords from `.env` or environment variables, but fails when it reads or writes the keychain. The release workflow builds each Linux binary on a runner of its own architecture.
+
 ## Releasing a New Version
 
 1. Update the version in `package.json`
