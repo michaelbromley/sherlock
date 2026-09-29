@@ -79,6 +79,9 @@ detect_platform() {
         linux/x86_64)
             echo "linux-x64"
             ;;
+        linux/aarch64|linux/arm64)
+            echo "linux-arm64"
+            ;;
         *)
             error "No prebuilt sherlock binary for $os/$arch. Build it from source instead: https://github.com/$REPO#from-source"
             ;;

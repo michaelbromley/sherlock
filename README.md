@@ -28,7 +28,7 @@ Sherlock comes in two parts:
 curl -fsSL https://raw.githubusercontent.com/michaelbromley/sherlock/main/install.sh | bash
 ```
 
-This installs the `sherlock` binary to `~/.local/bin`, then offers to install the agent skill for you (step 2). Prebuilt binaries exist for **macOS on Apple silicon** and **Linux x64**. On any other platform, [build from source](#from-source).
+This installs the `sherlock` binary to `~/.local/bin`, then offers to install the agent skill for you (step 2). Prebuilt binaries exist for **macOS on Apple silicon**, **Linux x64** and **Linux arm64**. On any other platform, [build from source](#from-source).
 
 The installer reads two optional environment variables, set on the `bash` side of the pipe:
 
@@ -109,7 +109,7 @@ Then install the skill with `npx skills add michaelbromley/sherlock -g`. If a sk
 
 ### From Binary
 
-Download `sherlock-darwin-arm64` or `sherlock-linux-x64` from [GitHub Releases](https://github.com/michaelbromley/sherlock/releases) and put it on your PATH:
+Download `sherlock-darwin-arm64`, `sherlock-linux-x64` or `sherlock-linux-arm64` from [GitHub Releases](https://github.com/michaelbromley/sherlock/releases) and put it on your PATH:
 
 ```bash
 chmod +x sherlock-darwin-arm64
@@ -492,7 +492,10 @@ bun build ./src/query-db.ts --compile --outfile sherlock
 # Cross-platform builds
 bun build ./src/query-db.ts --compile --target=bun-darwin-arm64 --outfile sherlock-macos-arm64
 bun build ./src/query-db.ts --compile --target=bun-linux-x64 --outfile sherlock-linux-x64
+bun build ./src/query-db.ts --compile --target=bun-linux-arm64 --outfile sherlock-linux-arm64
 ```
+
+A Linux binary only stores passwords in the OS keychain if you build it on a Linux machine with the same architecture. Sherlock reaches the Linux keychain through `@napi-rs/keyring`, a native module, and `bun install` only installs the copy for the machine it runs on. A cross-compiled Linux binary works with passwords from `.env` or environment variables, but fails when it reads or writes the keychain. The release workflow builds each Linux binary on a runner of its own architecture.
 
 ## Releasing a New Version
 
@@ -509,7 +512,7 @@ bun build ./src/query-db.ts --compile --target=bun-linux-x64 --outfile sherlock-
    git push origin main --tags
    ```
 
-The GitHub Actions workflow builds the macOS (Apple silicon) and Linux x64 binaries and creates a release.
+The GitHub Actions workflow builds the macOS (Apple silicon), Linux x64 and Linux arm64 binaries and creates a release.
 
 ## License
 

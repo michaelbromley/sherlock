@@ -25,7 +25,7 @@ function getAssetName(): string | null {
     const { platform, arch } = process;
     const map: Record<string, Record<string, string>> = {
         darwin: { arm64: 'sherlock-darwin-arm64' },
-        linux: { x64: 'sherlock-linux-x64' },
+        linux: { x64: 'sherlock-linux-x64', arm64: 'sherlock-linux-arm64' },
     };
     return map[platform]?.[arch] ?? null;
 }
