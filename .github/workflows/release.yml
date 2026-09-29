@@ -20,6 +20,9 @@ jobs:
           - os: ubuntu-latest
             target: linux-x64
             bun_target: bun-linux-x64
+          - os: ubuntu-24.04-arm
+            target: linux-arm64
+            bun_target: bun-linux-arm64
 
     runs-on: ${{ matrix.os }}
 

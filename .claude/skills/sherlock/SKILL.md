@@ -2,7 +2,7 @@
 name: sherlock
 description: Read-only access to PostgreSQL, MySQL/MariaDB, SQL Server, SQLite and Redis through the sherlock CLI. Use when the user asks about data in a database, wants to explore tables, a schema or foreign keys, needs a SELECT query written and run, wants to inspect Redis keys, or wants a database connection set up, tunnelled or moved to another machine.
 license: MIT
-compatibility: Requires the sherlock CLI on PATH. Install it with `curl -fsSL https://raw.githubusercontent.com/michaelbromley/sherlock/main/install.sh | bash` (macOS on Apple silicon, Linux x64).
+compatibility: Requires the sherlock CLI on PATH. Install it with `curl -fsSL https://raw.githubusercontent.com/michaelbromley/sherlock/main/install.sh | bash` (macOS on Apple silicon, Linux x64, Linux arm64).
 allowed-tools: Bash(sherlock:*)
 ---
 
