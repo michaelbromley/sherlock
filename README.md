@@ -208,6 +208,29 @@ The `manage` wizard offers these as three options ("No SSL" / "Require SSL (acce
 
 If you pass an `ssl` field alongside a raw `url:` (instead of individual host/port fields), sherlock overlays the SSL settings onto the URL — handy when you've stored a `DATABASE_URL` and want to enable SSL without rewriting it.
 
+#### MySQL 8 and `caching_sha2_password`
+
+MySQL 8 users use the `caching_sha2_password` plugin by default. To log in, the client must either connect over TLS or encrypt the password with the server's RSA public key. Without either, the connection fails with an error that mentions `caching_sha2_password`. The `mysql` CLI does not hit this, because it uses TLS whenever the server offers it.
+
+Set `"ssl": true` on the connection, or add `?ssl-mode=REQUIRED` to a `--url`. MySQL 8 servers generate a certificate on first start, so this works on most servers.
+
+If the server has no TLS, set `"allowPublicKeyRetrieval": true` on the connection, or add `?allowPublicKeyRetrieval=true` to the URL. Sherlock then asks the server for its public key. Over an unencrypted connection, anyone who can intercept the traffic can send their own key and read the password, so use this only on networks you trust, such as localhost or an SSH tunnel.
+
+```json
+{
+  "connections": {
+    "local-mysql": {
+      "type": "mysql",
+      "host": "127.0.0.1",
+      "database": "app",
+      "username": "dev",
+      "password": { "$env": "LOCAL_MYSQL_PASSWORD" },
+      "allowPublicKeyRetrieval": true
+    }
+  }
+}
+```
+
 ### Tunnels
 
 Some databases are only reachable through a port-forwarding process: a Northflank addon, a Kubernetes service, a host behind a bastion. Give the connection a `tunnel` block and sherlock starts the forwarding command on the first query, reuses it for later commands, and shuts it down once it has gone unused.

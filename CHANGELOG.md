@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- `allowPublicKeyRetrieval` connection option for MySQL, also accepted as `?allowPublicKeyRetrieval=true` in a URL. It lets sherlock log in users with MySQL 8's default `caching_sha2_password` plugin over a connection without TLS (#9)
+
+### Changed
+
+- When a MySQL server needs TLS or public key retrieval to log a user in, the error now names the sherlock settings that fix it: `"ssl": true` or `allowPublicKeyRetrieval` (#9)
+
 ## [1.9.0] - 2026-09-29
 
 ### Added

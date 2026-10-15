@@ -5,8 +5,8 @@
 import * as p from '@clack/prompts';
 import * as fs from 'fs';
 import * as path from 'path';
-import { SQL, RedisClient } from 'bun';
-import { MssqlAdapter } from '../db/mssql-adapter';
+import { RedisClient } from 'bun';
+import { createConnection } from '../db/connection';
 import { findConfigFile, getConfigDir, ensureConfigDir } from '../config/paths';
 import {
     loadConfigFile,
@@ -174,14 +174,13 @@ async function testConnectionMenu(connections: string[]): Promise<void> {
             const client = new RedisClient(config.url);
             await client.send('PING', []);
             client.close();
-        } else if (config.type === DB_TYPES.MSSQL) {
-            const adapter = await MssqlAdapter.connect(config.url);
-            await adapter.unsafe('SELECT 1 AS test');
-            await adapter.close();
         } else {
-            const sql = new SQL(config.url);
-            await sql.connect();
-            sql.close();
+            const adapter = await createConnection(config);
+            try {
+                await adapter.unsafe('SELECT 1 AS test');
+            } finally {
+                await adapter.close();
+            }
         }
         p.log.success(`Connection "${selected}" successful!`);
     } catch (error: unknown) {
@@ -1064,6 +1063,10 @@ async function promptForConnection(
         logging,
     };
     if (ssl) config.ssl = ssl;
+    // Not prompted for: carried over from a pasted URL or the connection being edited
+    if (type === DB_TYPES.MYSQL && (prefill?.allowPublicKeyRetrieval ?? existingConfig?.allowPublicKeyRetrieval)) {
+        config.allowPublicKeyRetrieval = true;
+    }
     if (directory) config.directory = directory;
     if (tunnel) config.tunnel = tunnel;
 
@@ -1111,6 +1114,7 @@ async function promptForConnectionUrl(): Promise<ParsedConnectionUrl | null> {
             if (parsed.username) lines.push(`username: ${parsed.username}`);
             if (parsed.password) lines.push(`password: ${'*'.repeat(Math.min(parsed.password.length, 8))}`);
             if (parsed.ssl !== undefined) lines.push(`ssl:      ${sslHintLabel(parsed.ssl)}`);
+            if (parsed.allowPublicKeyRetrieval) lines.push('public key retrieval: allowed');
             p.note(lines.join('\n'), 'Parsed from URL');
             return parsed;
         }
