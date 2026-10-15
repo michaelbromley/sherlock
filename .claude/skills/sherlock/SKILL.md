@@ -91,6 +91,7 @@ printf '%s' "$PASSWORD" | sherlock connection add bastion \
 - `--from-url <url>` replaces `--host`, `--port`, `--username` and `--database`. A password in the URL is ignored, since it would already be in the shell history. This is a separate flag from the global `-u/--url`, which connects to a URL without saving it.
 - `--password-env VAR` stores only the variable name. Sherlock reads the password from that variable on each query.
 - `--ssl` takes `off`, `require` or `verify`. `require` is right for most managed databases.
+- A MySQL 8 login that fails with an error naming `caching_sha2_password` needs TLS or the server's public key. Try `--ssl require` (or `?ssl-mode=REQUIRED` on a `-u` URL) first. Only if the server has no TLS, ask the user before adding `?allowPublicKeyRetrieval=true` to the `-u` or `--from-url` URL: without TLS, anyone who can intercept the connection can read the password.
 - `--tunnel-northflank <project>/<addon>` writes the full `northflank forward --skipHostnames` command, and the pattern that reads the port back out of that command's output. Ask the user for the project and addon names if you do not know them.
 - `--force` replaces an existing connection of the same name. Without it, an existing name is an error.
 - Bad flag combinations fail immediately with a message naming the flag, before anything is written.
