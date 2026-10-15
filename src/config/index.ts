@@ -208,6 +208,7 @@ export interface ParsedConnectionUrl {
     password?: string;
     database?: string;
     ssl?: ConnectionConfig['ssl'];
+    allowPublicKeyRetrieval?: boolean;
 }
 
 /**
@@ -302,6 +303,10 @@ export function parseConnectionUrl(rawUrl: string): ParsedConnectionUrl | null {
 
     if (ssl !== undefined) result.ssl = ssl;
 
+    if (type === DB_TYPES.MYSQL && parseBoolParam(parsed.searchParams.get(PUBLIC_KEY_RETRIEVAL_PARAM))) {
+        result.allowPublicKeyRetrieval = true;
+    }
+
     return result;
 }
 
@@ -343,6 +348,31 @@ export function buildConnectionUrl(
     }
 
     throw new Error(`Unsupported database type: ${type}`);
+}
+
+/**
+ * Query param that carries the MySQL `allowPublicKeyRetrieval` option in a
+ * connection URL, named as in JDBC. Bun.SQL only accepts the option in its
+ * constructor, so `createConnection` strips the param and passes it there.
+ */
+export const PUBLIC_KEY_RETRIEVAL_PARAM = 'allowPublicKeyRetrieval';
+
+/**
+ * Add the public key retrieval param to a MySQL URL when the connection
+ * config enables it. Returns the URL unchanged for other types or when the
+ * option is not set.
+ */
+export function applyPublicKeyRetrievalToUrl(url: string, type: DbType, allow: boolean | undefined): string {
+    if (type !== DB_TYPES.MYSQL || allow !== true) return url;
+
+    let parsed: URL;
+    try {
+        parsed = new URL(url);
+    } catch {
+        return url;
+    }
+    parsed.searchParams.set(PUBLIC_KEY_RETRIEVAL_PARAM, 'true');
+    return parsed.toString();
 }
 
 /** Driver-specific SSL query keys that we manage ourselves */
@@ -513,7 +543,8 @@ async function buildResolvedConnection(
         // Auto-detect type from URL
         const type = detectDbTypeFromUrl(rawUrl) ?? config.type ?? DB_TYPES.POSTGRES;
         // If the user set `ssl` alongside `url`, apply it to the URL.
-        const url = applySslToUrl(rawUrl, type, config.ssl);
+        const sslUrl = applySslToUrl(rawUrl, type, config.ssl);
+        const url = applyPublicKeyRetrievalToUrl(sslUrl, type, config.allowPublicKeyRetrieval);
 
         return { type, url };
     }
@@ -596,7 +627,11 @@ async function buildResolvedConnection(
         );
     }
 
-    const url = buildConnectionUrl(type, host, port, username, password, database, config.ssl);
+    const url = applyPublicKeyRetrievalToUrl(
+        buildConnectionUrl(type, host, port, username, password, database, config.ssl),
+        type,
+        config.allowPublicKeyRetrieval
+    );
 
     return { type, url };
 }

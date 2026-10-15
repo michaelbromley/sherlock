@@ -216,6 +216,7 @@ export function buildConnectionConfig(name: string, opts: ConnectionAddOptions):
     // same `undefined` the URL fallback would otherwise fill in.
     const ssl = opts.ssl !== undefined ? parseSsl(opts.ssl) : fromUrl?.ssl;
     if (ssl !== undefined && ssl !== false) config.ssl = ssl;
+    if (fromUrl?.allowPublicKeyRetrieval) config.allowPublicKeyRetrieval = true;
 
     if (opts.logging) config.logging = true;
     if (opts.directory) config.directory = opts.directory;

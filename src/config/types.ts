@@ -64,6 +64,16 @@ export interface ConnectionConfig {
      * - `{ rejectUnauthorized: true }`: require SSL and verify against system CAs
      */
     ssl?: boolean | SslConfig;
+
+    /**
+     * MySQL only. Let the client fetch the server's RSA public key to send the
+     * password over an unencrypted connection. MySQL 8's default
+     * `caching_sha2_password` plugin needs either this or `ssl` to log in.
+     *
+     * Prefer `ssl`: without TLS, anyone in the network path can hand the client
+     * their own key and read the password. Default: false.
+     */
+    allowPublicKeyRetrieval?: boolean;
 }
 
 /**
