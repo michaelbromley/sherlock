@@ -60,7 +60,8 @@ function explainConnectError(error: unknown): never {
         throw new Error(
             'MySQL needs TLS or the server\'s RSA public key to log in this user (caching_sha2_password). ' +
             'Set "ssl": true on the connection, or add ?ssl-mode=REQUIRED to the URL. ' +
-            'If the server does not support TLS, set "allowPublicKeyRetrieval": true, or add ' +
+            'If the server does not support TLS and you trust the network between you and the ' +
+            'server (localhost, an SSH tunnel), set "allowPublicKeyRetrieval": true, or add ' +
             '?allowPublicKeyRetrieval=true to the URL. Without TLS, anyone who can intercept the ' +
             'connection can substitute their own key and read the password.'
         );
