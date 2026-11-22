@@ -7,7 +7,7 @@
  * caching, and logging are handled by separate modules.
  */
 
-import { Command } from 'commander';
+import { Command, CommanderError } from 'commander';
 import * as p from '@clack/prompts';
 
 // Config
@@ -31,7 +31,11 @@ import { connectionManagerMenu } from './tui';
 import { initConfig, migrateConfig } from './config/init';
 
 // Query validation
-import { validateReadOnlyQuery } from './query-validation';
+import { validateReadOnlyQuery, queryRefusedError } from './query-validation';
+
+// Errors and the response envelope
+import { SherlockError, usageError, errorMessage } from './errors';
+import { Invocation, printEnvelope } from './output/envelope';
 
 // Database
 import { withConnection, withConnectionFromConfig, type ConnectionOptions, type SqlAdapter } from './db/connection';
@@ -99,15 +103,10 @@ const MAX_SAMPLE_LIMIT = 1000;
  * each one points at.
  */
 function listConnectionsAction(configPath?: string): void {
-    try {
-        console.log(JSON.stringify({
-            connections: listConnections(configPath),
-            details: listConnectionSummaries(configPath),
-        }, null, 2));
-    } catch (error: unknown) {
-        console.error(JSON.stringify({ error: getErrorMessage(error) }));
-        process.exit(1);
-    }
+    console.log(JSON.stringify({
+        connections: listConnections(configPath),
+        details: listConnectionSummaries(configPath),
+    }, null, 2));
 }
 
 /**
@@ -129,23 +128,19 @@ function connectionAddNotes(config: import('./config/types').ConnectionConfig): 
     return notes;
 }
 
-/**
- * Report an error the way every non-interactive command does, as JSON on
- * stderr, and exit 1. Agents parse this; a plain "Error:" line is one more
- * format for them to handle.
- */
-function fail(message: string): never {
-    console.error(JSON.stringify({ error: message }));
-    process.exit(1);
+/** The global options, as commander parses them */
+interface CliOptions {
+    connection?: string;
+    url?: string;
+    config?: string;
+    log?: boolean;
+    format?: string;
+    /** Set by requireConnection for an ad hoc --url connection */
+    _resolvedConfig?: ResolvedConnectionConfig;
 }
 
-/** Get error message from unknown error */
-function getErrorMessage(error: unknown): string {
-    if (error instanceof Error) {
-        return error.message;
-    }
-    return String(error);
-}
+/** What is known about this run: its command, connection and warnings */
+const invocation = new Invocation();
 
 /**
  * Read a password from stdin, for non-interactive setup.
@@ -187,16 +182,24 @@ function syntheticNameFromUrl(url: string): string {
     }
 }
 
-/** Require connection option or exit. Auto-detects from cwd if not provided. Handles --url. */
-function requireConnection(opts: Record<string, any>): asserts opts is { connection: string } {
+/** A command's options once requireConnection has settled the connection */
+type ConnectedOptions = CliOptions & { connection: string };
+
+/** Require a connection. Auto-detects from cwd if not provided. Handles --url. */
+function requireConnection(opts: CliOptions): asserts opts is ConnectedOptions {
     // --url mode: resolve config up front
     if (opts.url) {
         const detectedType = detectDbTypeFromUrl(opts.url);
         if (!detectedType) {
-            fail(`Cannot detect database type from URL. Supported prefixes: postgres://, mysql://, mssql://, sqlserver://, sqlite://, redis://, rediss://`);
+            throw usageError(
+                'Cannot detect the database type from the URL.',
+                '--url',
+                'Start the URL with one of: postgres://, mysql://, mssql://, sqlserver://, sqlite://, redis://, rediss://'
+            );
         }
         opts._resolvedConfig = { type: detectedType, url: opts.url } as ResolvedConnectionConfig;
         opts.connection = syntheticNameFromUrl(opts.url);
+        invocation.dbType = detectedType;
         return;
     }
 
@@ -204,61 +207,74 @@ function requireConnection(opts: Record<string, any>): asserts opts is { connect
         const detected = detectConnectionFromCwd(opts.config);
         if (detected) {
             opts.connection = detected;
+            invocation.connection = detected;
             console.error(`Using connection "${detected}" (matched directory ${process.cwd()})`);
             return;
         }
-        fail('--connection (-c) or --url (-u) is required. Specify which database to use.');
+        throw new SherlockError('CONNECTION_REQUIRED', 'No connection given, and none is set up for this directory.', {
+            fix: 'Pass -c <name> (see: sherlock connection list) or -u <url>.',
+        });
     }
+    invocation.connection = opts.connection;
 }
 
+const REDIS_COMMANDS = 'info, keys, get, inspect, slowlog, command';
+
 /** Check that the active connection is a Redis connection */
-function requireRedisConnection(opts: Record<string, any>): void {
-    if (opts._resolvedConfig) {
-        if (opts._resolvedConfig.type !== DB_TYPES.REDIS) {
-            fail(`URL is a ${opts._resolvedConfig.type} connection. This command only works with Redis connections.`);
-        }
-        return;
-    }
-    const config = getConnectionConfig(opts.connection, opts.config);
-    if (!isRedisConfig(config)) {
-        const type = config.type || 'SQL';
-        fail(`"${opts.connection}" is a ${type} connection. This command only works with Redis connections.`);
+function requireRedisConnection(opts: ConnectedOptions): void {
+    const type = opts._resolvedConfig?.type ?? connectionType(opts);
+    if (type !== DB_TYPES.REDIS) {
+        const which = opts._resolvedConfig ? 'The URL' : `"${opts.connection}"`;
+        throw new SherlockError('WRONG_DATABASE_TYPE', `${which} is a ${type} connection, and this command works only with Redis.`, {
+            fix: 'Use the SQL commands: tables, describe, query.',
+            details: { dbType: type, expected: DB_TYPES.REDIS },
+        });
     }
 }
 
 /** Check that the active connection is a SQL connection */
-function requireSqlConnection(opts: Record<string, any>): void {
-    if (opts._resolvedConfig) {
-        if (opts._resolvedConfig.type === DB_TYPES.REDIS) {
-            fail(`URL is a Redis connection. Use Redis commands (info, keys, get, inspect, slowlog, command) instead.`);
-        }
-        return;
-    }
-    const config = getConnectionConfig(opts.connection, opts.config);
-    if (isRedisConfig(config)) {
-        fail(`"${opts.connection}" is a Redis connection. Use Redis commands (info, keys, get, inspect, slowlog, command) instead.`);
+function requireSqlConnection(opts: ConnectedOptions): void {
+    const type = opts._resolvedConfig?.type ?? connectionType(opts);
+    if (type === DB_TYPES.REDIS) {
+        const which = opts._resolvedConfig ? 'The URL' : `"${opts.connection}"`;
+        throw new SherlockError('WRONG_DATABASE_TYPE', `${which} is a Redis connection, and this command works only with SQL databases.`, {
+            fix: `Use the Redis commands: ${REDIS_COMMANDS}.`,
+            details: { dbType: DB_TYPES.REDIS, expected: 'sql' },
+        });
     }
 }
 
-/** Parse a CLI option as a positive integer, exit with error if invalid */
+/** A configured connection's type, as far as the config says without resolving it */
+function connectionType(opts: ConnectedOptions): string {
+    const config = getConnectionConfig(opts.connection, opts.config);
+    return isRedisConfig(config) ? DB_TYPES.REDIS : certainDbType(opts) ?? config.type ?? DB_TYPES.POSTGRES;
+}
+
+/** Parse a CLI option as a positive integer */
 function parsePositiveInt(value: string, name: string, max?: number): number {
     const n = parseInt(value, 10);
     if (isNaN(n) || n < 1 || (max !== undefined && n > max)) {
-        fail(`--${name} must be a positive number${max ? ` (max ${max})` : ''}`);
+        throw usageError(`--${name} must be a positive number${max ? ` (max ${max})` : ''}, got "${value}".`, `--${name}`);
     }
     return n;
 }
 
 /** Route to the right SQL connection handler based on whether we have a pre-resolved config */
 async function runWithSqlConnection<T>(
-    opts: Record<string, any>,
+    opts: ConnectedOptions,
     handler: (sql: SqlAdapter, dbType: string) => Promise<T>,
     options?: ConnectionOptions
 ): Promise<T> {
+    // The type is only certain once the connection is resolved: a URL held in
+    // the keychain says which database it is only when read.
+    const recordType = (sql: SqlAdapter, dbType: string) => {
+        invocation.dbType = dbType;
+        return handler(sql, dbType);
+    };
     if (opts._resolvedConfig) {
-        return withConnectionFromConfig(opts._resolvedConfig, handler, options);
+        return withConnectionFromConfig(opts._resolvedConfig, recordType, options);
     }
-    return withConnection(opts.connection, opts.config, handler, options);
+    return withConnection(opts.connection, opts.config, recordType, options);
 }
 
 /**
@@ -267,7 +283,7 @@ async function runWithSqlConnection<T>(
  * the keychain or the environment, which only resolving the connection reads.
  * Follows the same precedence as resolving: the URL's scheme wins.
  */
-function certainDbType(opts: Record<string, any>): DbType | undefined {
+function certainDbType(opts: ConnectedOptions): DbType | undefined {
     if (opts._resolvedConfig) return opts._resolvedConfig.type;
     const config = getConnectionConfig(opts.connection, opts.config);
     if (config.url === undefined) return config.type ?? DB_TYPES.POSTGRES;
@@ -285,15 +301,15 @@ const MAX_QUERY_FILE_BYTES = 1024 * 1024;
  */
 async function readQueryText(sqlArg: string | undefined, file: string | undefined): Promise<string> {
     if (sqlArg !== undefined && file !== undefined) {
-        throw new Error('Give the query as an argument or with --file, not both.');
+        throw usageError('Give the query as an argument or with --file, not both.', '--file');
     }
 
     const source = file ?? (sqlArg === '-' ? '-' : undefined);
     if (source === undefined) {
         if (sqlArg === undefined) {
-            throw new Error('Give the query as an argument, with --file <path>, or on stdin with "query -".');
+            throw usageError('Give the query as an argument, with --file <path>, or on stdin with "query -".');
         }
-        if (sqlArg.trim() === '') throw new Error('The query is empty.');
+        if (sqlArg.trim() === '') throw usageError('The query is empty.');
         // Fix shell escaping artifacts: some shells/tools escape ! to \!
         // which is never valid SQL, so safely strip it
         return sqlArg.replace(/\\!/g, '!');
@@ -302,35 +318,36 @@ async function readQueryText(sqlArg: string | undefined, file: string | undefine
     let text: string;
     if (source === '-') {
         if (process.stdin.isTTY) {
-            throw new Error('"query -" reads the query from stdin, but stdin is a terminal. Pipe the query in.');
+            throw usageError('"query -" reads the query from stdin, but stdin is a terminal. Pipe the query in.');
         }
         const chunks: Buffer[] = [];
         let size = 0;
         for await (const chunk of process.stdin) {
             size += chunk.length;
-            if (size > MAX_QUERY_FILE_BYTES) throw new Error('The query on stdin is larger than 1 MB.');
+            if (size > MAX_QUERY_FILE_BYTES) throw usageError('The query on stdin is larger than 1 MB.');
             chunks.push(Buffer.from(chunk));
         }
         text = Buffer.concat(chunks).toString('utf-8');
     } else {
         const fs = await import('fs');
         const stat = fs.statSync(source, { throwIfNoEntry: false });
-        if (!stat?.isFile()) throw new Error(`${source} does not exist or is not a file.`);
-        if (stat.size > MAX_QUERY_FILE_BYTES) throw new Error(`${source} is larger than 1 MB.`);
+        if (!stat?.isFile()) throw usageError(`${source} does not exist or is not a file.`, '--file');
+        if (stat.size > MAX_QUERY_FILE_BYTES) throw usageError(`${source} is larger than 1 MB.`, '--file');
         text = fs.readFileSync(source, 'utf-8');
     }
 
     // A byte-order mark would stop the query starting with SELECT.
     text = text.replace(/^\uFEFF/, '').trim();
-    if (text === '') throw new Error(`The query ${source === '-' ? 'on stdin' : `in ${source}`} is empty.`);
+    if (text === '') throw usageError(`The query ${source === '-' ? 'on stdin' : `in ${source}`} is empty.`);
     return text;
 }
 
 /** Route to the right Redis connection handler based on whether we have a pre-resolved config */
 async function runWithRedisConnection<T>(
-    opts: Record<string, any>,
+    opts: ConnectedOptions,
     handler: (client: import('bun').RedisClient) => Promise<T>
 ): Promise<T> {
+    invocation.dbType = DB_TYPES.REDIS;
     if (opts._resolvedConfig) {
         return withRedisConnectionFromConfig(opts._resolvedConfig, handler);
     }
@@ -353,11 +370,12 @@ const IMPORT_PASSPHRASE_ATTEMPTS = 3;
 /** The passphrase is only ever typed at a prompt, so both commands need a terminal */
 function requireTerminal(command: string): void {
     if (!process.stdin.isTTY) {
-        console.error(
-            `Error: 'sherlock config ${command}' prompts for a passphrase and needs an ` +
-            `interactive terminal. The passphrase cannot be passed as an argument or piped in.`
+        throw usageError(
+            `'sherlock config ${command}' prompts for a passphrase and needs an interactive terminal. ` +
+            `The passphrase cannot be passed as an argument or piped in.`,
+            undefined,
+            `Run 'sherlock config ${command}' yourself in a terminal.`
         );
-        process.exit(1);
     }
 }
 
@@ -425,7 +443,7 @@ async function exportConfigAction(
         );
         if (skipped.length > 0) process.exitCode = 1;
     } catch (error: unknown) {
-        p.cancel(getErrorMessage(error));
+        p.cancel(errorMessage(error));
         process.exit(1);
     }
 }
@@ -444,11 +462,10 @@ async function importConfigAction(
     // Import writes to the user config, like `connection add`. Saying so beats
     // quietly writing somewhere other than the file the user named.
     if (configPath) {
-        console.error(
-            `Error: --config cannot be used with import. Connections are always imported into ` +
-            `${writableConfigPath()}.`
+        throw usageError(
+            `--config cannot be used with import. Connections are always imported into ${writableConfigPath()}.`,
+            '--config'
         );
-        process.exit(1);
     }
 
     requireTerminal('import');
@@ -472,7 +489,7 @@ async function importConfigAction(
                 payload = openPayload(sealed, passphrase);
                 spinner.stop('Decrypted');
             } catch (error) {
-                spinner.error(getErrorMessage(error));
+                spinner.error(errorMessage(error));
                 if (!(error instanceof DecryptionFailedError)) throw error;
                 if (attempt >= IMPORT_PASSPHRASE_ATTEMPTS) {
                     throw new Error(
@@ -538,7 +555,7 @@ async function importConfigAction(
         p.outro(`Delete ${file} now that it has been imported. Try: sherlock -c ${imported[0].name} tables`);
         if (plan.skipped.length > 0) process.exitCode = 1;
     } catch (error: unknown) {
-        p.cancel(getErrorMessage(error));
+        p.cancel(errorMessage(error));
         process.exit(1);
     }
 }
@@ -549,6 +566,13 @@ async function importConfigAction(
 
 function setupCLI() {
     const program = new Command();
+
+    // Before any subcommand is added: commander copies these settings to each
+    // subcommand as it is created. Usage errors are thrown rather than printed
+    // and exited on, so the top-level handler reports them in the envelope.
+    program
+        .exitOverride()
+        .configureOutput({ outputError: () => undefined });
 
     program
         .name('sherlock')
@@ -562,13 +586,14 @@ function setupCLI() {
         .option('--config <path>', 'path to config file')
         .option('--no-log', 'disable query logging')
         .option('-f, --format <format>', 'output format: json or markdown', DEFAULT_OUTPUT_FORMAT)
-        .hook('preAction', (thisCommand) => {
-            const opts = thisCommand.opts();
+        .hook('preAction', (thisCommand, actionCommand) => {
+            invocation.command = commandPath(actionCommand);
+            const opts = thisCommand.opts<CliOptions>();
             if (opts.connection && opts.url) {
-                fail('--connection (-c) and --url (-u) are mutually exclusive. Use one or the other.');
+                throw usageError('--connection (-c) and --url (-u) are mutually exclusive. Use one or the other.', '--url');
             }
             if (opts.format && !['json', 'markdown'].includes(opts.format)) {
-                fail(`Invalid format "${opts.format}". Must be 'json' or 'markdown'.`);
+                throw usageError(`Invalid format "${opts.format}". Must be 'json' or 'markdown'.`, '--format');
             }
         });
 
@@ -581,7 +606,7 @@ function setupCLI() {
         .command('tables')
         .description('List all tables in the database')
         .action(async () => {
-            const opts = program.opts();
+            const opts = program.opts<CliOptions>();
             requireConnection(opts);
             requireSqlConnection(opts);
             await runWithSqlConnection(opts, async (sql, dbType) => {
@@ -596,7 +621,7 @@ function setupCLI() {
         .description('Get schema information for all tables (cached)')
         .option('--refresh', 'force refresh the cached schema')
         .action(async (cmdOpts: { refresh?: boolean }) => {
-            const opts = program.opts();
+            const opts = program.opts<CliOptions>();
             requireConnection(opts);
 
             requireSqlConnection(opts);
@@ -649,7 +674,7 @@ function setupCLI() {
         .command('describe <table>')
         .description('Describe a specific table schema')
         .action(async (tableName: string) => {
-            const opts = program.opts();
+            const opts = program.opts<CliOptions>();
             requireConnection(opts);
             requireSqlConnection(opts);
             await runWithSqlConnection(opts, async (sql, dbType) => {
@@ -664,7 +689,7 @@ function setupCLI() {
         .description('Get random sample rows from a table')
         .option('-n, --limit <number>', 'number of rows to sample', String(DEFAULT_SAMPLE_LIMIT))
         .action(async (tableName: string, cmdOpts: { limit: string }) => {
-            const opts = program.opts();
+            const opts = program.opts<CliOptions>();
             requireConnection(opts);
             requireSqlConnection(opts);
 
@@ -695,7 +720,7 @@ function setupCLI() {
         .command('stats <table>')
         .description('Get data profiling stats for a table (row count, nulls, distinct values)')
         .action(async (tableName: string) => {
-            const opts = program.opts();
+            const opts = program.opts<CliOptions>();
             requireConnection(opts);
             requireSqlConnection(opts);
             await runWithSqlConnection(opts, async (sql, dbType) => {
@@ -714,7 +739,7 @@ function setupCLI() {
         .command('fk <table>')
         .description('Show foreign key relationships for a table')
         .action(async (tableName: string) => {
-            const opts = program.opts();
+            const opts = program.opts<CliOptions>();
             requireConnection(opts);
             requireSqlConnection(opts);
             await runWithSqlConnection(opts, async (sql, dbType) => {
@@ -742,7 +767,7 @@ function setupCLI() {
         .command('indexes <table>')
         .description('Show indexes for a table')
         .action(async (tableName: string) => {
-            const opts = program.opts();
+            const opts = program.opts<CliOptions>();
             requireConnection(opts);
             requireSqlConnection(opts);
             await runWithSqlConnection(opts, async (sql, dbType) => {
@@ -770,33 +795,28 @@ The query can be given three ways:
 
 Every query runs in a read-only transaction that is rolled back afterwards.`)
         .action(async (sqlArg: string | undefined, cmdOpts: { file?: string; timeout?: string }) => {
-            const opts = program.opts();
+            const opts = program.opts<CliOptions>();
             requireConnection(opts);
             requireSqlConnection(opts);
 
-            let sqlQuery: string;
+            const sqlQuery = await readQueryText(sqlArg, cmdOpts.file);
             let options: ConnectionOptions = {};
-            try {
-                sqlQuery = await readQueryText(sqlArg, cmdOpts.file);
-                if (cmdOpts.timeout !== undefined) {
-                    options = { statementTimeoutMs: Math.round(parseDuration(cmdOpts.timeout)) };
+            if (cmdOpts.timeout !== undefined) {
+                let timeoutMs: number;
+                try {
+                    timeoutMs = Math.round(parseDuration(cmdOpts.timeout));
+                } catch (error: unknown) {
+                    throw usageError(`--timeout: ${errorMessage(error)}`, '--timeout');
                 }
-            } catch (error: unknown) {
-                console.error(JSON.stringify({ error: getErrorMessage(error) }));
-                process.exit(1);
+                options = { statementTimeoutMs: timeoutMs };
             }
-
-            const reject = (error: string | undefined): never => {
-                console.error(JSON.stringify({ error }));
-                process.exit(1);
-            };
 
             // When the config already says which database this is, refuse a
             // bad query before a tunnel is started or a connection opened.
             const knownType = certainDbType(opts);
             if (knownType) {
                 const early = validateReadOnlyQuery(sqlQuery, knownType);
-                if (!early.valid) reject(early.error);
+                if (!early.valid) throw queryRefusedError(early);
             }
 
             await runWithSqlConnection(opts, async (sql, dbType) => {
@@ -804,7 +824,7 @@ Every query runs in a read-only transaction that is rolled back afterwards.`)
                 // to: the one the database will read the query with. The type
                 // is only certain once a URL held in the keychain is read.
                 const validation = validateReadOnlyQuery(sqlQuery, dbType as DbType);
-                if (!validation.valid) reject(validation.error);
+                if (!validation.valid) throw queryRefusedError(validation);
 
                 const result = await executeQuery(sql, sqlQuery);
 
@@ -832,7 +852,7 @@ Every query runs in a read-only transaction that is rolled back afterwards.`)
         .description('Redis server info, memory stats, and keyspace overview')
         .option('--section <name>', 'get a specific INFO section (e.g., memory, server, clients)')
         .action(async (cmdOpts: { section?: string }) => {
-            const opts = program.opts();
+            const opts = program.opts<CliOptions>();
             requireConnection(opts);
             requireRedisConnection(opts);
             await runWithRedisConnection(opts, async (client) => {
@@ -848,7 +868,7 @@ Every query runs in a read-only transaction that is rolled back afterwards.`)
         .option('--limit <n>', 'maximum number of keys to return', '100')
         .option('--no-types', 'skip TYPE/TTL lookups for faster scanning')
         .action(async (pattern: string | undefined, cmdOpts: { limit: string; types: boolean }) => {
-            const opts = program.opts();
+            const opts = program.opts<CliOptions>();
             requireConnection(opts);
             requireRedisConnection(opts);
 
@@ -866,7 +886,7 @@ Every query runs in a read-only transaction that is rolled back afterwards.`)
         .description('Get value of a Redis key (auto-detects type)')
         .option('--limit <n>', 'max items for lists/sets/zsets', '100')
         .action(async (key: string, cmdOpts: { limit: string }) => {
-            const opts = program.opts();
+            const opts = program.opts<CliOptions>();
             requireConnection(opts);
             requireRedisConnection(opts);
 
@@ -883,7 +903,7 @@ Every query runs in a read-only transaction that is rolled back afterwards.`)
         .command('inspect <key>')
         .description('Inspect Redis key metadata (type, TTL, memory usage, encoding)')
         .action(async (key: string) => {
-            const opts = program.opts();
+            const opts = program.opts<CliOptions>();
             requireConnection(opts);
             requireRedisConnection(opts);
             await runWithRedisConnection(opts, async (client) => {
@@ -898,7 +918,7 @@ Every query runs in a read-only transaction that is rolled back afterwards.`)
         .description('Show recent slow queries from the Redis slow log')
         .option('-n, --count <n>', 'number of entries to show', '10')
         .action(async (cmdOpts: { count: string }) => {
-            const opts = program.opts();
+            const opts = program.opts<CliOptions>();
             requireConnection(opts);
             requireRedisConnection(opts);
 
@@ -915,7 +935,7 @@ Every query runs in a read-only transaction that is rolled back afterwards.`)
         .command('command <cmd> [args...]')
         .description('Execute a read-only Redis command')
         .action(async (cmd: string, args: string[]) => {
-            const opts = program.opts();
+            const opts = program.opts<CliOptions>();
             requireConnection(opts);
             requireRedisConnection(opts);
             await runWithRedisConnection(opts, async (client) => {
@@ -940,27 +960,21 @@ Every query runs in a read-only transaction that is rolled back afterwards.`)
         .command('test <connectionName>', { hidden: true })
         .description('Test a database connection')
         .action(async (connectionName: string) => {
-            const opts = program.opts();
+            const opts = program.opts<CliOptions>();
 
             console.log(`Testing connection: ${connectionName}...`);
 
-            try {
-                const connConfig = getConnectionConfig(connectionName, opts.config);
-                if (isRedisConfig(connConfig)) {
-                    await withRedisConnection(connectionName, opts.config, async (client) => {
-                        await client.send('PING', []);
-                    });
-                } else {
-                    await withConnection(connectionName, opts.config, async (sql) => {
-                        await sql.unsafe('SELECT 1');
-                    });
-                }
-                console.log(`\x1b[32m✓ Connection "${connectionName}" successful!\x1b[0m`);
-            } catch (error: unknown) {
-                console.error(`\x1b[31m✗ Connection "${connectionName}" failed\x1b[0m`);
-                console.error(`  Error: ${getErrorMessage(error)}`);
-                process.exit(1);
+            const connConfig = getConnectionConfig(connectionName, opts.config);
+            if (isRedisConfig(connConfig)) {
+                await withRedisConnection(connectionName, opts.config, async (client) => {
+                    await client.send('PING', []);
+                });
+            } else {
+                await withConnection(connectionName, opts.config, async (sql) => {
+                    await sql.unsafe('SELECT 1');
+                });
             }
+            console.log(`\x1b[32m✓ Connection "${connectionName}" successful!\x1b[0m`);
         });
 
     program
@@ -968,11 +982,7 @@ Every query runs in a read-only transaction that is rolled back afterwards.`)
         .description('Print the guide for AI agents using sherlock (topics: transfer)')
         .action(async (topic: string | undefined) => {
             const { guideText } = await import('./guide');
-            try {
-                process.stdout.write(guideText(topic, pkg.version));
-            } catch (error: unknown) {
-                fail(getErrorMessage(error));
-            }
+            process.stdout.write(guideText(topic, pkg.version));
         });
 
     program
@@ -990,19 +1000,22 @@ Checks, in order, stopping at the first failure:
 
 Exits 1 when a check fails.`)
         .action(async (connectionName: string | undefined) => {
-            const opts = program.opts();
+            const opts = program.opts<CliOptions>();
             if (opts.url) {
-                fail('doctor checks a configured connection. Give its name, not --url.');
+                throw usageError('doctor checks a configured connection. Give its name, not --url.', '--url');
             }
             const name = connectionName ?? opts.connection;
             if (connectionName && opts.connection && connectionName !== opts.connection) {
-                fail('give the connection either as an argument or with -c, not both.');
+                throw usageError('Give the connection either as an argument or with -c, not both.', '--connection');
             }
             const configPath: string | undefined = opts.config;
             const target = name ?? detectConnectionFromCwd(configPath);
             if (!target) {
-                fail('Give the connection to check: sherlock doctor <name>. See them with: sherlock connection list');
+                throw new SherlockError('CONNECTION_REQUIRED', 'No connection given to check, and none is set up for this directory.', {
+                    fix: 'Give its name: sherlock doctor <name>. See them with: sherlock connection list',
+                });
             }
+            invocation.connection = target;
             const { diagnoseConnection } = await import('./doctor');
             const report = await diagnoseConnection(target, configPath);
             console.log(JSON.stringify(report, null, 2));
@@ -1059,64 +1072,60 @@ Exits 1 when a check fails.`)
             // it never reaches this command. Say so rather than reporting the
             // missing details it would have supplied.
             if (program.opts().url) {
-                console.error(
-                    'Error: use --from-url to build a connection from a URL. ' +
-                    '-u/--url connects to a URL without saving it.'
+                throw usageError(
+                    '-u/--url connects to a URL without saving it.',
+                    '--url',
+                    'Use --from-url to build a connection from a URL.'
                 );
-                process.exit(1);
+            }
+            invocation.connection = name;
+
+            const config = buildConnectionConfig(name, cmdOpts);
+
+            // Refuse a duplicate before storing the secret. Writing the
+            // keychain entry first would replace the existing connection's
+            // password and then abandon it, leaving that connection
+            // pointing at credentials that no longer work.
+            if (connectionExists(name) && !cmdOpts.force) {
+                throw usageError(`Connection "${name}" already exists.`, '--force', 'Pass --force to replace it.');
             }
 
-            try {
-                const config = buildConnectionConfig(name, cmdOpts);
-
-                // Refuse a duplicate before storing the secret. Writing the
-                // keychain entry first would replace the existing connection's
-                // password and then abandon it, leaving that connection
-                // pointing at credentials that no longer work.
-                if (connectionExists(name) && !cmdOpts.force) {
-                    throw new Error(
-                        `Connection "${name}" already exists. Pass --force to replace it.`
-                    );
-                }
-
-                if (cmdOpts.passwordStdin && process.stdin.isTTY) {
-                    throw new Error(
-                        '--password-stdin reads the password from a pipe, and stdin is a terminal. ' +
-                        "Pipe it in, e.g. printf '%s' \"$PASSWORD\" | sherlock connection add ..."
-                    );
-                }
-                if (cmdOpts.passwordStdin) {
-                    const password = await readPasswordFromStdin();
-                    if (password === null) {
-                        fail('--password-stdin was given but stdin was empty.');
-                    }
-                    setKeychainPassword(name, password);
-                }
-
-                const { replaced, path: configPath } = addConnection(name, config, {
-                    force: cmdOpts.force,
-                });
-
-                const shadowed = shadowingWarning();
-                if (shadowed) console.error(`Warning: ${shadowed}`);
-                for (const note of connectionAddNotes(config)) console.error(`Note: ${note}`);
-
-                // A tunnel is opened by the first command, so check it with
-                // doctor first; otherwise start with a command that lists something.
-                const next = config.tunnel
-                    ? `sherlock doctor ${name}`
-                    : isRedisConfig(config) ? `sherlock -c ${name} info` : `sherlock -c ${name} tables`;
-
-                console.log(JSON.stringify({
-                    connection: name,
-                    action: replaced ? 'replaced' : 'added',
-                    config: configPath,
-                    tunnel: config.tunnel ? summarizeTunnel(name, config.tunnel) : null,
-                    next,
-                }, null, 2));
-            } catch (error: unknown) {
-                fail(getErrorMessage(error));
+            if (cmdOpts.passwordStdin && process.stdin.isTTY) {
+                throw usageError(
+                    '--password-stdin reads the password from a pipe, and stdin is a terminal.',
+                    '--password-stdin',
+                    "Pipe it in, e.g. printf '%s' \"$PASSWORD\" | sherlock connection add ..."
+                );
             }
+            if (cmdOpts.passwordStdin) {
+                const password = await readPasswordFromStdin();
+                if (password === null) {
+                    throw usageError('--password-stdin was given but stdin was empty.', '--password-stdin');
+                }
+                setKeychainPassword(name, password);
+            }
+
+            const { replaced, path: configPath } = addConnection(name, config, {
+                force: cmdOpts.force,
+            });
+
+            const shadowed = shadowingWarning();
+            if (shadowed) console.error(`Warning: ${shadowed}`);
+            for (const note of connectionAddNotes(config)) console.error(`Note: ${note}`);
+
+            // A tunnel is opened by the first command, so check it with
+            // doctor first; otherwise start with a command that lists something.
+            const next = config.tunnel
+                ? `sherlock doctor ${name}`
+                : isRedisConfig(config) ? `sherlock -c ${name} info` : `sherlock -c ${name} tables`;
+
+            console.log(JSON.stringify({
+                connection: name,
+                action: replaced ? 'replaced' : 'added',
+                config: configPath,
+                tunnel: config.tunnel ? summarizeTunnel(name, config.tunnel) : null,
+                next,
+            }, null, 2));
         });
 
     // ========================================================================
@@ -1201,7 +1210,7 @@ A connection whose name already exists is skipped unless --force is given.`)
         .description('Run as a tunnel supervisor process (internal)')
         .requiredOption('--name <name>', 'connection name to supervise')
         .action(async (cmdOpts: { name: string }) => {
-            const opts = program.opts();
+            const opts = program.opts<CliOptions>();
             const { runSupervisor } = await import('./tunnel/supervisor');
             const code = await runSupervisor(cmdOpts.name, opts.config);
             process.exit(code);
@@ -1233,11 +1242,7 @@ A connection whose name already exists is skipped unless --force is given.`)
         .description('Migrate legacy config.ts to new JSON format')
         .option('--from <path>', 'path to legacy config.ts', 'config.ts')
         .action(async (cmdOpts) => {
-            try {
-                await migrateConfig(cmdOpts.from);
-            } catch (error: unknown) {
-                fail(getErrorMessage(error));
-            }
+            await migrateConfig(cmdOpts.from);
         });
 
     // ========================================================================
@@ -1266,8 +1271,7 @@ A connection whose name already exists is skipped unless --force is given.`)
         .action(async (account: string) => {
             const password = await promptPassword(`Enter password for "${account}": `);
             if (!password) {
-                console.error('No password provided');
-                process.exit(1);
+                throw usageError('No password was entered.');
             }
             setKeychainPassword(account, password);
             console.log(`\x1b[32m✓\x1b[0m Password stored for account "${account}"`);
@@ -1282,7 +1286,7 @@ A connection whose name already exists is skipped unless --force is given.`)
             // Reports only whether the entry exists. Printing the password
             // would put it in the terminal scrollback, and in front of any
             // agent that finds this command.
-            if (!hasKeychainPassword(account)) fail(`No password found for account "${account}"`);
+            if (!hasKeychainPassword(account)) throw keychainEntryNotFound(account);
             console.log(`The keychain has a password for "${account}".`);
         });
 
@@ -1290,10 +1294,7 @@ A connection whose name already exists is skipped unless --force is given.`)
         .command('delete <account>')
         .description('Delete a password from the keychain')
         .action((account: string) => {
-            if (!hasKeychainPassword(account)) {
-                console.error(`No password found for account "${account}"`);
-                process.exit(1);
-            }
+            if (!hasKeychainPassword(account)) throw keychainEntryNotFound(account);
             deleteKeychainPassword(account);
             console.log(`\x1b[32m✓\x1b[0m Password deleted for account "${account}"`);
         });
@@ -1302,20 +1303,16 @@ A connection whose name already exists is skipped unless --force is given.`)
         .command('list')
         .description('Show where each connection\'s password comes from, and whether it is there')
         .action(async () => {
-            const opts = program.opts();
-            try {
-                const { loadConfigFile } = await import('./config');
-                const { passwordStatus } = await import('./credentials/status');
-                const config = loadConfigFile(opts.config);
-                const passwords = listConnections(opts.config).map((name) => ({
-                    connection: name,
-                    ...passwordStatus(name, config.connections[name]),
-                }));
-                console.log(JSON.stringify({ passwords }, null, 2));
-                if (passwords.some((entry) => !entry.ok)) process.exitCode = 1;
-            } catch (error: unknown) {
-                fail(getErrorMessage(error));
-            }
+            const opts = program.opts<CliOptions>();
+            const { loadConfigFile } = await import('./config');
+            const { passwordStatus } = await import('./credentials/status');
+            const config = loadConfigFile(opts.config);
+            const passwords = listConnections(opts.config).map((name) => ({
+                connection: name,
+                ...passwordStatus(name, config.connections[name]),
+            }));
+            console.log(JSON.stringify({ passwords }, null, 2));
+            if (passwords.some((entry) => !entry.ok)) process.exitCode = 1;
         });
 
     return program;
@@ -1325,11 +1322,84 @@ A connection whose name already exists is skipped unless --force is given.`)
 // Main
 // ============================================================================
 
-const program = setupCLI();
-program.parseAsync(process.argv).catch((error: Error) => {
-    console.error(JSON.stringify({
-        error: error.message,
-        ...(process.env.DEBUG && { stack: error.stack }),
-    }));
-    process.exit(1);
-});
+/** Commander's exits that are not failures: help and --version */
+const COMMANDER_EXITS = new Set(['commander.help', 'commander.helpDisplayed', 'commander.version']);
+
+/** The command as typed, e.g. "connection add", from the command commander ran */
+function commandPath(command: Command): string {
+    const names: string[] = [];
+    for (let current: Command | null = command; current?.parent; current = current.parent) {
+        names.unshift(current.name());
+    }
+    return names.join(' ');
+}
+
+/**
+ * The command named on the command line, for an error raised before commander
+ * ran it: the longest run of words that name a command and its subcommands.
+ */
+function commandPathFromArgv(program: Command, args: string[]): string {
+    const names: string[] = [];
+    let current = program;
+    for (const arg of args) {
+        if (arg.startsWith('-')) continue;
+        const next = current.commands.find((c) => c.name() === arg || c.aliases().includes(arg));
+        if (!next) {
+            // A value of a global option such as -c, or the command's own argument
+            if (names.length > 0) break;
+            continue;
+        }
+        names.push(next.name());
+        current = next;
+    }
+    return names.join(' ');
+}
+
+/** A commander parse failure as a USAGE error, naming the flag when there is one */
+function fromCommanderError(error: CommanderError): SherlockError {
+    const message = error.message.replace(/^error: /, '');
+    const flag = /(?:option|flag) '([^']+)'/.exec(message)?.[1]?.split(/[ ,<[]/)[0];
+    const fix = error.code === 'commander.unknownCommand' || error.code === 'commander.unknownOption'
+        ? 'See the commands and flags with: sherlock --help'
+        : undefined;
+    return usageError(message.replace(/\.?$/, '.'), flag, fix);
+}
+
+function keychainEntryNotFound(account: string): SherlockError {
+    return new SherlockError('NOT_FOUND', `The keychain has no password for "${account}".`, {
+        fix: `Store one with: sherlock keychain set ${account}`,
+        details: { kind: 'keychain entry', name: account },
+    });
+}
+
+/**
+ * Run the command. Any error it throws, or commander's own usage errors, is
+ * reported once, here, in the envelope, with the exit code that goes with it.
+ * `tunnel __supervise` exits by itself with its own code and never gets here.
+ */
+async function main(): Promise<void> {
+    const program = setupCLI();
+    try {
+        await program.parseAsync(process.argv);
+    } catch (thrown: unknown) {
+        let error = thrown;
+        if (error instanceof CommanderError) {
+            if (COMMANDER_EXITS.has(error.code)) {
+                process.exitCode = error.exitCode;
+                return;
+            }
+            error = fromCommanderError(error);
+        }
+        invocation.command ||= commandPathFromArgv(program, process.argv.slice(2));
+        if (process.env.DEBUG && error instanceof Error && error.stack) {
+            process.stderr.write(`${error.stack}\n`);
+        }
+        const code = printEnvelope(invocation.fail(error));
+        // Exit once stdout has taken the envelope: pending work such as a
+        // tunnel keepalive timer must not keep the process alive, and exiting
+        // straight away can cut a write to a pipe short.
+        process.stdout.write('', () => process.exit(code));
+    }
+}
+
+void main();

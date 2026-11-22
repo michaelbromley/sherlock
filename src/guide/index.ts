@@ -10,6 +10,7 @@
 
 /// <reference path="./text-modules.d.ts" />
 
+import { usageError } from '../errors';
 import main from './agent.md' with { type: 'text' };
 import transfer from './transfer.md' with { type: 'text' };
 
@@ -26,7 +27,7 @@ export function guideText(topic: string | undefined, version: string): string {
     const name = (topic ?? 'main') as GuideTopic;
     // hasOwn, so that "constructor" and other inherited keys are not topics.
     if (!Object.hasOwn(GUIDE_TOPICS, name)) {
-        throw new Error(
+        throw usageError(
             `No guide topic "${topic}". Topics: ` +
             Object.entries(GUIDE_TOPICS).map(([key, value]) => `${key} (${value.summary})`).join(', ') + '.'
         );

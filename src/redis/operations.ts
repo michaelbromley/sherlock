@@ -5,6 +5,7 @@
 
 import type { RedisClient } from 'bun';
 import { validateRedisCommand } from './validation';
+import { queryRefusedError } from '../query-validation';
 
 // ============================================================================
 // Types
@@ -353,7 +354,7 @@ export async function executeCommand(
 ): Promise<unknown> {
     const validation = validateRedisCommand(cmd, args);
     if (!validation.valid) {
-        throw new Error(validation.error);
+        throw queryRefusedError(validation, 'Use a read-only Redis command, such as GET, HGETALL, SCAN or TTL.');
     }
 
     return await client.send(cmd, args);

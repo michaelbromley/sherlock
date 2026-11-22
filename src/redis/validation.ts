@@ -50,6 +50,8 @@ export function validateRedisCommand(cmd: string, args: string[] = []): Validati
     if (!ALLOWED_REDIS_COMMANDS.has(upperCmd)) {
         return {
             valid: false,
+            reason: 'NOT_READ_ONLY',
+            keyword: cmd.toUpperCase(),
             error: `Command "${cmd}" is not allowed (read-only mode). Only read operations are permitted.`,
         };
     }
@@ -60,6 +62,8 @@ export function validateRedisCommand(cmd: string, args: string[] = []): Validati
         if (args.length === 0) {
             return {
                 valid: false,
+                reason: 'NOT_READ_ONLY',
+                keyword: cmd.toUpperCase(),
                 error: `"${cmd}" requires a subcommand. Allowed: ${cmd} ${[...allowedSubs].join('|')}`,
             };
         }
@@ -67,6 +71,8 @@ export function validateRedisCommand(cmd: string, args: string[] = []): Validati
         if (!allowedSubs.has(subCmd)) {
             return {
                 valid: false,
+                reason: 'NOT_READ_ONLY',
+                keyword: `${cmd} ${args[0]}`.toUpperCase(),
                 error: `"${cmd} ${args[0]}" is not allowed (read-only mode). Allowed: ${cmd} ${[...allowedSubs].join('|')}`,
             };
         }
