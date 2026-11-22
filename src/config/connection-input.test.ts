@@ -121,6 +121,13 @@ describe('buildConnectionConfig — passwords', () => {
     });
 });
 
+describe('buildConnectionConfig — directory', () => {
+    it('stores the directory as an absolute path, so "." does not match everywhere', () => {
+        expect(buildConnectionConfig('prod', { ...BASE, directory: '.' }).directory).toBe(process.cwd());
+        expect(buildConnectionConfig('prod', { ...BASE, directory: '/srv/app' }).directory).toBe('/srv/app');
+    });
+});
+
 describe('buildConnectionConfig — tunnels', () => {
     it('expands --tunnel-northflank into a command and a pattern', () => {
         const config = buildConnectionConfig('nf', {

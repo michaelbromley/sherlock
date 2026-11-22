@@ -10,7 +10,7 @@ import type { ResolvedConnectionConfig } from '../config/types';
 import { DB_TYPES, parseBoolParam } from '../db-types';
 import { MssqlAdapter, type SqlAdapter } from './mssql-adapter';
 import { parseDuration } from '../tunnel/config';
-import { connectTimeoutFor, connectTimeoutSeconds, explainConnectTimeout } from './connect-timeout';
+import { connectTimeoutFor, connectTimeoutSeconds, explainConnectFailure } from './connect-timeout';
 import {
     DEFAULT_STATEMENT_TIMEOUT,
     explainTimeout,
@@ -56,7 +56,7 @@ export async function createConnection(
             requestTimeoutMs: timeoutMs,
             connectTimeoutMs: connectTimeoutFor(config),
         }).catch((error) => {
-            throw explainConnectTimeout(error, config);
+            throw explainConnectFailure(error, config);
         });
         return {
             unsafe: (query: string) => adapter.unsafe(query).catch((error) => {
@@ -128,11 +128,11 @@ export async function createConnection(
                 ) {
                     mysqlVariable = 'max_statement_time';
                     return runReadOnly(query).catch((retryError) =>
-                        explainConnectError(explainTimeout(explainConnectTimeout(retryError, config), timeoutMs))
+                        explainConnectError(explainTimeout(explainConnectFailure(retryError, config), timeoutMs))
                     );
                 }
                 return explainConnectError(
-                    explainMultipleStatements(explainTimeout(explainConnectTimeout(error, config), timeoutMs))
+                    explainMultipleStatements(explainTimeout(explainConnectFailure(error, config), timeoutMs))
                 );
             }
         }),

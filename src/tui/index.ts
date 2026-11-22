@@ -643,8 +643,9 @@ async function editConnectionWizard(): Promise<void> {
 
         if (isConfigFromWorkingDirectory()) {
             p.log.warn(
-                'This config was loaded from the current directory, and tunnels are ignored there ' +
-                'because they run a shell command. Move it to your user config directory to use it.'
+                'This config was loaded from the current directory, where tunnels are refused: a ' +
+                'tunnel runs a command or uses your platform login, so a cloned repository must not ' +
+                'be able to define one. Move the connection to your user config directory to use it.'
             );
         }
         return;
@@ -906,6 +907,7 @@ async function promptForConnection(
             logging,
         };
         if (directory) config.directory = directory;
+        carryOverUnprompted(existingConfig, config);
 
         return { name, config, password: '', storageMethod: 'env' };
     }
@@ -982,6 +984,7 @@ async function promptForConnection(
         if (ssl) config.ssl = ssl;
         if (directory) config.directory = directory;
         if (tunnel) config.tunnel = tunnel;
+        carryOverUnprompted(existingConfig, config);
 
         return { name, config, password, storageMethod };
     }
@@ -1077,8 +1080,22 @@ async function promptForConnection(
     }
     if (directory) config.directory = directory;
     if (tunnel) config.tunnel = tunnel;
+    carryOverUnprompted(existingConfig, config);
 
     return { name, config, password, storageMethod };
+}
+
+/**
+ * Settings the wizard has no prompt for. The edited connection is rebuilt from
+ * the answers, so without this, editing a connection would drop them.
+ */
+const UNPROMPTED_SETTINGS = ['statementTimeout', 'connectTimeout'] as const;
+
+export function carryOverUnprompted(existing: ConnectionConfig | undefined, config: ConnectionConfig): void {
+    if (!existing) return;
+    for (const key of UNPROMPTED_SETTINGS) {
+        if (existing[key] !== undefined) config[key] = existing[key];
+    }
 }
 
 /**

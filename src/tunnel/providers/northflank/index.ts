@@ -232,7 +232,8 @@ export function createNorthflankProvider(
                         context: config.context,
                         project: config.project,
                         addon: config.addon,
-                        endpoint: config.endpoint ?? 'read replica if the addon has one',
+                        // "auto": the read replica when the addon has one, else the primary
+                        endpoint: config.endpoint ?? 'auto',
                     },
                 },
                 checkHost: (host) => checkNorthflankHost(host, config.project, config.addon),

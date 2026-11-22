@@ -9,6 +9,7 @@ import {
 } from './paths';
 import { getCredentialResolver } from '../credentials';
 import type { SherlockConfig, ConnectionConfig, ResolvedConnectionConfig, CredentialRef, SslConfig } from './types';
+import type { TunnelConfig } from '../tunnel/types';
 import { getEnvVarForConnection } from '../credentials/providers/env';
 import { DB_TYPES, DEFAULT_PORTS, detectDbTypeFromUrl, parseBoolParam, type DbType } from '../db-types';
 import { ensureTunnel } from '../tunnel/manager';
@@ -434,7 +435,8 @@ export function rewriteUrlEndpoint(url: string, host: string, port: number): str
     try {
         parsed = new URL(url);
     } catch {
-        throw new Error(`Cannot apply tunnel: "${url}" is not a parseable connection URL`);
+        // The URL holds the password, so it is not quoted here.
+        throw new Error('Cannot apply the tunnel: the connection URL cannot be parsed.');
     }
 
     parsed.hostname = host;
@@ -474,7 +476,8 @@ function assertTunnelAllowed(connectionName: string): void {
         throw new Error(
             `Connection "${connectionName}" defines a tunnel, but the config was loaded from ` +
             `${describeConfigSource(cachedConfigSource)}.\n\n` +
-            `Tunnels run a shell command, so they are only honoured from a config you opted into ` +
+            `A tunnel runs a command on this machine or uses your platform login, so it is only ` +
+            `honoured from a config you opted into ` +
             `explicitly: your user config directory, a config next to the binary, --config, or ` +
             `SHERLOCK_CONFIG.\n\n` +
             `If you trust this file, re-run with --config ${cachedConfigPath ?? '<path>'}`
@@ -723,6 +726,32 @@ export function listConnections(configPath?: string): string[] {
 }
 
 /**
+ * A tunnel, as every command reports it. `kind` says whether a provider opens
+ * it or a shell command does; a command recognised as a platform's CLI keeps
+ * kind "command" and has that platform's target in `details`.
+ */
+export interface TunnelSummary {
+    kind: 'provider' | 'command';
+    /** The provider id, or "command" */
+    provider: string;
+    /** One line, e.g. "my-project/postgresql (read)" */
+    target: string;
+    details: Record<string, string>;
+}
+
+/** Summarise a tunnel block. Throws when it is invalid. */
+export function summarizeTunnel(connectionName: string, tunnel: TunnelConfig): TunnelSummary {
+    const resolved = resolveTunnel(connectionName, tunnel);
+    const { target } = resolved.inspect();
+    return {
+        kind: resolved.providerId === 'command' ? 'command' : 'provider',
+        provider: resolved.providerId,
+        target: target.summary,
+        details: target.details,
+    };
+}
+
+/**
  * Where a connection points, for `sherlock connections`. Never includes a
  * secret: a URL is reduced to its host, and a credential reference is named
  * rather than resolved.
@@ -732,8 +761,8 @@ export interface ConnectionSummary {
     type: DbType;
     /** The database's host, file, or where those are read from */
     target: string;
-    /** The tunnel's provider and target, when the connection has a tunnel */
-    tunnel?: { provider: string; target: string; details: Record<string, string> };
+    /** The tunnel, when the connection has one */
+    tunnel?: TunnelSummary;
     /** Set when the connection's config cannot be read as it is */
     problem?: string;
 }
@@ -781,12 +810,7 @@ export function summarizeConnection(name: string, config: ConnectionConfig): Con
 
     if (config.tunnel) {
         try {
-            const inspection = resolveTunnel(name, config.tunnel).inspect();
-            summary.tunnel = {
-                provider: inspection.target.provider,
-                target: inspection.target.summary,
-                details: inspection.target.details,
-            };
+            summary.tunnel = summarizeTunnel(name, config.tunnel);
         } catch (error) {
             summary.problem = error instanceof Error ? error.message : String(error);
         }

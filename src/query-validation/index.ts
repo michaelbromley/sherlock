@@ -122,7 +122,10 @@ function validateCode(code: string): ValidationResult {
     if (dangerousKeyword) {
         return {
             valid: false,
-            error: `Dangerous keyword detected: ${dangerousKeyword}. Only read-only queries are allowed.`,
+            error:
+                `Dangerous keyword detected: ${dangerousKeyword}. Only read-only queries are allowed. ` +
+                `If ${dangerousKeyword} is a column or table name here, quote it as an identifier ` +
+                `("name" in PostgreSQL and SQLite, \`name\` in MySQL, [name] in SQL Server).`,
         };
     }
 
@@ -130,14 +133,33 @@ function validateCode(code: string): ValidationResult {
 }
 
 /**
+ * Uses of a dangerous keyword that are harmless, by keyword. The keyword is
+ * judged by what follows it in the code, after literals and comments are gone.
+ *
+ * Only exemptions that are harmless in every dialect belong here. SQL Server
+ * runs statements written one after another without a semicolon, so a keyword
+ * that can start a statement there must stay blocked anywhere in the query.
+ */
+const HARMLESS_USES: Record<string, RegExp> = {
+    // The string functions REPLACE() and the numeric TRUNCATE(). The
+    // statements are REPLACE INTO and TRUNCATE [TABLE] name, never with "(".
+    REPLACE: /^\s*\(/,
+    TRUNCATE: /^\s*\(/,
+    // The statement is COMMENT ON. Anything else is a column or alias name.
+    COMMENT: /^(?!\s+ON\b)/i,
+};
+
+/**
  * Finds the first dangerous keyword in a query
  * Uses word boundaries to avoid false positives (e.g., "INSERTED" column name)
  */
 function findDangerousKeyword(query: string): string | null {
     for (const keyword of DANGEROUS_KEYWORDS) {
-        const regex = new RegExp(`\\b${keyword}\\b`, 'i');
-        if (regex.test(query)) {
-            return keyword;
+        const regex = new RegExp(`\\b${keyword}\\b`, 'gi');
+        const harmless = HARMLESS_USES[keyword];
+        for (const match of query.matchAll(regex)) {
+            const after = query.slice((match.index ?? 0) + match[0].length);
+            if (!harmless || !harmless.test(after)) return keyword;
         }
     }
     return null;

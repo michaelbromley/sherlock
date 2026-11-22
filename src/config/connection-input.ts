@@ -6,6 +6,7 @@
  * command itself.
  */
 
+import * as path from 'path';
 import type { ConnectionConfig, CredentialRef } from './types';
 import { parseConnectionUrl } from './index';
 import { DB_TYPES, isValidDbType, type DbType } from '../db-types';
@@ -232,7 +233,7 @@ export function buildConnectionConfig(name: string, opts: ConnectionAddOptions):
             throw new Error('SQLite needs --database pointing at the database file.');
         }
         const config: ConnectionConfig = { type, filename };
-        if (opts.directory) config.directory = opts.directory;
+        if (opts.directory) config.directory = path.resolve(opts.directory);
         return config;
     }
 
@@ -275,7 +276,9 @@ export function buildConnectionConfig(name: string, opts: ConnectionAddOptions):
     if (fromUrl?.allowPublicKeyRetrieval) config.allowPublicKeyRetrieval = true;
 
     if (opts.logging) config.logging = true;
-    if (opts.directory) config.directory = opts.directory;
+    // Stored absolute: a relative path would be resolved against wherever
+    // sherlock runs later, so "." would auto-select this connection everywhere.
+    if (opts.directory) config.directory = path.resolve(opts.directory);
     if (tunnel) config.tunnel = tunnel;
 
     return config;

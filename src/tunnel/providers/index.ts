@@ -71,6 +71,10 @@ export function resolveTunnel(connectionName: string, tunnel: TunnelConfig): Res
         throw new Error(`Invalid ${tunnelConfigLabel(connectionName)}: it must be an object.`);
     }
 
+    if (!isProviderTunnel(tunnel) && typeof (tunnel as { command?: unknown }).command !== 'string') {
+        throw missingProviderError(tunnel, connectionName);
+    }
+
     const provider = providerFor(tunnel, connectionName);
     const timeouts = resolveTunnelTimeouts(tunnel, tunnelConfigLabel(connectionName));
     const config = provider.resolve(tunnel, connectionName);
@@ -83,6 +87,30 @@ export function resolveTunnel(connectionName: string, tunnel: TunnelConfig): Res
         open: (context) => provider.open(config, context),
         diagnose: diagnose ? (context) => diagnose(config, context) : null,
     };
+}
+
+/**
+ * The error for a tunnel block with neither a command nor a provider. When its
+ * settings are those of a provider, say which: the likely mistake is a
+ * forgotten "provider".
+ */
+function missingProviderError(tunnel: TunnelConfig, connectionName: string): Error {
+    const where = tunnelConfigLabel(connectionName);
+    const keys = Object.keys(tunnel).filter((key) => !['idleTimeout', 'readyTimeout'].includes(key));
+    const match = PROVIDERS.find((provider) => {
+        const fields = provider.setup?.fields.map((field) => field.key) ?? [];
+        return keys.length > 0 && keys.every((key) => fields.includes(key));
+    });
+    if (match) {
+        return new Error(
+            `Invalid ${where}: it has no "provider" or "command". Its settings are those of the ` +
+            `${match.id} provider: did you mean to add "provider": "${match.id}"?`
+        );
+    }
+    return new Error(
+        `Invalid ${where}: give either "command" (a port-forwarding command) or "provider" ` +
+        `(one of: ${tunnelProviderIds().join(', ')}).`
+    );
 }
 
 /**

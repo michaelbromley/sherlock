@@ -53,6 +53,25 @@ describe('validateReadOnlyQuery — allowed', () => {
         ok('SELECT inserted_at, updated_by, created FROM t');
     });
 
+    it('allows the REPLACE() and TRUNCATE() functions and a column called comment', () => {
+        ok("SELECT replace(name, 'a', 'b') FROM t");
+        ok('SELECT truncate(1.5, 0)', 'mysql');
+        ok('SELECT TRUNCATE (price, 2) FROM t', 'mysql');
+        ok('SELECT body AS comment, comment FROM posts');
+    });
+
+    it('still blocks the statements those words start', () => {
+        rejected('SELECT 1 TRUNCATE TABLE t', /TRUNCATE/, 'mssql');
+        rejected('SELECT 1 COMMENT ON TABLE t IS', /COMMENT/);
+        rejected("SELECT 1 EXEC('DROP TABLE t')", /EXEC/, 'mssql');
+        rejected("SELECT replace(a, 'x', 'y') FROM t REPLACE INTO u VALUES (1)", /REPLACE/, 'mssql');
+    });
+
+    it('suggests quoting when a keyword may be a name', () => {
+        rejected('SELECT lock FROM t', /quote it as an identifier/);
+        ok('SELECT "lock" FROM t', 'postgres');
+    });
+
     it('does not mistake a column beginning with an allowed word for the statement', () => {
         rejected('SELECTED_ROWS', /Only SELECT/);
     });

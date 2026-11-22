@@ -305,9 +305,12 @@ export interface TunnelStatus {
     running: boolean;
     ready: boolean;
     startedAt: string;
-    /** The command that was run, or the provider's description of its target */
-    command: string;
-    provider?: string;
+    kind: 'provider' | 'command';
+    provider: string;
+    /** What is being forwarded: the provider's target, or the command that was run */
+    target: string;
+    /** The command that was run, for a command tunnel only */
+    command?: string;
     logFile: string;
     error?: string;
 }
@@ -325,8 +328,11 @@ export async function listTunnels(): Promise<TunnelStatus[]> {
             running,
             ready: running && state.ready && (await isPortAccepting(state.port, state.host)),
             startedAt: state.startedAt,
-            command: state.command,
-            ...(state.provider ? { provider: state.provider } : {}),
+            // State written before providers existed has no provider: a command.
+            kind: !state.provider || state.provider === 'command' ? 'command' : 'provider',
+            provider: state.provider ?? 'command',
+            target: state.command,
+            ...(!state.provider || state.provider === 'command' ? { command: state.command } : {}),
             logFile: state.logFile,
             error: state.error,
         });
