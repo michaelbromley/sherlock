@@ -14,7 +14,8 @@ import { connectTimeoutFor, connectTimeoutSeconds, explainConnectTimeout } from 
 import {
     DEFAULT_STATEMENT_TIMEOUT,
     explainTimeout,
-    isUnknownVariableError,
+    explainMultipleStatements,
+    isUnknownTimeoutVariableError,
     readOnlyWrapper,
     runWrapped,
     type MysqlTimeoutVariable,
@@ -93,14 +94,14 @@ export async function createConnection(
         // MySQL is opened with a single connection (see openBunSql), so every
         // statement already shares one session.
         if (config.type === DB_TYPES.MYSQL) {
-            return runWrapped(sql as unknown as StatementRunner, wrapper, query);
+            return runWrapped(singleStatementRunner(sql), wrapper, query);
         }
 
         // Elsewhere, reserve a connection so the transaction and the statement
         // are guaranteed to share a session.
         const reserved = await sql.reserve();
         try {
-            return await runWrapped(reserved, wrapper, query);
+            return await runWrapped(singleStatementRunner(reserved), wrapper, query);
         } finally {
             reserved.release();
         }
@@ -123,17 +124,35 @@ export async function createConnection(
                 if (
                     config.type === DB_TYPES.MYSQL &&
                     mysqlVariable === 'max_execution_time' &&
-                    isUnknownVariableError(error)
+                    isUnknownTimeoutVariableError(error)
                 ) {
                     mysqlVariable = 'max_statement_time';
                     return runReadOnly(query).catch((retryError) =>
                         explainConnectError(explainTimeout(explainConnectTimeout(retryError, config), timeoutMs))
                     );
                 }
-                return explainConnectError(explainTimeout(explainConnectTimeout(error, config), timeoutMs));
+                return explainConnectError(
+                    explainMultipleStatements(explainTimeout(explainConnectTimeout(error, config), timeoutMs))
+                );
             }
         }),
         close: () => sql.close(),
+    };
+}
+
+/**
+ * A runner whose `single` sends the statement as a tagged-template query with
+ * no values. Bun prepares those, using the extended protocol on PostgreSQL and
+ * a prepared statement on MySQL, and both servers refuse more than one
+ * statement there. `unsafe` uses the simple protocol, which runs any number.
+ */
+function singleStatementRunner(sql: SQL | Bun.ReservedSQL): StatementRunner {
+    return {
+        unsafe: (query) => sql.unsafe(query) as Promise<unknown[]>,
+        single: (query) => {
+            const strings = Object.assign([query], { raw: [query] }) as unknown as TemplateStringsArray;
+            return sql(strings) as Promise<unknown[]>;
+        },
     };
 }
 

@@ -93,6 +93,19 @@ function endOfQuoted(sql: string, start: number, close: string, backslashEscapes
     return -1;
 }
 
+/**
+ * Where a line comment starting at `start` ends: at the next line break.
+ * PostgreSQL ends one at a carriage return as well as a line feed, so both
+ * count everywhere. Ending a comment early can only leave more text to be
+ * checked as code, never less.
+ */
+function endOfLineComment(sql: string, start: number): number {
+    for (let i = start; i < sql.length; i++) {
+        if (sql[i] === '\n' || sql[i] === '\r') return i;
+    }
+    return sql.length;
+}
+
 /** Index just past the end of a block comment starting at `start`, or -1 */
 function endOfBlockComment(sql: string, start: number, nested: boolean): number {
     let depth = 1;
@@ -130,16 +143,14 @@ export function scanSql(sql: string, dbType: DbType): ScanResult {
         if (char === '-' && next === '-') {
             const after = sql[i + 2];
             if (!dialect.dashCommentNeedsSpace || after === undefined || /\s/.test(after)) {
-                const end = sql.indexOf('\n', i);
-                i = end === -1 ? sql.length : end;
+                i = endOfLineComment(sql, i);
                 code += ' ';
                 continue;
             }
         }
 
         if (char === '#' && dialect.hashComments) {
-            const end = sql.indexOf('\n', i);
-            i = end === -1 ? sql.length : end;
+            i = endOfLineComment(sql, i);
             code += ' ';
             continue;
         }

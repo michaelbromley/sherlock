@@ -21,8 +21,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - **The agent skill is now a short pointer to `sherlock guide`.** It keeps the description that tells agents when to use sherlock, how to find the binary, and the rules that apply to every version. Everything else moved into the guide, so updating the binary updates what agents are told. Update the skill with `npx skills update sherlock -g`
-- Every PostgreSQL and MySQL/MariaDB statement now runs in a read-only transaction that is rolled back, so the database refuses writes the keyword check cannot see, such as those made by functions. SQLite connections refuse writes with `query_only`
-- The read-only check ignores string literals, quoted identifiers and comments, following each database's quoting rules. `WHERE action = 'delete'` and `SELECT 'a;b'` are no longer rejected. `SELECT ... INTO` and MySQL executable comments (`/*! ... */`) are now rejected
+- Every PostgreSQL and MySQL/MariaDB statement now runs in a read-only transaction that is rolled back, so the database refuses writes the keyword check cannot see, such as those made by functions. The statement is sent as a prepared statement, so the server also refuses a second statement chained after it. SQLite connections refuse writes with `query_only`
+- The read-only check ignores string literals, quoted identifiers and comments, following the quoting rules of the database the connection resolves to. Line comments end at a carriage return as well as a line feed. `WHERE action = 'delete'` and `SELECT 'a;b'` are no longer rejected. `SELECT ... INTO` and MySQL executable comments (`/*! ... */`) are now rejected
 - The default Northflank `endpointPattern` also matches the CLI's newer `exposed locally on` wording
 
 ### Fixed
