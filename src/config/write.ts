@@ -5,6 +5,7 @@
  * connection added either way lands in the same file with the same permissions.
  */
 
+import { usageError } from '../errors';
 import * as fs from 'fs';
 import * as path from 'path';
 import { getConfigDir, ensureConfigDir, findConfig, describeConfigSource, type ConfigSource, type FoundConfig } from './paths';
@@ -118,7 +119,7 @@ export function addConnection(
     const replaced = config.connections[name] !== undefined;
 
     if (replaced && !options.force) {
-        throw new Error(`Connection "${name}" already exists. Pass --force to replace it.`);
+        throw usageError(`Connection "${name}" already exists.`, '--force', 'Pass --force to replace it.');
     }
 
     config.connections[name] = connection;

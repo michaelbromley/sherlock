@@ -105,6 +105,15 @@ export interface TunnelState {
     /** Set when the tunnel failed to come up; includes the tail of the log */
     error?: string;
 
+    /** The error code of that failure, so the process that waits can report it */
+    errorCode?: string;
+
+    /** What to do about it */
+    errorFix?: string;
+
+    /** The failure's details. Never a secret. */
+    errorDetails?: Record<string, unknown>;
+
     /**
      * What is being forwarded: the command that was run, with `{{port}}` already
      * substituted, or a provider's description of its target. Never a secret.

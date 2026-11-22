@@ -27,6 +27,6 @@ describe('runSteps', () => {
     it('reports a step that throws as a failure', async () => {
         const result = await runSteps([async () => { throw new Error('boom'); }, async () => [check('x', 'pass')]]);
         expect(result.ok).toBe(false);
-        expect(result.checks).toEqual([{ name: 'unexpected error', status: 'fail', detail: 'boom' }]);
+        expect(result.checks).toEqual([{ name: 'unexpected error', status: 'fail', detail: 'boom', code: 'INTERNAL' }]);
     });
 });

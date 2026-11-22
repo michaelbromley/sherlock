@@ -7,7 +7,8 @@ import { RedisClient } from 'bun';
 import { resolveConnection } from '../config';
 import { startTunnelKeepalive } from '../tunnel/manager';
 import type { ResolvedConnectionConfig } from '../config/types';
-import { connectTimeoutFor, explainConnectFailure } from '../db/connect-timeout';
+import { connectTimeoutFor } from '../db/connect-timeout';
+import { classifyDbError } from '../db/errors';
 
 /**
  * Create a Redis connection from resolved config
@@ -30,7 +31,7 @@ export async function withRedisConnectionFromConfig<T>(
         client = createRedisConnection(config);
         return await handler(client);
     } catch (error) {
-        throw explainConnectFailure(error, config);
+        throw classifyDbError(error, config);
     } finally {
         if (client) {
             client.close();
@@ -58,7 +59,7 @@ export async function withRedisConnection<T>(
         client = createRedisConnection(config);
         return await handler(client);
     } catch (error) {
-        throw config ? explainConnectFailure(error, config) : error;
+        throw config ? classifyDbError(error, config) : error;
     } finally {
         stopKeepalive?.();
         if (client) {

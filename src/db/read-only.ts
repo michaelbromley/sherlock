@@ -15,6 +15,7 @@
  */
 
 import { DB_TYPES, type DbType } from '../db-types';
+import { SherlockError } from '../errors';
 
 /** How long a statement may run when the connection does not say */
 export const DEFAULT_STATEMENT_TIMEOUT = '60s';
@@ -117,11 +118,22 @@ export function isUnknownTimeoutVariableError(error: unknown): boolean {
     return /unknown system variable '?max_execution_time/i.test(message);
 }
 
-/** Replace the server's refusal of a second statement with sherlock's own wording */
+/**
+ * Replace the server's refusal of a second statement with sherlock's own
+ * wording. The server refused it, not sherlock's check, so it is QUERY_FAILED.
+ */
 export function explainMultipleStatements(error: unknown): unknown {
     const message = error instanceof Error ? error.message : String(error);
     if (!/cannot insert multiple commands into a prepared statement/i.test(message)) return error;
-    return new Error('Multiple statements are not allowed (read-only mode). The database refused the query.');
+    return new SherlockError(
+        'QUERY_FAILED',
+        'Multiple statements are not allowed (read-only mode). The database refused the query.',
+        {
+            fix: 'Send one statement at a time.',
+            details: { dbCode: (error as { errno?: unknown }).errno ?? '42601' },
+            cause: error,
+        }
+    );
 }
 
 /**
@@ -137,9 +149,14 @@ export function explainTimeout(error: unknown, timeoutMs: number): unknown {
         /timeout: request failed to complete/i.test(message);
     if (!timedOut) return error;
 
-    return new Error(
-        `Query cancelled after ${formatMs(timeoutMs)}, the connection's statement timeout. ` +
-        `Give it longer with --timeout on the query, or "statementTimeout" on the connection.`
+    return new SherlockError(
+        'QUERY_TIMEOUT',
+        `Query cancelled after ${formatMs(timeoutMs)}, the connection's statement timeout.`,
+        {
+            fix: 'Give it longer with --timeout on the query, or "statementTimeout" on the connection.',
+            details: { timeoutMs },
+            cause: error,
+        }
     );
 }
 

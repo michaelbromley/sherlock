@@ -177,9 +177,9 @@ function findDangerousKeyword(query: string): string | null {
 /** The error for a query the read-only check refused */
 export function queryRefusedError(result: ValidationResult, fix?: string): SherlockError {
     return new SherlockError('QUERY_REFUSED', result.error ?? 'The query is not read-only.', {
-        fix: fix ?? result.reason === 'KEYWORD'
+        fix: fix ?? (result.reason === 'KEYWORD'
             ? 'Remove the statement that writes, or quote the word if it is a name.'
-            : 'Send one read-only statement: SELECT, WITH, SHOW, DESCRIBE or EXPLAIN.',
+            : 'Send one read-only statement: SELECT, WITH, SHOW, DESCRIBE or EXPLAIN.'),
         details: {
             reason: result.reason ?? 'NOT_READ_ONLY',
             ...(result.keyword !== undefined && { keyword: result.keyword }),

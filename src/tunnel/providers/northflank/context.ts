@@ -7,6 +7,7 @@
  * and nothing here ever writes to the file.
  */
 
+import { SherlockError } from '../../../errors';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -56,9 +57,10 @@ export function loadNorthflankContext(
     try {
         content = fs.readFileSync(file, 'utf-8');
     } catch {
-        throw new Error(
-            `Cannot read the Northflank CLI config at ${file}. Log in with "northflank login", ` +
-            `or set "configDir" on the tunnel to the directory that holds config.json.`
+        throw loginError(
+            name,
+            `Cannot read the Northflank CLI config at ${file}.`,
+            `Log in with "northflank login", or set "configDir" on the tunnel to the directory that holds config.json.`
         );
     }
 
@@ -67,7 +69,7 @@ export function loadNorthflankContext(
         contexts = (JSON.parse(content) as { contexts?: unknown }).contexts;
     } catch {
         // The parse error would quote the file, which holds tokens.
-        throw new Error(`The Northflank CLI config at ${file} is not valid JSON.`);
+        throw loginError(name, `The Northflank CLI config at ${file} is not valid JSON.`, `Log in again with "northflank login".`);
     }
 
     const list = (Array.isArray(contexts) ? contexts : []).filter(
@@ -78,15 +80,16 @@ export function loadNorthflankContext(
 
     if (!found) {
         const names = list.map((entry) => `"${entry.name as string}"`).join(', ');
-        throw new Error(
-            `No Northflank context named "${name}" in ${file}. ` +
-            (names ? `It has: ${names}.` : 'It has no contexts: log in with "northflank login".')
+        throw loginError(
+            name,
+            `No Northflank context named "${name}" in ${file}.` + (names ? ` It has: ${names}.` : ' It has no contexts.'),
+            names
+                ? `Set "context" on the tunnel to one of them, or log in as "${name}" with: northflank login --name ${name}`
+                : `Log in with: northflank login --name ${name}`
         );
     }
     if (typeof found.token !== 'string' || found.token === '') {
-        throw new Error(
-            `Northflank context "${name}" in ${file} has no token. Log in again with "northflank login".`
-        );
+        throw loginError(name, `Northflank context "${name}" in ${file} has no token.`, `Log in again with: northflank login --name ${name}`);
     }
 
     return {
@@ -121,4 +124,9 @@ export function listNorthflankContextNames(
 /** Remove a token from text that is about to be shown or logged */
 export function redactToken(text: string, token: string): string {
     return token ? text.split(token).join('[redacted]') : text;
+}
+
+/** The Northflank login a tunnel names cannot be used. Never includes a token. */
+function loginError(context: string, message: string, fix: string): SherlockError {
+    return new SherlockError('PROVIDER_AUTH', message, { fix, details: { provider: 'northflank', context } });
 }

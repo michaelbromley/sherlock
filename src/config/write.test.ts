@@ -47,9 +47,12 @@ describe('addConnection', () => {
         addConnection('prod', { ...CONNECTION });
         clearConfigCache();
 
-        expect(() => addConnection('prod', { ...CONNECTION, host: 'other' })).toThrow(
-            /already exists.*--force/s
-        );
+        expect(() => addConnection('prod', { ...CONNECTION, host: 'other' })).toThrow(/already exists/);
+        try {
+            addConnection('prod', { ...CONNECTION, host: 'other' });
+        } catch (error) {
+            expect(error).toMatchObject({ code: 'USAGE', fix: 'Pass --force to replace it.', details: { flag: '--force' } });
+        }
     });
 
     it('leaves the existing connection untouched when it refuses', () => {

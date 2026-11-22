@@ -826,16 +826,18 @@ Every query runs in a read-only transaction that is rolled back afterwards.`)
                 const validation = validateReadOnlyQuery(sqlQuery, dbType as DbType);
                 if (!validation.valid) throw queryRefusedError(validation);
 
-                const result = await executeQuery(sql, sqlQuery);
-
                 // Log if enabled (ad hoc --url connections have logging disabled)
-                if (!opts._resolvedConfig) {
-                    const connConfig = getConnectionConfig(opts.connection, opts.config);
-                    const loggingEnabled = connConfig.logging === true && opts.log !== false;
-                    if (loggingEnabled) {
-                        logQuery(opts.connection, sqlQuery, result);
-                    }
+                const loggingEnabled = !opts._resolvedConfig &&
+                    getConnectionConfig(opts.connection, opts.config).logging === true && opts.log !== false;
+
+                let result;
+                try {
+                    result = await executeQuery(sql, sqlQuery);
+                } catch (error: unknown) {
+                    if (loggingEnabled) logQuery(opts.connection, sqlQuery, { error: errorMessage(error) });
+                    throw error;
                 }
+                if (loggingEnabled) logQuery(opts.connection, sqlQuery, result);
 
                 const format = opts.format as OutputFormat;
                 console.log(formatOutput(result, format));

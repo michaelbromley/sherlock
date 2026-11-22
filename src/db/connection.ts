@@ -10,11 +10,10 @@ import type { ResolvedConnectionConfig } from '../config/types';
 import { DB_TYPES, parseBoolParam } from '../db-types';
 import { MssqlAdapter, type SqlAdapter } from './mssql-adapter';
 import { parseDuration } from '../tunnel/config';
-import { connectTimeoutFor, connectTimeoutSeconds, explainConnectFailure } from './connect-timeout';
+import { connectTimeoutFor, connectTimeoutSeconds } from './connect-timeout';
+import { classifyDbError } from './errors';
 import {
     DEFAULT_STATEMENT_TIMEOUT,
-    explainTimeout,
-    explainMultipleStatements,
     isUnknownTimeoutVariableError,
     readOnlyWrapper,
     runWrapped,
@@ -56,11 +55,11 @@ export async function createConnection(
             requestTimeoutMs: timeoutMs,
             connectTimeoutMs: connectTimeoutFor(config),
         }).catch((error) => {
-            throw explainConnectFailure(error, config);
+            throw classifyDbError(error, config);
         });
         return {
             unsafe: (query: string) => adapter.unsafe(query).catch((error) => {
-                throw explainTimeout(error, timeoutMs);
+                throw classifyDbError(error, config, timeoutMs);
             }),
             close: () => adapter.close(),
         };
@@ -75,9 +74,13 @@ export async function createConnection(
         let readOnly: Promise<unknown> | null = null;
         return {
             unsafe: async (query: string) => {
-                readOnly ??= sql.unsafe('PRAGMA query_only = ON');
-                await readOnly;
-                return (await sql.unsafe(query)) as unknown[];
+                try {
+                    readOnly ??= sql.unsafe('PRAGMA query_only = ON');
+                    await readOnly;
+                    return (await sql.unsafe(query)) as unknown[];
+                } catch (error) {
+                    throw classifyDbError(error, config);
+                }
             },
             close: () => sql.close(),
         };
@@ -127,13 +130,11 @@ export async function createConnection(
                     isUnknownTimeoutVariableError(error)
                 ) {
                     mysqlVariable = 'max_statement_time';
-                    return runReadOnly(query).catch((retryError) =>
-                        explainConnectError(explainTimeout(explainConnectFailure(retryError, config), timeoutMs))
-                    );
+                    return runReadOnly(query).catch((retryError) => {
+                        throw classifyDbError(retryError, config, timeoutMs);
+                    });
                 }
-                return explainConnectError(
-                    explainMultipleStatements(explainTimeout(explainConnectFailure(error, config), timeoutMs))
-                );
+                throw classifyDbError(error, config, timeoutMs);
             }
         }),
         close: () => sql.close(),
@@ -185,24 +186,6 @@ function openBunSql(config: ResolvedConnectionConfig): SQL {
     // The Bun runtime supports this option, but the pinned bun-types predate it
     const options = { ...pool, allowPublicKeyRetrieval } as Bun.SQL.PostgresOrMySQLOptions;
     return new SQL(parsed.toString(), options);
-}
-
-/**
- * Replace Bun's MySQL public key error, which names a Bun option, with one
- * that names the sherlock settings that fix it.
- */
-function explainConnectError(error: unknown): never {
-    if ((error as { code?: string } | null)?.code === 'ERR_MYSQL_PUBLIC_KEY_RETRIEVAL_NOT_ALLOWED') {
-        throw new Error(
-            'MySQL needs TLS or the server\'s RSA public key to log in this user (caching_sha2_password). ' +
-            'Set "ssl": true on the connection, or add ?ssl-mode=REQUIRED to the URL. ' +
-            'If the server does not support TLS and you trust the network between you and the ' +
-            'server (localhost, an SSH tunnel), set "allowPublicKeyRetrieval": true, or add ' +
-            '?allowPublicKeyRetrieval=true to the URL. Without TLS, anyone who can intercept the ' +
-            'connection can substitute their own key and read the password.'
-        );
-    }
-    throw error;
 }
 
 /**

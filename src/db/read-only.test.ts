@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'bun:test';
 import { explainMultipleStatements, explainTimeout, readOnlyWrapper, runWrapped, isUnknownTimeoutVariableError } from './read-only';
+import type { SherlockError } from '../errors';
 
 function recorder(failOn?: string) {
     const statements: string[] = [];
@@ -96,8 +97,11 @@ describe('explainTimeout', () => {
         'Query execution was interrupted, maximum statement execution time exceeded',
         'Timeout: Request failed to complete in 60000ms',
     ])('names the setting for "%s"', (message) => {
-        const explained = explainTimeout(new Error(message), 60_000) as Error;
-        expect(explained.message).toMatch(/cancelled after 1m.*--timeout.*"statementTimeout"/);
+        const explained = explainTimeout(new Error(message), 60_000) as SherlockError;
+        expect(explained.code).toBe('QUERY_TIMEOUT');
+        expect(explained.message).toMatch(/cancelled after 1m/);
+        expect(explained.fix).toMatch(/--timeout.*"statementTimeout"/);
+        expect(explained.details).toEqual({ timeoutMs: 60_000 });
     });
 
     it('leaves other errors alone', () => {

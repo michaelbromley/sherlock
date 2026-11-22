@@ -26,6 +26,7 @@ import {
     writeState,
 } from './state';
 import type { TunnelState } from './types';
+import { errorMessage, isSherlockError } from '../errors';
 
 /** How often the supervisor checks whether it should shut down */
 const HEARTBEAT_MS = 2000;
@@ -99,12 +100,23 @@ export async function runSupervisor(connectionName: string, configPath?: string)
         logFile,
     } satisfies TunnelState;
 
-    /** Record why the tunnel failed, with the tail of its log, and give up */
-    const fail = (reason: string): number => {
+    /**
+     * Record why the tunnel failed, with the tail of its log, and give up. A
+     * classified error, such as a provider rejecting the login, keeps its code;
+     * anything else is TUNNEL_FAILED.
+     */
+    const fail = (error: unknown): number => {
+        const reason = errorMessage(error);
         const tail = readLogTail(connectionName);
+        const classified = isSherlockError(error) ? error : null;
         writeState({
             ...stateBase,
-            error: withSudoHint(tail ? `${reason}\n\nLast output:\n${tail}` : reason, tail),
+            // A classified error says what went wrong; the log tail is for one that does not.
+            error: classified ? reason : withSudoHint(tail ? `${reason}\n\nLast output:\n${tail}` : reason, tail),
+            errorCode: classified?.code ?? 'TUNNEL_FAILED',
+            ...(classified?.fix !== undefined && { errorFix: classified.fix }),
+            // Each code has its own details keys; TUNNEL_FAILED's are these two.
+            errorDetails: classified ? { provider: tunnel.providerId, ...classified.details } : { provider: tunnel.providerId, logFile },
         });
         releaseLock(connectionName);
         closeLog();
@@ -127,9 +139,8 @@ export async function runSupervisor(connectionName: string, configPath?: string)
             findFreePort,
         });
     } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        log(`failed to start: ${message}`);
-        return fail(message);
+        log(`failed to start: ${errorMessage(error)}`);
+        return fail(error);
     }
 
     const baseState: TunnelState = {

@@ -1,5 +1,6 @@
 import type { CredentialProvider } from '../types';
 import type { CredentialRef } from '../../config/types';
+import { SherlockError } from '../../errors';
 
 /**
  * Environment variable credential provider
@@ -22,7 +23,10 @@ export class EnvProvider implements CredentialProvider {
         const value = process.env[envVar];
 
         if (value === undefined) {
-            throw new Error(`Environment variable not set: ${envVar}`);
+            throw new SherlockError('CREDENTIAL_MISSING', `Environment variable not set: ${envVar}`, {
+                fix: `Set ${envVar} in the environment, or in the .env file next to the config.`,
+                details: { source: 'env' },
+            });
         }
 
         return value;

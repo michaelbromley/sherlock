@@ -126,4 +126,6 @@ export interface ResolvedConnectionConfig {
     connectionName?: string;
     /** True when the URL points at a tunnel rather than the database itself */
     tunnelled?: boolean;
+    /** The tunnel's provider, e.g. "northflank" or "command", when tunnelled */
+    tunnelProvider?: string;
 }

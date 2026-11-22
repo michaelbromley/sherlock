@@ -8,6 +8,7 @@ import type { ConnectionConfig, CredentialRef } from '../config/types';
 import { DB_TYPES } from '../db-types';
 import { connectionEnvVarName } from './providers/env';
 import { hasKeychainPassword } from './providers/keychain';
+import { errorMessage } from '../errors';
 
 export interface CredentialStatus {
     /** False when the credential is configured but cannot be found */
@@ -53,9 +54,14 @@ export function credentialSource(
     const account = typeof ref === 'string' ? ref : ref.account;
     const service = typeof ref === 'string' ? undefined : ref.service;
     const label = `OS keychain (${service ?? 'sherlock'}/${account})`;
-    return hasKeychainPassword(account, service)
-        ? { ok: true, source: label }
-        : { ok: false, source: `${label}, which has no such entry` };
+    try {
+        return hasKeychainPassword(account, service)
+            ? { ok: true, source: label }
+            : { ok: false, source: `${label}, which has no such entry` };
+    } catch (error) {
+        // A locked or missing keychain: report this entry, not the whole listing.
+        return { ok: false, source: `${label}, which could not be read: ${errorMessage(error)}` };
+    }
 }
 
 /** Where a connection's password comes from, including when it needs none */

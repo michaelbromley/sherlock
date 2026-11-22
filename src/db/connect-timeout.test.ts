@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'bun:test';
 import * as net from 'node:net';
 import { connectTimeoutFor, connectTimeoutSeconds, explainConnectFailure, isConnectTimeoutError } from './connect-timeout';
+import type { SherlockError } from '../errors';
 import { createConnection } from './connection';
 import { createRedisConnection } from '../redis/connection';
 
@@ -32,20 +33,31 @@ describe('explainConnectFailure', () => {
     it('points at the tunnel when the connection goes through one', () => {
         const explained = explainConnectFailure(timeoutError('ERR_POSTGRES_CONNECTION_TIMEOUT'), {
             type: 'postgres', url: 'x', connectionName: 'prod', tunnelled: true, connectTimeoutMs: 5000,
-        }) as Error;
-        expect(explained.message).toMatch(/did not answer within 5s.*goes through a tunnel.*sherlock tunnel stop prod.*sherlock doctor prod.*"connectTimeout"/);
+        }) as SherlockError;
+        expect(explained.code).toBe('CONNECT_TIMEOUT');
+        expect(explained.message).toMatch(/did not answer within 5s.*goes through a tunnel/);
+        expect(explained.fix).toMatch(/sherlock tunnel stop prod.*sherlock doctor prod.*"connectTimeout"/);
+        expect(explained.details).toEqual({ timeoutMs: 5000 });
     });
 
     it('points at the host and port when there is no tunnel', () => {
-        const explained = explainConnectFailure(timeoutError('ERR_MYSQL_CONNECTION_TIMEOUT'), { type: 'mysql', url: 'x' }) as Error;
-        expect(explained.message).toMatch(/did not answer within 10s. Check that the host and port/);
-        expect(explained.message).not.toMatch(/tunnel/);
+        const explained = explainConnectFailure(timeoutError('ERR_MYSQL_CONNECTION_TIMEOUT'), { type: 'mysql', url: 'mysql://u@db:3307/d' }) as SherlockError;
+        expect(explained.code).toBe('CONNECT_TIMEOUT');
+        expect(explained.message).toBe('The database did not answer within 10s.');
+        expect(explained.fix).toMatch(/^Check that the host and port/);
+        expect(explained.fix).not.toMatch(/tunnel/);
+        expect(explained.details).toEqual({ host: 'db', port: 3307, timeoutMs: 10_000 });
     });
 
     it('explains a connection the tunnel closed before the database answered', () => {
         const closed = Object.assign(new Error('Connection closed before the connection was established'), { code: 'ERR_POSTGRES_CONNECTION_FAILED' });
-        const explained = explainConnectFailure(closed, { type: 'postgres', url: 'x', connectionName: 'prod', tunnelled: true }) as Error;
-        expect(explained.message).toMatch(/tunnel accepted the connection and then closed it.*sherlock tunnel stop prod/);
+        const explained = explainConnectFailure(closed, {
+            type: 'postgres', url: 'postgres://u:p@127.0.0.1:40001/d', connectionName: 'prod', tunnelled: true, tunnelProvider: 'northflank',
+        }) as SherlockError;
+        expect(explained.code).toBe('TUNNEL_DOWN');
+        expect(explained.message).toMatch(/tunnel accepted the connection and then closed it/);
+        expect(explained.fix).toMatch(/sherlock tunnel stop prod/);
+        expect(explained.details).toEqual({ provider: 'northflank', host: '127.0.0.1', port: 40001 });
         // Without a tunnel the driver's own message is accurate already.
         expect(explainConnectFailure(closed, { type: 'postgres', url: 'x' })).toBe(closed);
     });
@@ -109,9 +121,12 @@ describe('explainConnectFailure for unreachable servers', () => {
     it('names the host and port, never the credentials', () => {
         const explained = explainConnectFailure(refused('ERR_POSTGRES_CONNECTION_REFUSED'), {
             type: 'postgres', url: 'postgres://app:hunter2@db.internal:5433/app', connectionName: 'prod',
-        }) as Error;
-        expect(explained.message).toMatch(/Could not connect to db.internal:5433: nothing answered.*sherlock doctor prod.*"tunnel"/);
-        expect(explained.message).not.toContain('hunter2');
+        }) as SherlockError;
+        expect(explained.code).toBe('CONNECT_REFUSED');
+        expect(explained.message).toMatch(/Could not connect to db.internal:5433: nothing answered/);
+        expect(explained.fix).toMatch(/sherlock doctor prod.*"tunnel"/);
+        expect(explained.details).toEqual({ host: 'db.internal', port: 5433 });
+        expect(JSON.stringify(explained.details) + explained.message + explained.fix).not.toContain('hunter2');
     });
 
     it('covers MySQL and Redis, whose messages say even less', () => {
@@ -124,7 +139,9 @@ describe('explainConnectFailure for unreachable servers', () => {
     it('says the tunnel stopped accepting when the connection goes through one', () => {
         const explained = explainConnectFailure(refused('ERR_POSTGRES_CONNECTION_REFUSED'), {
             type: 'postgres', url: 'postgres://u:p@127.0.0.1:40001/d', connectionName: 'prod', tunnelled: true,
-        }) as Error;
-        expect(explained.message).toMatch(/tunnel on 127.0.0.1:40001: it is no longer accepting.*sherlock tunnel stop prod/);
+        }) as SherlockError;
+        expect(explained.code).toBe('TUNNEL_DOWN');
+        expect(explained.message).toMatch(/tunnel on 127.0.0.1:40001: it is no longer accepting/);
+        expect(explained.fix).toMatch(/sherlock tunnel stop prod/);
     });
 });

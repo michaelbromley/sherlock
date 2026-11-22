@@ -5,6 +5,7 @@
 
 import { DB_TYPES, type DbType } from '../db-types';
 import type { SqlAdapter } from './mssql-adapter';
+import { SherlockError, usageError } from '../errors';
 
 /** Valid SQL identifier pattern (prevents injection via malicious names) */
 const SAFE_IDENTIFIER = /^[a-zA-Z_][a-zA-Z0-9_]*$/;
@@ -25,7 +26,11 @@ export function quoteIdentifier(name: string, dbType: DbType): string {
  */
 export function validateIdentifier(name: string, type: 'table' | 'column'): void {
     if (!SAFE_IDENTIFIER.test(name)) {
-        throw new Error(`Invalid ${type} name: "${name}". Names must start with a letter or underscore and contain only alphanumeric characters and underscores.`);
+        throw usageError(
+            `Invalid ${type} name: "${name}". Names must start with a letter or underscore and contain only alphanumeric characters and underscores.`,
+            undefined,
+            `To query a table with another name, use: sherlock query "SELECT ... FROM <quoted name>"`
+        );
     }
 }
 
@@ -41,7 +46,10 @@ export async function validateTableExists(
     validateIdentifier(tableName, 'table');
     const validTables = await getTables(sql, dbType);
     if (!validTables.includes(tableName)) {
-        throw new Error(`Table "${tableName}" not found. List the tables with: sherlock -c <connection> tables`);
+        throw new SherlockError('NOT_FOUND', `Table "${tableName}" not found.`, {
+            fix: 'List the tables with: sherlock -c <connection> tables',
+            details: { kind: 'table', name: tableName },
+        });
     }
 }
 
@@ -532,14 +540,11 @@ export async function executeQuery(
     sql: SqlAdapter,
     query: string
 ): Promise<QueryResult> {
-    try {
-        const result = await sql.unsafe(query);
-        return {
-            rowCount: Array.isArray(result) ? result.length : 0,
-            rows: result,
-        };
-    } catch (error: unknown) {
-        const message = error instanceof Error ? error.message : String(error);
-        return { error: message };
-    }
+    // A failure is thrown, already classified by the connection, so a query
+    // the database rejects fails the command rather than printing as a result.
+    const result = await sql.unsafe(query);
+    return {
+        rowCount: Array.isArray(result) ? result.length : 0,
+        rows: result,
+    };
 }

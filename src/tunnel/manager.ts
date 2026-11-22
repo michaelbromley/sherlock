@@ -20,12 +20,14 @@ import {
     isProcessAlive,
     listTunnelStates,
     lockPath,
+    logPath,
     readLogTail,
     releaseLock,
     readState,
     touchLastUsed,
 } from './state';
 import type { TunnelConfig, TunnelState } from './types';
+import { SherlockError, isErrorCode } from '../errors';
 
 /** Where a running tunnel can be reached locally */
 export interface TunnelEndpoint {
@@ -128,7 +130,7 @@ async function waitForReadyState(connectionName: string, timeoutMs: number): Pro
 
         if (state?.error) {
             clearState(connectionName);
-            throw new Error(state.error);
+            throw tunnelStartError(connectionName, state);
         }
         if (state?.ready) return state;
 
@@ -136,11 +138,25 @@ async function waitForReadyState(connectionName: string, timeoutMs: number): Pro
     }
 
     const tail = readLogTail(connectionName);
+    const state = readState(connectionName);
     clearState(connectionName);
-    throw new Error(
-        `Timed out waiting for tunnel "${connectionName}" to start.` +
-            (tail ? `\n\nLast output:\n${tail}` : '')
+    throw new SherlockError(
+        'TUNNEL_FAILED',
+        `Timed out waiting for tunnel "${connectionName}" to start.` + (tail ? `\n\nLast output:\n${tail}` : ''),
+        {
+            fix: `Run 'sherlock doctor ${connectionName}' to find out why, or raise "readyTimeout" on the tunnel.`,
+            details: { provider: state?.provider, logFile: logPath(connectionName) },
+        }
     );
+}
+
+/** The error a supervisor recorded, with the code it gave it */
+function tunnelStartError(connectionName: string, state: TunnelState): SherlockError {
+    const code = isErrorCode(state.errorCode) ? state.errorCode : 'TUNNEL_FAILED';
+    return new SherlockError(code, state.error ?? 'The tunnel did not start.', {
+        fix: state.errorFix ?? `Run 'sherlock doctor ${connectionName}' to find out why.`,
+        details: state.errorDetails ?? { provider: state.provider, logFile: state.logFile },
+    });
 }
 
 /** Launch the detached supervisor that owns the forwarding process */

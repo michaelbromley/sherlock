@@ -10,6 +10,7 @@
  * it in `./index.ts`. Nothing else needs to change.
  */
 
+import type { ErrorCode } from '../../errors';
 import type { DbType } from '../../db-types';
 import type { TunnelConfig } from '../types';
 
@@ -53,6 +54,8 @@ export interface DiagnosticCheck {
     detail: string;
     /** What to change, when the check failed */
     fix?: string;
+    /** The cause of a failed check, as an error code: what `doctor` reports as its error */
+    code?: ErrorCode;
 }
 
 /** What a provider is told about the connection it is diagnosing */
