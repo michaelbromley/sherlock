@@ -930,6 +930,19 @@ Every query runs in a read-only transaction that is rolled back afterwards.`)
         });
 
     program
+        .command('guide [topic]')
+        .description('Print the guide for AI agents using sherlock (topics: transfer)')
+        .action(async (topic: string | undefined) => {
+            const { guideText } = await import('./guide');
+            try {
+                process.stdout.write(guideText(topic, pkg.version));
+            } catch (error: unknown) {
+                console.error(`Error: ${getErrorMessage(error)}`);
+                process.exit(1);
+            }
+        });
+
+    program
         .command('doctor [connectionName]')
         .description('Check a connection step by step and report the first thing that is wrong')
         .addHelpText('after', `
