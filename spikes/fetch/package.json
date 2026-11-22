@@ -1,0 +1,10 @@
+{
+  "name": "sherlock-fetch-spike",
+  "private": true,
+  "description": "Step 4 of the 2.0 contract: how each driver can stop after maxRows + 1 rows, and where column names come from. Not part of the build.",
+  "dependencies": {
+    "mssql": "^12.2.0",
+    "mysql2": "^3.24.6",
+    "postgres": "^4.1.1"
+  }
+}
