@@ -5,6 +5,39 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Tunnel providers.** A `tunnel` block can name a `provider` instead of giving a `command`. The first is `northflank`, which forwards an addon through the Northflank API using a named context from the Northflank CLI config (`"context"`, `"project"`, `"addon"`). It never reads or changes the CLI's current context, needs no root, and defaults to the addon's read replica when it has one (`"endpoint": "read" | "primary"`). `"configDir"` points at a separate CLI config directory. A `tunnel` block with no `provider` behaves exactly as before
+- `connection add --tunnel-provider <id> --tunnel-option key=value` sets up a provider tunnel without the wizard
+- The `sherlock manage` wizard sets up provider tunnels too. It first asks how the database is reached, then asks the provider's own questions: for Northflank, pick a context from the CLI config, then a project and a database addon listed from the API. An existing provider tunnel can be edited there rather than only in config.json
+- `sherlock doctor <connection>` checks a connection in order: config, tunnel target against the configured host, provider access, credentials, tunnel, TLS and `SELECT 1`. It stops at the first failure and says what to change
+- `query --file <path>`, and `query -` to read the query from stdin
+- `query --timeout <duration>` and a `statementTimeout` connection setting. Statements are cancelled after 60s by default
+- `connection list` reports each connection's type, target and tunnel alongside the names
+- A `connectTimeout` connection setting, default 10s. A connection through a tunnel whose far end is gone now fails within it, with an error that says the tunnel is the problem and how to restart it, instead of waiting 30s per connection
+
+### Changed
+
+- Every PostgreSQL and MySQL/MariaDB statement now runs in a read-only transaction that is rolled back, so the database refuses writes the keyword check cannot see, such as those made by functions. The statement is sent as a prepared statement, so the server also refuses a second statement chained after it. SQLite connections refuse writes with `query_only`
+- The read-only check ignores string literals, quoted identifiers and comments, following the quoting rules of the database the connection resolves to. Line comments end at a carriage return as well as a line feed. `WHERE action = 'delete'` and `SELECT 'a;b'` are no longer rejected. `SELECT ... INTO` and MySQL executable comments (`/*! ... */`) are now rejected
+- The default Northflank `endpointPattern` also matches the CLI's newer `exposed locally on` wording
+
+### Fixed
+
+- The hidden `sherlock test <connection>` command no longer fails on SQL connections
+- `connection add --directory .` stored the relative path, which made the connection auto-select in every directory. Directories are now stored absolute
+- A connection that cannot reach its server says which host and port it tried, instead of "Failed to connect" or "Max reconnection attempts reached"
+- The read-only check allows the `REPLACE()` and `TRUNCATE()` functions and a column called `comment`, and suggests quoting when a keyword may be a name
+- A query that would be refused is refused before a tunnel is started, when the config says which database it is
+- Editing a connection in `sherlock manage` keeps its `statementTimeout` and `connectTimeout`
+- An unparseable connection URL is no longer quoted, password included, in the error
+- A tunnel block with a provider's settings but no `"provider"` says which provider it looks like
+- `connection add` suggests `info` rather than `tables` for Redis, and `doctor` for a tunnelled connection; notes a connection stored with no password and `--ssl verify` combined with a tunnel; and refuses `--password-stdin` from a terminal instead of waiting forever
+- Tunnels are reported in one shape everywhere (`kind`, `provider`, `target`, `details`) by `connection add`, `connection list` and `tunnel status`
+- `doctor` advises on a missing credential by its cause, and no longer suggests `echo`ing a password
+
 ## [1.9.1] - 2026-10-15
 
 ### Added

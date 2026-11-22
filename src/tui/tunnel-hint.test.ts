@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'bun:test';
-import { tunnelHintLabel } from './index';
+import { carryOverUnprompted, tunnelHintLabel } from './index';
 
 // Rendered for every non-SQLite connection whenever the edit menu opens, so it
 // has to cope with each shape a tunnel config can take, including none at all.
@@ -26,5 +26,19 @@ describe('tunnelHintLabel', () => {
         expect(tunnelHintLabel({ command: 'fwd {{port}}', idleTimeout: '30s' })).toBe(
             'auto port, idle 30s'
         );
+    });
+});
+
+describe('carryOverUnprompted', () => {
+    it('keeps the timeouts the wizard does not ask about when a connection is edited', () => {
+        const edited = { type: 'postgres' as const, host: 'new-host' };
+        carryOverUnprompted({ type: 'postgres', host: 'old', statementTimeout: '5m', connectTimeout: '30s' }, edited);
+        expect(edited).toEqual({ type: 'postgres', host: 'new-host', statementTimeout: '5m', connectTimeout: '30s' });
+    });
+
+    it('adds nothing for a new connection', () => {
+        const added = { type: 'postgres' as const };
+        carryOverUnprompted(undefined, added);
+        expect(added).toEqual({ type: 'postgres' });
     });
 });

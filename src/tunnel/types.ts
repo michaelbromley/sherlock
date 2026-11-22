@@ -7,8 +7,22 @@
  * and shuts it down once nobody has used it for a while.
  */
 
-/** Tunnel settings as written in the config file */
-export interface TunnelConfig {
+/** Settings every tunnel accepts, whichever provider opens it */
+export interface TunnelCommonConfig {
+    /** Shut the tunnel down after this long with no queries. Default "10m". */
+    idleTimeout?: string;
+
+    /** How long to wait for the local port to start accepting. Default "30s". */
+    readyTimeout?: string;
+}
+
+/**
+ * A tunnel opened by running a shell command. This is the form a `tunnel` block
+ * takes when it names no `provider`.
+ */
+export interface CommandTunnelConfig extends TunnelCommonConfig {
+    provider?: undefined;
+
     /**
      * Shell command that forwards a remote port to localhost. `{{port}}` is
      * replaced with the local port before the command runs.
@@ -30,15 +44,27 @@ export interface TunnelConfig {
      * (defaulting to 127.0.0.1). Mutually exclusive with `localPort` and
      * `{{port}}`, since those dictate an endpoint rather than discovering one.
      *
-     * e.g. "exposed on (?<host>[\\d.]+):(?<port>\\d+)" for `northflank forward`.
+     * e.g. "Forwarding from (?<host>[\\d.]+):(?<port>\\d+)".
      */
     endpointPattern?: string;
+}
 
-    /** Shut the tunnel down after this long with no queries. Default "10m". */
-    idleTimeout?: string;
+/**
+ * A tunnel opened by a named provider. Everything other than the common
+ * settings belongs to the provider, which validates it.
+ */
+export interface ProviderTunnelConfig extends TunnelCommonConfig {
+    /** Id of a registered tunnel provider */
+    provider: string;
+    [option: string]: unknown;
+}
 
-    /** How long to wait for the local port to start accepting. Default "30s". */
-    readyTimeout?: string;
+/** Tunnel settings as written in the config file */
+export type TunnelConfig = CommandTunnelConfig | ProviderTunnelConfig;
+
+/** Whether a tunnel block names a provider, rather than giving a shell command */
+export function isProviderTunnel(tunnel: TunnelConfig): tunnel is ProviderTunnelConfig {
+    return typeof (tunnel as ProviderTunnelConfig).provider === 'string';
 }
 
 /**
@@ -62,8 +88,9 @@ export interface TunnelState {
     supervisorPid: number;
 
     /**
-     * PID of the forwarding command itself. Also its process group id, since
-     * the supervisor spawns it detached so the whole tree can be signalled.
+     * PID of the forwarding command, when the tunnel is a separate process.
+     * Also its process group id, since it is spawned detached so the whole tree
+     * can be signalled. -1 when the provider forwards inside the supervisor.
      */
     childPid: number;
 
@@ -78,8 +105,14 @@ export interface TunnelState {
     /** Set when the tunnel failed to come up; includes the tail of the log */
     error?: string;
 
-    /** The command that was run, with `{{port}}` already substituted */
+    /**
+     * What is being forwarded: the command that was run, with `{{port}}` already
+     * substituted, or a provider's description of its target. Never a secret.
+     */
     command: string;
+
+    /** Id of the provider that opened the tunnel */
+    provider?: string;
 
     /** Where the forwarding command's stdout/stderr are being written */
     logFile: string;

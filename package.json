@@ -24,6 +24,7 @@
   "dependencies": {
     "@clack/prompts": "^1.7.0",
     "@napi-rs/keyring": "^1.2.0",
+    "@northflank/js-client": "0.13.0",
     "commander": "^14.0.2",
     "mssql": "^12.2.0"
   },

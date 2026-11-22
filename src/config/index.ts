@@ -9,9 +9,12 @@ import {
 } from './paths';
 import { getCredentialResolver } from '../credentials';
 import type { SherlockConfig, ConnectionConfig, ResolvedConnectionConfig, CredentialRef, SslConfig } from './types';
+import type { TunnelConfig } from '../tunnel/types';
 import { getEnvVarForConnection } from '../credentials/providers/env';
 import { DB_TYPES, DEFAULT_PORTS, detectDbTypeFromUrl, parseBoolParam, type DbType } from '../db-types';
 import { ensureTunnel } from '../tunnel/manager';
+import { resolveTunnel } from '../tunnel/providers';
+import { parseDuration } from '../tunnel/config';
 
 let cachedConfig: SherlockConfig | null = null;
 let cachedConfigPath: string | null = null;
@@ -432,7 +435,8 @@ export function rewriteUrlEndpoint(url: string, host: string, port: number): str
     try {
         parsed = new URL(url);
     } catch {
-        throw new Error(`Cannot apply tunnel: "${url}" is not a parseable connection URL`);
+        // The URL holds the password, so it is not quoted here.
+        throw new Error('Cannot apply the tunnel: the connection URL cannot be parsed.');
     }
 
     parsed.hostname = host;
@@ -472,7 +476,8 @@ function assertTunnelAllowed(connectionName: string): void {
         throw new Error(
             `Connection "${connectionName}" defines a tunnel, but the config was loaded from ` +
             `${describeConfigSource(cachedConfigSource)}.\n\n` +
-            `Tunnels run a shell command, so they are only honoured from a config you opted into ` +
+            `A tunnel runs a command on this machine or uses your platform login, so it is only ` +
+            `honoured from a config you opted into ` +
             `explicitly: your user config directory, a config next to the binary, --config, or ` +
             `SHERLOCK_CONFIG.\n\n` +
             `If you trust this file, re-run with --config ${cachedConfigPath ?? '<path>'}`
@@ -508,7 +513,7 @@ async function applyTunnel(
     }
 
     const { host, port } = await ensureTunnel(connectionName, config.tunnel, configPath);
-    return { ...resolved, url: rewriteUrlEndpoint(resolved.url, host, port) };
+    return { ...resolved, url: rewriteUrlEndpoint(resolved.url, host, port), tunnelled: true };
 }
 
 /**
@@ -521,7 +526,41 @@ export async function resolveConnection(
 ): Promise<ResolvedConnectionConfig> {
     const config = getConnectionConfig(connectionName, configPath);
     const resolved = await buildResolvedConnection(connectionName, config);
+    resolved.connectionName = connectionName;
+    if (config.statementTimeout !== undefined) {
+        resolved.statementTimeoutMs = resolveDurationSetting(connectionName, 'statementTimeout', config.statementTimeout);
+    }
+    if (config.connectTimeout !== undefined) {
+        resolved.connectTimeoutMs = resolveDurationSetting(connectionName, 'connectTimeout', config.connectTimeout);
+    }
     return applyTunnel(connectionName, config, resolved, configPath);
+}
+
+/**
+ * Resolve a connection's credentials into a connection URL without starting
+ * its tunnel, so `doctor` can check credentials on their own. The URL holds
+ * the password: never print it.
+ */
+export async function resolveConnectionCredentials(
+    connectionName: string,
+    configPath?: string
+): Promise<ResolvedConnectionConfig> {
+    return buildResolvedConnection(connectionName, getConnectionConfig(connectionName, configPath));
+}
+
+/**
+ * Parse a duration setting into whole milliseconds, naming the connection and
+ * the setting when it is malformed.
+ */
+export function resolveDurationSetting(connectionName: string, setting: string, value: string): number {
+    try {
+        return Math.round(parseDuration(value));
+    } catch (error) {
+        throw new Error(
+            `Invalid "${setting}" for connection "${connectionName}": ` +
+            (error instanceof Error ? error.message : String(error))
+        );
+    }
 }
 
 /**
@@ -684,6 +723,107 @@ export function sortConnectionNames(names: string[]): string[] {
 export function listConnections(configPath?: string): string[] {
     const config = loadConfigFile(configPath);
     return sortConnectionNames(Object.keys(config.connections));
+}
+
+/**
+ * A tunnel, as every command reports it. `kind` says whether a provider opens
+ * it or a shell command does; a command recognised as a platform's CLI keeps
+ * kind "command" and has that platform's target in `details`.
+ */
+export interface TunnelSummary {
+    kind: 'provider' | 'command';
+    /** The provider id, or "command" */
+    provider: string;
+    /** One line, e.g. "my-project/postgresql (read)" */
+    target: string;
+    details: Record<string, string>;
+}
+
+/** Summarise a tunnel block. Throws when it is invalid. */
+export function summarizeTunnel(connectionName: string, tunnel: TunnelConfig): TunnelSummary {
+    const resolved = resolveTunnel(connectionName, tunnel);
+    const { target } = resolved.inspect();
+    return {
+        kind: resolved.providerId === 'command' ? 'command' : 'provider',
+        provider: resolved.providerId,
+        target: target.summary,
+        details: target.details,
+    };
+}
+
+/**
+ * Where a connection points, for `sherlock connections`. Never includes a
+ * secret: a URL is reduced to its host, and a credential reference is named
+ * rather than resolved.
+ */
+export interface ConnectionSummary {
+    name: string;
+    type: DbType;
+    /** The database's host, file, or where those are read from */
+    target: string;
+    /** The tunnel, when the connection has one */
+    tunnel?: TunnelSummary;
+    /** Set when the connection's config cannot be read as it is */
+    problem?: string;
+}
+
+/** Name a credential reference without resolving it */
+function describeReference(value: CredentialRef): string {
+    if (typeof value === 'string') return value;
+    if ('$env' in value) return `$env:${value.$env}`;
+    const ref = value.$keychain;
+    return typeof ref === 'string' ? `$keychain:${ref}` : `$keychain:${ref.service ?? 'sherlock'}/${ref.account}`;
+}
+
+/** The host and port of a literal URL, dropping everything that could be secret */
+function urlTarget(url: string): string {
+    try {
+        const parsed = new URL(url);
+        if (parsed.protocol === 'file:' || parsed.protocol === 'sqlite:') {
+            return parsed.pathname || url;
+        }
+        return parsed.port ? `${parsed.hostname}:${parsed.port}` : parsed.hostname;
+    } catch {
+        return 'unparseable url';
+    }
+}
+
+/** Summarise one connection without resolving credentials or starting a tunnel */
+export function summarizeConnection(name: string, config: ConnectionConfig): ConnectionSummary {
+    const urlType = typeof config.url === 'string' ? detectDbTypeFromUrl(config.url) : null;
+    const type = urlType ?? config.type ?? DB_TYPES.POSTGRES;
+
+    let target: string;
+    if (type === DB_TYPES.SQLITE && config.url === undefined) {
+        target = config.filename ?? config.path ?? config.database ?? ':memory:';
+    } else if (config.url !== undefined) {
+        target = typeof config.url === 'string' ? urlTarget(config.url) : `url from ${describeReference(config.url)}`;
+    } else {
+        const host = config.host === undefined
+            ? `$env:SHERLOCK_${name.toUpperCase()}_HOST`
+            : typeof config.host === 'string' ? config.host : describeReference(config.host);
+        target = config.port ? `${host}:${config.port}` : host;
+    }
+    if (config.database && type !== DB_TYPES.SQLITE && config.url === undefined) target += `/${config.database}`;
+
+    const summary: ConnectionSummary = { name, type, target };
+
+    if (config.tunnel) {
+        try {
+            summary.tunnel = summarizeTunnel(name, config.tunnel);
+        } catch (error) {
+            summary.problem = error instanceof Error ? error.message : String(error);
+        }
+    }
+
+    return summary;
+}
+
+/** Summaries of every connection, sorted by name */
+export function listConnectionSummaries(configPath?: string): ConnectionSummary[] {
+    const config = loadConfigFile(configPath);
+    return sortConnectionNames(Object.keys(config.connections))
+        .map((name) => summarizeConnection(name, config.connections[name]));
 }
 
 /**

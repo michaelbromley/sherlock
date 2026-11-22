@@ -5,10 +5,10 @@ import {
     applyPortPlaceholder,
     hasPortPlaceholder,
     matchEndpoint,
-    NORTHFLANK_ENDPOINT_PATTERN,
     DEFAULT_IDLE_TIMEOUT,
     DEFAULT_READY_TIMEOUT,
 } from './config';
+import { NORTHFLANK_ENDPOINT_PATTERN } from './providers/northflank/command';
 
 describe('parseDuration', () => {
     it('parses milliseconds', () => {

@@ -260,8 +260,9 @@ class TestRunner {
             `DROP TABLE ${tableName}`,
             // SQL injection via chained query
             `SELECT * FROM ${tableName}; DROP TABLE ${tableName}`,
-            // SQL injection via comment
-            `SELECT * FROM ${tableName} WHERE 1=1 -- ; DROP TABLE ${tableName}`,
+            // SQL injection via a MySQL executable comment, which the server runs.
+            // A plain comment is harmless and allowed: "-- ; DROP TABLE" never executes.
+            `SELECT * FROM ${tableName} WHERE 1=1 /*! ; DROP TABLE ${tableName} */`,
             // TRUNCATE
             `TRUNCATE TABLE ${tableName}`,
             // CREATE

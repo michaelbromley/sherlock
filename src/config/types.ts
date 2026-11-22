@@ -38,6 +38,20 @@ export interface ConnectionConfig {
     logging?: boolean;
 
     /**
+     * Longest a single statement may run before the database cancels it, as a
+     * duration such as "60s" or "5m". Default "60s". `query --timeout`
+     * overrides it for one query.
+     */
+    statementTimeout?: string;
+
+    /**
+     * Longest to wait for the database to answer when connecting, as a
+     * duration such as "10s". Default "10s". A tunnel whose far end is gone
+     * still accepts connections locally, so this is what makes it fail fast.
+     */
+    connectTimeout?: string;
+
+    /**
      * Port-forwarding process to run before connecting, for databases that are
      * only reachable through a tunnel. When set, the connection's host and port
      * are replaced with the tunnel's local endpoint.
@@ -104,4 +118,12 @@ export interface SherlockConfig {
 export interface ResolvedConnectionConfig {
     type: DbType;
     url: string;
+    /** The connection's `statementTimeout`, when it sets one */
+    statementTimeoutMs?: number;
+    /** The connection's `connectTimeout`, when it sets one */
+    connectTimeoutMs?: number;
+    /** Name of the configured connection, for error messages. Unset for --url. */
+    connectionName?: string;
+    /** True when the URL points at a tunnel rather than the database itself */
+    tunnelled?: boolean;
 }

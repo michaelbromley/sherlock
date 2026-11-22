@@ -6,10 +6,11 @@
  * command itself.
  */
 
+import * as path from 'path';
 import type { ConnectionConfig, CredentialRef } from './types';
 import { parseConnectionUrl } from './index';
 import { DB_TYPES, isValidDbType, type DbType } from '../db-types';
-import { resolveTunnelConfig, NORTHFLANK_ENDPOINT_PATTERN } from '../tunnel/config';
+import { resolveTunnel, tunnelProviderIds, tunnelShorthand } from '../tunnel/providers';
 import type { TunnelConfig } from '../tunnel/types';
 
 /** Flags accepted by `sherlock connection add`, before any validation */
@@ -31,6 +32,10 @@ export interface ConnectionAddOptions {
     tunnelLocalPort?: string;
     tunnelEndpointPattern?: string;
     tunnelNorthflank?: string;
+    /** Id of a tunnel provider, with its settings given as --tunnel-option */
+    tunnelProvider?: string;
+    /** `key=value` settings for the tunnel provider */
+    tunnelOption?: string[];
     tunnelIdleTimeout?: string;
     tunnelReadyTimeout?: string;
 }
@@ -58,60 +63,112 @@ function parsePort(value: string | undefined, flag: string): number | undefined 
     return port;
 }
 
+/** Shorthand flags that expand to a whole tunnel block, by the name after `--tunnel-` */
+const SHORTHAND_FLAGS = { northflank: 'tunnelNorthflank' } as const satisfies Record<string, keyof ConnectionAddOptions>;
+
+/** Parse repeated `--tunnel-option key=value` flags into provider settings */
+function parseTunnelOptions(options: string[] | undefined): Record<string, string> {
+    const parsed: Record<string, string> = {};
+    for (const option of options ?? []) {
+        const eq = option.indexOf('=');
+        const key = eq === -1 ? '' : option.slice(0, eq).trim();
+        if (!key) {
+            throw new Error(`Invalid --tunnel-option "${option}". Use key=value, e.g. project=my-project.`);
+        }
+        if (['provider', 'idleTimeout', 'readyTimeout'].includes(key)) {
+            throw new Error(
+                `--tunnel-option cannot set "${key}". Use --tunnel-provider, --tunnel-idle-timeout ` +
+                `or --tunnel-ready-timeout.`
+            );
+        }
+        parsed[key] = option.slice(eq + 1);
+    }
+    return parsed;
+}
+
 /**
  * Build the tunnel block from the tunnel flags.
  *
- * `--tunnel-northflank` is a shorthand for the command and endpoint pattern
- * together, because getting either wrong is the most common way to end up with
- * a tunnel that never comes up.
+ * A tunnel comes from exactly one of: `--tunnel-command`, `--tunnel-provider`
+ * with its `--tunnel-option` settings, or a shorthand flag that expands to a
+ * whole block, because getting a forwarding command and its endpoint pattern
+ * both right by hand is the most common way to end up with a tunnel that never
+ * comes up.
  */
 function buildTunnel(opts: ConnectionAddOptions): TunnelConfig | undefined {
-    const hasNorthflank = opts.tunnelNorthflank !== undefined;
-    const hasCommand = opts.tunnelCommand !== undefined;
+    const shorthandName = (Object.keys(SHORTHAND_FLAGS) as (keyof typeof SHORTHAND_FLAGS)[])
+        .find((name) => opts[SHORTHAND_FLAGS[name]] !== undefined);
+    const sources = [
+        shorthandName !== undefined && `--tunnel-${shorthandName}`,
+        opts.tunnelCommand !== undefined && '--tunnel-command',
+        opts.tunnelProvider !== undefined && '--tunnel-provider',
+    ].filter(Boolean) as string[];
 
-    if (hasNorthflank && hasCommand) {
-        throw new Error('--tunnel-northflank and --tunnel-command cannot both be given.');
+    if (sources.length > 1) {
+        throw new Error(`${sources.join(' and ')} cannot both be given.`);
     }
-    if (!hasNorthflank && !hasCommand) {
+    if (sources.length === 0) {
         const strayFlags = [
             opts.tunnelLocalPort !== undefined && '--tunnel-local-port',
             opts.tunnelEndpointPattern !== undefined && '--tunnel-endpoint-pattern',
+            opts.tunnelOption !== undefined && opts.tunnelOption.length > 0 && '--tunnel-option',
             opts.tunnelIdleTimeout !== undefined && '--tunnel-idle-timeout',
             opts.tunnelReadyTimeout !== undefined && '--tunnel-ready-timeout',
         ].filter(Boolean);
         if (strayFlags.length > 0) {
             throw new Error(
                 `${strayFlags.join(', ')} needs a tunnel. ` +
-                `Add --tunnel-command or --tunnel-northflank.`
+                `Add --tunnel-command, --tunnel-provider or --tunnel-northflank.`
             );
         }
         return undefined;
     }
 
-    const tunnel: TunnelConfig = { command: '' };
+    let tunnel: TunnelConfig;
 
-    if (hasNorthflank) {
-        const spec = opts.tunnelNorthflank as string;
-        const [project, addon, ...rest] = spec.split('/');
-        if (!project || !addon || rest.length > 0) {
+    if (opts.tunnelProvider !== undefined) {
+        const commandOnly = [
+            opts.tunnelLocalPort !== undefined && '--tunnel-local-port',
+            opts.tunnelEndpointPattern !== undefined && '--tunnel-endpoint-pattern',
+        ].filter(Boolean);
+        if (commandOnly.length > 0) {
             throw new Error(
-                `Invalid --tunnel-northflank "${spec}". Use <project>/<addon>, e.g. cloud/control-plane-db.`
+                `${commandOnly.join(', ')} only applies to --tunnel-command. ` +
+                `A provider finds its own local port.`
             );
         }
-        // --skipHostnames avoids the /etc/hosts write that would otherwise need
-        // root, which a background tunnel has no terminal to ask for.
-        tunnel.command =
-            `northflank forward addon --project ${project} --addon ${addon} --skipHostnames`;
-        tunnel.endpointPattern = opts.tunnelEndpointPattern ?? NORTHFLANK_ENDPOINT_PATTERN;
+        if (!tunnelProviderIds().includes(opts.tunnelProvider)) {
+            throw new Error(
+                `Invalid --tunnel-provider "${opts.tunnelProvider}". Use one of: ${tunnelProviderIds().join(', ')}.`
+            );
+        }
+        tunnel = { ...parseTunnelOptions(opts.tunnelOption), provider: opts.tunnelProvider };
     } else {
-        tunnel.command = opts.tunnelCommand as string;
+        if (opts.tunnelOption !== undefined && opts.tunnelOption.length > 0) {
+            throw new Error('--tunnel-option needs --tunnel-provider.');
+        }
+
+        if (shorthandName !== undefined) {
+            const spec = opts[SHORTHAND_FLAGS[shorthandName]] as string;
+            const shorthand = tunnelShorthand(shorthandName);
+            if (!shorthand) throw new Error(`--tunnel-${shorthandName} is not available in this build.`);
+            try {
+                tunnel = shorthand.expand(spec);
+            } catch (error) {
+                const reason = error instanceof Error ? error.message : String(error);
+                throw new Error(`Invalid --tunnel-${shorthandName} "${spec}". ${reason}`);
+            }
+        } else {
+            tunnel = { command: opts.tunnelCommand as string };
+        }
+
         if (opts.tunnelEndpointPattern !== undefined) {
             tunnel.endpointPattern = opts.tunnelEndpointPattern;
         }
+        const localPort = parsePort(opts.tunnelLocalPort, '--tunnel-local-port');
+        if (localPort !== undefined) tunnel.localPort = localPort;
     }
 
-    const localPort = parsePort(opts.tunnelLocalPort, '--tunnel-local-port');
-    if (localPort !== undefined) tunnel.localPort = localPort;
     if (opts.tunnelIdleTimeout !== undefined) tunnel.idleTimeout = opts.tunnelIdleTimeout;
     if (opts.tunnelReadyTimeout !== undefined) tunnel.readyTimeout = opts.tunnelReadyTimeout;
 
@@ -154,7 +211,7 @@ export function buildConnectionConfig(name: string, opts: ConnectionAddOptions):
         throw new Error('SQLite is a local file and cannot use a tunnel.');
     }
     // Report a bad tunnel here rather than on the first query.
-    if (tunnel) resolveTunnelConfig(name, tunnel);
+    if (tunnel) resolveTunnel(name, tunnel);
 
     if (type === DB_TYPES.SQLITE) {
         const ignored = [
@@ -176,7 +233,7 @@ export function buildConnectionConfig(name: string, opts: ConnectionAddOptions):
             throw new Error('SQLite needs --database pointing at the database file.');
         }
         const config: ConnectionConfig = { type, filename };
-        if (opts.directory) config.directory = opts.directory;
+        if (opts.directory) config.directory = path.resolve(opts.directory);
         return config;
     }
 
@@ -219,7 +276,9 @@ export function buildConnectionConfig(name: string, opts: ConnectionAddOptions):
     if (fromUrl?.allowPublicKeyRetrieval) config.allowPublicKeyRetrieval = true;
 
     if (opts.logging) config.logging = true;
-    if (opts.directory) config.directory = opts.directory;
+    // Stored absolute: a relative path would be resolved against wherever
+    // sherlock runs later, so "." would auto-select this connection everywhere.
+    if (opts.directory) config.directory = path.resolve(opts.directory);
     if (tunnel) config.tunnel = tunnel;
 
     return config;

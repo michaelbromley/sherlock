@@ -3,6 +3,9 @@
  * Ensures queries are read-only and safe to execute
  */
 
+import type { DbType } from '../db-types';
+import { scanSql, SQL_DIALECTS } from './scan';
+
 /** Keywords that indicate read-only query types */
 const ALLOWED_QUERY_STARTS = ['SELECT', 'SHOW', 'DESCRIBE', 'EXPLAIN', 'WITH'] as const;
 
@@ -43,6 +46,9 @@ const DANGEROUS_KEYWORDS = [
     // File operations (MySQL)
     'INTO OUTFILE',
     'INTO DUMPFILE',
+    // SELECT ... INTO creates a table (SQL Server, PostgreSQL) or writes a file
+    // or variable (MySQL). INSERT INTO is already caught by INSERT.
+    'INTO',
     'LOAD DATA',
     'LOAD XML',
     // PostgreSQL specific
@@ -61,15 +67,38 @@ export interface ValidationResult {
  * Validates that a query is read-only and safe to execute.
  * Uses a whitelist approach - only explicitly allowed query types pass.
  *
+ * The checks run on the statement's code only: string literals, quoted
+ * identifiers and comments are set aside first, so a keyword inside
+ * `'delete'` or a semicolon inside a string does not block a query. How quotes
+ * and comments are read depends on the database, so pass its type. Without
+ * one, the query must pass under every SQL dialect sherlock supports.
+ *
  * @param query - The SQL query to validate
+ * @param dbType - The database the query will run on, when known
  * @returns ValidationResult with valid=true if safe, or valid=false with error message
  */
-export function validateReadOnlyQuery(query: string): ValidationResult {
-    const normalizedQuery = query.trim().toUpperCase();
+export function validateReadOnlyQuery(query: string, dbType?: DbType): ValidationResult {
+    const dialects = dbType && SQL_DIALECTS.includes(dbType) ? [dbType] : SQL_DIALECTS;
+
+    for (const dialect of dialects) {
+        const scanned = scanSql(query, dialect);
+        if (!scanned.ok) {
+            return { valid: false, error: `${scanned.error}. Only read-only queries are allowed.` };
+        }
+        const result = validateCode(scanned.code);
+        if (!result.valid) return result;
+    }
+
+    return { valid: true };
+}
+
+/** Check a statement with its literals, quoted identifiers and comments removed */
+function validateCode(code: string): ValidationResult {
+    const normalizedQuery = code.trim().toUpperCase();
 
     // Check if query starts with allowed commands
     const startsWithAllowed = ALLOWED_QUERY_STARTS.some((cmd) =>
-        normalizedQuery.startsWith(cmd)
+        new RegExp(`^${cmd}\\b`).test(normalizedQuery)
     );
 
     if (!startsWithAllowed) {
@@ -80,37 +109,45 @@ export function validateReadOnlyQuery(query: string): ValidationResult {
     }
 
     // Check for multiple statements (prevent SQL injection via chained queries)
-    const semicolonCount = (query.match(/;/g) || []).length;
-    if (semicolonCount > 1 || (semicolonCount === 1 && !query.trim().endsWith(';'))) {
+    const semicolonCount = (code.match(/;/g) || []).length;
+    if (semicolonCount > 1 || (semicolonCount === 1 && !code.trim().endsWith(';'))) {
         return {
             valid: false,
             error: 'Multiple statements are not allowed (read-only mode)',
         };
     }
 
-    // Check for dangerous keywords anywhere in the query
-    const dangerousKeyword = findDangerousKeyword(query);
+    // Check for dangerous keywords anywhere in the code
+    const dangerousKeyword = findDangerousKeyword(code);
     if (dangerousKeyword) {
         return {
             valid: false,
-            error: `Dangerous keyword detected: ${dangerousKeyword}. Only read-only queries are allowed.`,
+            error:
+                `Dangerous keyword detected: ${dangerousKeyword}. Only read-only queries are allowed. ` +
+                `If ${dangerousKeyword} is a column or table name here, quote it as an identifier ` +
+                `("name" in PostgreSQL and SQLite, \`name\` in MySQL, [name] in SQL Server).`,
         };
-    }
-
-    // Check comments for hidden dangerous keywords
-    if (hasComments(query)) {
-        const withoutComments = stripComments(query);
-        const hiddenKeyword = findDangerousKeyword(withoutComments);
-        if (hiddenKeyword) {
-            return {
-                valid: false,
-                error: `Dangerous keyword detected: ${hiddenKeyword}. Only read-only queries are allowed.`,
-            };
-        }
     }
 
     return { valid: true };
 }
+
+/**
+ * Uses of a dangerous keyword that are harmless, by keyword. The keyword is
+ * judged by what follows it in the code, after literals and comments are gone.
+ *
+ * Only exemptions that are harmless in every dialect belong here. SQL Server
+ * runs statements written one after another without a semicolon, so a keyword
+ * that can start a statement there must stay blocked anywhere in the query.
+ */
+const HARMLESS_USES: Record<string, RegExp> = {
+    // The string functions REPLACE() and the numeric TRUNCATE(). The
+    // statements are REPLACE INTO and TRUNCATE [TABLE] name, never with "(".
+    REPLACE: /^\s*\(/,
+    TRUNCATE: /^\s*\(/,
+    // The statement is COMMENT ON. Anything else is a column or alias name.
+    COMMENT: /^(?!\s+ON\b)/i,
+};
 
 /**
  * Finds the first dangerous keyword in a query
@@ -118,23 +155,12 @@ export function validateReadOnlyQuery(query: string): ValidationResult {
  */
 function findDangerousKeyword(query: string): string | null {
     for (const keyword of DANGEROUS_KEYWORDS) {
-        const regex = new RegExp(`\\b${keyword}\\b`, 'i');
-        if (regex.test(query)) {
-            return keyword;
+        const regex = new RegExp(`\\b${keyword}\\b`, 'gi');
+        const harmless = HARMLESS_USES[keyword];
+        for (const match of query.matchAll(regex)) {
+            const after = query.slice((match.index ?? 0) + match[0].length);
+            if (!harmless || !harmless.test(after)) return keyword;
         }
     }
     return null;
-}
-
-/** Checks if a query contains SQL comments */
-function hasComments(query: string): boolean {
-    return query.includes('/*') || query.includes('--') || query.includes('#');
-}
-
-/** Strips SQL comments from a query */
-function stripComments(query: string): string {
-    return query
-        .replace(/\/\*[\s\S]*?\*\//g, ' ')  // Remove /* */ comments
-        .replace(/--[^\n]*/g, ' ')           // Remove -- comments
-        .replace(/#[^\n]*/g, ' ');           // Remove # comments (MySQL)
 }

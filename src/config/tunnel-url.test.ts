@@ -55,6 +55,6 @@ describe('rewriteUrlEndpoint', () => {
     });
 
     it('rejects an unparseable URL rather than connecting somewhere unintended', () => {
-        expect(() => rewriteUrlEndpoint('not a url', '127.0.0.1', 15432)).toThrow(/not a parseable/);
+        expect(() => rewriteUrlEndpoint('not a url', '127.0.0.1', 15432)).toThrow(/cannot be parsed/);
     });
 });
