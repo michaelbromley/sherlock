@@ -239,19 +239,6 @@ async function runWithSqlConnection<T>(
     return withConnection(opts.connection, opts.config, handler, options);
 }
 
-/**
- * The SQL dialect a connection speaks, as far as can be told without resolving
- * credentials or starting a tunnel. Undefined when it depends on a URL held in
- * the keychain or the environment, in which case the guard checks every dialect.
- */
-function sqlDialectFor(opts: Record<string, any>): DbType | undefined {
-    if (opts._resolvedConfig) return opts._resolvedConfig.type;
-    const config = getConnectionConfig(opts.connection, opts.config);
-    if (config.type) return config.type;
-    if (config.url === undefined) return DB_TYPES.POSTGRES;
-    return typeof config.url === 'string' ? detectDbTypeFromUrl(config.url) ?? undefined : undefined;
-}
-
 /** Largest SQL file `query --file` will read */
 const MAX_QUERY_FILE_BYTES = 1024 * 1024;
 
@@ -764,14 +751,18 @@ Every query runs in a read-only transaction that is rolled back afterwards.`)
                 process.exit(1);
             }
 
-            // Enforce read-only
-            const validation = validateReadOnlyQuery(sqlQuery, sqlDialectFor(opts));
-            if (!validation.valid) {
-                console.error(JSON.stringify({ error: validation.error }));
+            const reject = (error: string | undefined): never => {
+                console.error(JSON.stringify({ error }));
                 process.exit(1);
-            }
+            };
 
-            await runWithSqlConnection(opts, async (sql) => {
+            await runWithSqlConnection(opts, async (sql, dbType) => {
+                // Enforce read-only, with the dialect the connection resolved
+                // to: the one the database will read the query with. The type
+                // is only certain once a URL held in the keychain is read.
+                const validation = validateReadOnlyQuery(sqlQuery, dbType as DbType);
+                if (!validation.valid) reject(validation.error);
+
                 const result = await executeQuery(sql, sqlQuery);
 
                 // Log if enabled (ad hoc --url connections have logging disabled)

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'bun:test';
-import { explainTimeout, readOnlyWrapper, runWrapped, isUnknownVariableError } from './read-only';
+import { explainMultipleStatements, explainTimeout, readOnlyWrapper, runWrapped, isUnknownTimeoutVariableError } from './read-only';
 
 function recorder(failOn?: string) {
     const statements: string[] = [];
@@ -106,7 +106,27 @@ describe('explainTimeout', () => {
     });
 });
 
-it('recognises an unknown MySQL variable', () => {
-    expect(isUnknownVariableError(new Error("Unknown system variable 'max_execution_time'"))).toBe(true);
-    expect(isUnknownVariableError(new Error('Access denied'))).toBe(false);
+it('recognises only MariaDB lacking max_execution_time, not the user\'s own unknown variable', () => {
+    expect(isUnknownTimeoutVariableError(new Error("Unknown system variable 'max_execution_time'"))).toBe(true);
+    expect(isUnknownTimeoutVariableError(new Error("Unknown system variable 'nosuch'"))).toBe(false);
+    expect(isUnknownTimeoutVariableError(new Error('Access denied'))).toBe(false);
+});
+
+it('words the server\'s refusal of a second statement as sherlock does', () => {
+    const refused = new Error('cannot insert multiple commands into a prepared statement');
+    expect((explainMultipleStatements(refused) as Error).message).toMatch(/^Multiple statements are not allowed/);
+    const other = new Error('relation "x" does not exist');
+    expect(explainMultipleStatements(other)).toBe(other);
+});
+
+it('runs the user\'s statement through the single-statement path when there is one', async () => {
+    const calls: string[] = [];
+    const runner = {
+        unsafe: async (query: string) => { calls.push(`unsafe ${query}`); return []; },
+        single: async (query: string) => { calls.push(`single ${query}`); return [{ ok: 1 }]; },
+    };
+    expect(await runWrapped(runner, readOnlyWrapper('postgres', 1000)!, 'SELECT 1')).toEqual([{ ok: 1 }]);
+    expect(calls).toEqual([
+        'unsafe BEGIN TRANSACTION READ ONLY', 'unsafe SET LOCAL statement_timeout = 1000', 'single SELECT 1', 'unsafe ROLLBACK',
+    ]);
 });

@@ -99,6 +99,17 @@ describe('validateReadOnlyQuery — rejected', () => {
         rejected('SELECT 1--1; DELETE FROM t', /Multiple statements/, 'mysql');
     });
 
+    it('ends a line comment at a carriage return, as PostgreSQL does', () => {
+        // Found in review: with the comment running to the next line feed, the
+        // ROLLBACK and DELETE were hidden, and PostgreSQL ran both.
+        for (const dialect of [undefined, 'postgres', 'mysql', 'mssql', 'sqlite'] as const) {
+            rejected('SELECT 1 --\r; ROLLBACK; DELETE FROM t', /Multiple statements/, dialect);
+            rejected('SELECT 1 --\r\n; ROLLBACK; DELETE FROM t', /Multiple statements/, dialect);
+        }
+        rejected('SELECT 1 #\r; DELETE FROM t', /Multiple statements/, 'mysql');
+        ok('-- note\r\nSELECT 1', 'postgres');
+    });
+
     it('rejects unterminated literals and comments instead of guessing', () => {
         rejected("SELECT 'abc", /Unterminated string/);
         rejected('SELECT 1 /* open', /Unterminated comment/);

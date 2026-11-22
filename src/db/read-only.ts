@@ -22,6 +22,13 @@ export const DEFAULT_STATEMENT_TIMEOUT = '60s';
 /** Something statements can be run on, one after another, on one connection */
 export interface StatementRunner {
     unsafe(query: string): Promise<unknown[]>;
+    /**
+     * Run exactly one statement, through a protocol on which the server itself
+     * refuses a second one. The user's statement is run this way when the
+     * database offers it, so that a statement the guard misjudged cannot end
+     * the read-only transaction and write after it.
+     */
+    single?(query: string): Promise<unknown[]>;
 }
 
 /** Which variable a MySQL-family server limits statement time with */
@@ -89,7 +96,7 @@ export async function runWrapped(
             await runner.unsafe(statement);
             opened += 1;
         }
-        return await runner.unsafe(query);
+        return await (runner.single ? runner.single(query) : runner.unsafe(query));
     } finally {
         // Nothing to roll back if not even the first statement ran.
         if (opened > 0) {
@@ -100,10 +107,21 @@ export async function runWrapped(
     }
 }
 
-/** Whether a MySQL-family error says a system variable does not exist */
-export function isUnknownVariableError(error: unknown): boolean {
+/**
+ * Whether a MySQL-family error says the server has no `max_execution_time`,
+ * as MariaDB does not. Any other unknown variable is the user's own mistake
+ * and must be reported as it is.
+ */
+export function isUnknownTimeoutVariableError(error: unknown): boolean {
     const message = error instanceof Error ? error.message : String(error);
-    return /unknown system variable/i.test(message);
+    return /unknown system variable '?max_execution_time/i.test(message);
+}
+
+/** Replace the server's refusal of a second statement with sherlock's own wording */
+export function explainMultipleStatements(error: unknown): unknown {
+    const message = error instanceof Error ? error.message : String(error);
+    if (!/cannot insert multiple commands into a prepared statement/i.test(message)) return error;
+    return new Error('Multiple statements are not allowed (read-only mode). The database refused the query.');
 }
 
 /**

@@ -32,6 +32,7 @@ import { explainConnectTimeout } from '../db/connect-timeout';
 import { createRedisConnection } from '../redis/connection';
 import { resolveTunnel, type DiagnosticCheck, type ResolvedTunnel } from '../tunnel/providers';
 import { startTunnelKeepalive } from '../tunnel/manager';
+import { logPath } from '../tunnel/state';
 
 export type { DiagnosticCheck };
 
@@ -254,11 +255,14 @@ function connectSteps(connectionName: string, configPath: string | undefined, st
         try {
             resolved = await resolveConnection(connectionName, configPath);
         } catch (error) {
+            if (!state.tunnel) {
+                return [{ name: 'connect', status: 'fail', detail: errorMessage(error) }];
+            }
             return [{
                 name: 'tunnel',
                 status: 'fail',
                 detail: errorMessage(error),
-                fix: 'Read the forwarding output above, and check the tunnel log in ~/.config/sherlock/tunnels/.',
+                fix: `The error includes the end of the tunnel's log. The whole log is in ${logPath(connectionName)}.`,
             }];
         }
         stopKeepalive = startTunnelKeepalive(connectionName);

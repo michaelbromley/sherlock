@@ -1,6 +1,8 @@
 import { describe, it, expect } from 'bun:test';
 import { buildConnectionConfig } from './connection-input';
 import { NORTHFLANK_ENDPOINT_PATTERN } from '../tunnel/providers/northflank/command';
+import { resolveNorthflankConfig } from '../tunnel/providers/northflank/config';
+import { resolveTunnel } from '../tunnel/providers';
 import { DB_TYPES } from '../db-types';
 
 const BASE = { type: 'postgres', host: 'db.example.com', database: 'app', username: 'u' };
@@ -147,6 +149,18 @@ describe('buildConnectionConfig — tunnels', () => {
             endpoint: 'read',
             idleTimeout: '5m',
         });
+    });
+
+    it('reads a numeric --tunnel-option port as a port number, not a port name', () => {
+        const config = buildConnectionConfig('nf', {
+            ...BASE,
+            tunnelProvider: 'northflank',
+            tunnelOption: ['context=kbart', 'project=artsupplies', 'addon=postgresql', 'port=5432'],
+        });
+        expect(resolveTunnel('nf', config.tunnel!).inspect().target.provider).toBe('northflank');
+        expect(resolveNorthflankConfig(config.tunnel!, 'nf').port).toBe(5432);
+        expect(resolveNorthflankConfig({ ...config.tunnel!, port: 'pooler' }, 'nf').port).toBe('pooler');
+        expect(() => resolveNorthflankConfig({ ...config.tunnel!, port: '70000' }, 'nf')).toThrow(/"port" must be/);
     });
 
     it('has the provider validate its options as the connection is written', () => {

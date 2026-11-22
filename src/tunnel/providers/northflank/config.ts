@@ -103,7 +103,14 @@ export function resolveNorthflankConfig(
                 `Invalid ${where}: "port" must be the addon port's name or its number (1 to 65535).`
             );
         }
-        config.port = typeof port === 'string' ? port.trim() : (port as number);
+        // --tunnel-option gives every value as a string, so "5432" is the port
+        // number 5432, not a port named "5432".
+        config.port = typeof port === 'string'
+            ? (/^\d+$/.test(port.trim()) ? Number(port.trim()) : port.trim())
+            : (port as number);
+        if (typeof config.port === 'number' && (config.port < 1 || config.port > 65535)) {
+            throw new Error(`Invalid ${where}: "port" must be the addon port's name or its number (1 to 65535).`);
+        }
     }
 
     return config;
