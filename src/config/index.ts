@@ -76,7 +76,8 @@ export function loadConfigFile(configPath?: string): SherlockConfig {
     if (!found) {
         throw new Error(
             `No configuration file found.\n\n` +
-            `Run 'sherlock init' to create one, or create a config file at:\n` +
+            `Run 'sherlock manage' to set up a connection, or add one with ` +
+            `'sherlock connection add <name> ...' (see --help). Sherlock reads a config file at:\n` +
             `  - ./.sherlock.json (project-local)\n` +
             `  - ${path.join(getConfigDir(), 'config.json')} (user config)\n\n` +
             `Or set SHERLOCK_CONFIG environment variable to your config file path.`

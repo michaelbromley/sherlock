@@ -41,7 +41,7 @@ export async function validateTableExists(
     validateIdentifier(tableName, 'table');
     const validTables = await getTables(sql, dbType);
     if (!validTables.includes(tableName)) {
-        throw new Error(`Table "${tableName}" not found. Use 'sherlock tables' to list available tables.`);
+        throw new Error(`Table "${tableName}" not found. List the tables with: sherlock -c <connection> tables`);
     }
 }
 

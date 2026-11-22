@@ -129,6 +129,16 @@ function connectionAddNotes(config: import('./config/types').ConnectionConfig): 
     return notes;
 }
 
+/**
+ * Report an error the way every non-interactive command does, as JSON on
+ * stderr, and exit 1. Agents parse this; a plain "Error:" line is one more
+ * format for them to handle.
+ */
+function fail(message: string): never {
+    console.error(JSON.stringify({ error: message }));
+    process.exit(1);
+}
+
 /** Get error message from unknown error */
 function getErrorMessage(error: unknown): string {
     if (error instanceof Error) {
@@ -183,8 +193,7 @@ function requireConnection(opts: Record<string, any>): asserts opts is { connect
     if (opts.url) {
         const detectedType = detectDbTypeFromUrl(opts.url);
         if (!detectedType) {
-            console.error(`Error: Cannot detect database type from URL. Supported prefixes: postgres://, mysql://, mssql://, sqlserver://, sqlite://, redis://, rediss://`);
-            process.exit(1);
+            fail(`Cannot detect database type from URL. Supported prefixes: postgres://, mysql://, mssql://, sqlserver://, sqlite://, redis://, rediss://`);
         }
         opts._resolvedConfig = { type: detectedType, url: opts.url } as ResolvedConnectionConfig;
         opts.connection = syntheticNameFromUrl(opts.url);
@@ -198,8 +207,7 @@ function requireConnection(opts: Record<string, any>): asserts opts is { connect
             console.error(`Using connection "${detected}" (matched directory ${process.cwd()})`);
             return;
         }
-        console.error('Error: --connection (-c) or --url (-u) is required. Specify which database to use.');
-        process.exit(1);
+        fail('--connection (-c) or --url (-u) is required. Specify which database to use.');
     }
 }
 
@@ -207,16 +215,14 @@ function requireConnection(opts: Record<string, any>): asserts opts is { connect
 function requireRedisConnection(opts: Record<string, any>): void {
     if (opts._resolvedConfig) {
         if (opts._resolvedConfig.type !== DB_TYPES.REDIS) {
-            console.error(`Error: URL is a ${opts._resolvedConfig.type} connection. This command only works with Redis connections.`);
-            process.exit(1);
+            fail(`URL is a ${opts._resolvedConfig.type} connection. This command only works with Redis connections.`);
         }
         return;
     }
     const config = getConnectionConfig(opts.connection, opts.config);
     if (!isRedisConfig(config)) {
         const type = config.type || 'SQL';
-        console.error(`Error: "${opts.connection}" is a ${type} connection. This command only works with Redis connections.`);
-        process.exit(1);
+        fail(`"${opts.connection}" is a ${type} connection. This command only works with Redis connections.`);
     }
 }
 
@@ -224,15 +230,13 @@ function requireRedisConnection(opts: Record<string, any>): void {
 function requireSqlConnection(opts: Record<string, any>): void {
     if (opts._resolvedConfig) {
         if (opts._resolvedConfig.type === DB_TYPES.REDIS) {
-            console.error(`Error: URL is a Redis connection. Use Redis commands (info, keys, get, inspect, slowlog, command) instead.`);
-            process.exit(1);
+            fail(`URL is a Redis connection. Use Redis commands (info, keys, get, inspect, slowlog, command) instead.`);
         }
         return;
     }
     const config = getConnectionConfig(opts.connection, opts.config);
     if (isRedisConfig(config)) {
-        console.error(`Error: "${opts.connection}" is a Redis connection. Use Redis commands (info, keys, get, inspect, slowlog, command) instead.`);
-        process.exit(1);
+        fail(`"${opts.connection}" is a Redis connection. Use Redis commands (info, keys, get, inspect, slowlog, command) instead.`);
     }
 }
 
@@ -240,8 +244,7 @@ function requireSqlConnection(opts: Record<string, any>): void {
 function parsePositiveInt(value: string, name: string, max?: number): number {
     const n = parseInt(value, 10);
     if (isNaN(n) || n < 1 || (max !== undefined && n > max)) {
-        console.error(`Error: --${name} must be a positive number${max ? ` (max ${max})` : ''}`);
-        process.exit(1);
+        fail(`--${name} must be a positive number${max ? ` (max ${max})` : ''}`);
     }
     return n;
 }
@@ -290,6 +293,7 @@ async function readQueryText(sqlArg: string | undefined, file: string | undefine
         if (sqlArg === undefined) {
             throw new Error('Give the query as an argument, with --file <path>, or on stdin with "query -".');
         }
+        if (sqlArg.trim() === '') throw new Error('The query is empty.');
         // Fix shell escaping artifacts: some shells/tools escape ! to \!
         // which is never valid SQL, so safely strip it
         return sqlArg.replace(/\\!/g, '!');
@@ -561,12 +565,10 @@ function setupCLI() {
         .hook('preAction', (thisCommand) => {
             const opts = thisCommand.opts();
             if (opts.connection && opts.url) {
-                console.error('Error: --connection (-c) and --url (-u) are mutually exclusive. Use one or the other.');
-                process.exit(1);
+                fail('--connection (-c) and --url (-u) are mutually exclusive. Use one or the other.');
             }
             if (opts.format && !['json', 'markdown'].includes(opts.format)) {
-                console.error(`Error: Invalid format "${opts.format}". Must be 'json' or 'markdown'.`);
-                process.exit(1);
+                fail(`Invalid format "${opts.format}". Must be 'json' or 'markdown'.`);
             }
         });
 
@@ -969,8 +971,7 @@ Every query runs in a read-only transaction that is rolled back afterwards.`)
             try {
                 process.stdout.write(guideText(topic, pkg.version));
             } catch (error: unknown) {
-                console.error(`Error: ${getErrorMessage(error)}`);
-                process.exit(1);
+                fail(`${getErrorMessage(error)}`);
             }
         });
 
@@ -991,18 +992,19 @@ Exits 1 when a check fails.`)
         .action(async (connectionName: string | undefined) => {
             const opts = program.opts();
             if (opts.url) {
-                console.error('Error: doctor checks a configured connection. Give its name, not --url.');
-                process.exit(1);
+                fail('doctor checks a configured connection. Give its name, not --url.');
             }
             const name = connectionName ?? opts.connection;
             if (connectionName && opts.connection && connectionName !== opts.connection) {
-                console.error('Error: give the connection either as an argument or with -c, not both.');
-                process.exit(1);
+                fail('give the connection either as an argument or with -c, not both.');
             }
             const configPath: string | undefined = opts.config;
-            if (!name) requireConnection(opts);
+            const target = name ?? detectConnectionFromCwd(configPath);
+            if (!target) {
+                fail('Give the connection to check: sherlock doctor <name>. See them with: sherlock connection list');
+            }
             const { diagnoseConnection } = await import('./doctor');
-            const report = await diagnoseConnection(name ?? opts.connection, configPath);
+            const report = await diagnoseConnection(target, configPath);
             console.log(JSON.stringify(report, null, 2));
             if (!report.ok) process.exitCode = 1;
         });
@@ -1086,8 +1088,7 @@ Exits 1 when a check fails.`)
                 if (cmdOpts.passwordStdin) {
                     const password = await readPasswordFromStdin();
                     if (password === null) {
-                        console.error('Error: --password-stdin was given but stdin was empty.');
-                        process.exit(1);
+                        fail('--password-stdin was given but stdin was empty.');
                     }
                     setKeychainPassword(name, password);
                 }
@@ -1114,8 +1115,7 @@ Exits 1 when a check fails.`)
                     next,
                 }, null, 2));
             } catch (error: unknown) {
-                console.error(`Error: ${getErrorMessage(error)}`);
-                process.exit(1);
+                fail(`${getErrorMessage(error)}`);
             }
         });
 
@@ -1188,6 +1188,9 @@ A connection whose name already exists is skipped unless --force is given.`)
                 return;
             }
             console.log(JSON.stringify({ stopped: results }, null, 2));
+            // A named tunnel that was not running is worth knowing about: the
+            // name may be misspelt. Stopping all of none is not a failure.
+            if (connectionName && !results[0].stopped) process.exitCode = 1;
         });
 
     // Hidden: this is how sherlock re-invokes itself as a tunnel supervisor.
@@ -1230,7 +1233,11 @@ A connection whose name already exists is skipped unless --force is given.`)
         .description('Migrate legacy config.ts to new JSON format')
         .option('--from <path>', 'path to legacy config.ts', 'config.ts')
         .action(async (cmdOpts) => {
-            await migrateConfig(cmdOpts.from);
+            try {
+                await migrateConfig(cmdOpts.from);
+            } catch (error: unknown) {
+                fail(`${getErrorMessage(error)}`);
+            }
         });
 
     // ========================================================================
@@ -1270,14 +1277,13 @@ A connection whose name already exists is skipped unless --force is given.`)
 
     keychain
         .command('get <account>')
-        .description('Retrieve a password from the keychain (for testing)')
+        .description('Check whether the keychain has a password for an account')
         .action((account: string) => {
-            const password = getKeychainPassword(account);
-            if (password === null) {
-                console.error(`No password found for account "${account}"`);
-                process.exit(1);
-            }
-            console.log(`Password for "${account}": ${password}`);
+            // Reports only whether the entry exists. Printing the password
+            // would put it in the terminal scrollback, and in front of any
+            // agent that finds this command.
+            if (!hasKeychainPassword(account)) fail(`No password found for account "${account}"`);
+            console.log(`The keychain has a password for "${account}".`);
         });
 
     keychain
@@ -1294,20 +1300,21 @@ A connection whose name already exists is skipped unless --force is given.`)
 
     keychain
         .command('list')
-        .description('Check which connection passwords are in keychain')
-        .action(() => {
+        .description('Show where each connection\'s password comes from, and whether it is there')
+        .action(async () => {
             const opts = program.opts();
             try {
-                const connections = listConnections(opts.config);
-                console.log('Keychain status for connections:\n');
-                for (const conn of connections) {
-                    const hasPassword = hasKeychainPassword(conn);
-                    const status = hasPassword ? '\x1b[32m✓\x1b[0m' : '\x1b[31m✗\x1b[0m';
-                    console.log(`  ${status} ${conn}`);
-                }
+                const { loadConfigFile } = await import('./config');
+                const { passwordStatus } = await import('./credentials/status');
+                const config = loadConfigFile(opts.config);
+                const passwords = listConnections(opts.config).map((name) => ({
+                    connection: name,
+                    ...passwordStatus(name, config.connections[name]),
+                }));
+                console.log(JSON.stringify({ passwords }, null, 2));
+                if (passwords.some((entry) => !entry.ok)) process.exitCode = 1;
             } catch (error: unknown) {
-                console.error(`Error: ${getErrorMessage(error)}`);
-                process.exit(1);
+                fail(`${getErrorMessage(error)}`);
             }
         });
 

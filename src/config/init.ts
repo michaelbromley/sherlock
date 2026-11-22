@@ -70,20 +70,24 @@ SHERLOCK_MYAPP_STAGING_USERNAME=your_username
 SHERLOCK_MYAPP_STAGING_PASSWORD=your_password
 `;
 
-    fs.writeFileSync(envPath, exampleEnv, 'utf-8');
-    setSecurePermissions(envPath);
+    // An existing .env holds real credentials, so it is never replaced.
+    const envExisted = fs.existsSync(envPath);
+    if (!envExisted) {
+        fs.writeFileSync(envPath, exampleEnv, 'utf-8');
+        setSecurePermissions(envPath);
+    }
 
     console.log(`Sherlock initialized!
 
 Config created at: ${configPath}
-Env file created at: ${envPath}
+${envExisted ? `Env file left as it was: ${envPath}` : `Env file created at: ${envPath}`}
 
 Next steps:
-1. Edit ${configPath} to add your database connections
-2. Set your credentials in ${envPath} or use 'sherlock keychain set <name>'
-3. Run 'sherlock connections' to list configured connections
-4. Run 'sherlock test <connection>' to verify a connection
-5. Run 'sherlock -c <connection> tables' to list tables
+1. Replace the example connections in ${configPath}, or add real ones with
+   'sherlock manage' or 'sherlock connection add <name> ...' (see --help)
+2. Run 'sherlock connection list' to see what is configured
+3. Run 'sherlock doctor <connection>' to check a connection
+4. Run 'sherlock -c <connection> tables' to list tables
 `);
 }
 
@@ -93,9 +97,9 @@ Next steps:
 export async function migrateConfig(fromPath: string): Promise<void> {
     const absoluteFromPath = path.resolve(fromPath);
 
+    // Thrown rather than exiting, so that `sherlock manage` can ask again.
     if (!fs.existsSync(absoluteFromPath)) {
-        console.error(`Legacy config not found: ${absoluteFromPath}`);
-        process.exit(1);
+        throw new Error(`Legacy config not found: ${absoluteFromPath}`);
     }
 
     console.log(`Migrating from: ${absoluteFromPath}`);
@@ -104,8 +108,7 @@ export async function migrateConfig(fromPath: string): Promise<void> {
     const legacyConfig = require(absoluteFromPath);
 
     if (!legacyConfig.connections) {
-        console.error('Invalid legacy config: missing "connections" export');
-        process.exit(1);
+        throw new Error('Invalid legacy config: missing "connections" export');
     }
 
     interface LegacyConnectionOpts {
@@ -170,6 +173,15 @@ export async function migrateConfig(fromPath: string): Promise<void> {
 ${envVars.join('\n')}
 `;
 
+    // The .env file holds credentials, so like config.json it is backed up
+    // rather than overwritten.
+    if (fs.existsSync(envPath)) {
+        const backupPath = envPath + '.backup.' + Date.now();
+        fs.copyFileSync(envPath, backupPath);
+        setSecurePermissions(backupPath);
+        console.log(`\x1b[33mWarning: ${envPath} already exists\x1b[0m`);
+        console.log(`  Backed up to: ${backupPath}`);
+    }
     fs.writeFileSync(envPath, envContent, 'utf-8');
     setSecurePermissions(envPath);
     console.log(`\x1b[32m✓\x1b[0m Created: ${envPath}`);
@@ -181,6 +193,6 @@ Migration complete!
 1. Review ${envPath} and ensure credentials are correct
 2. The .env file contains your credentials - keep it secure!
 3. You can now delete the old ${fromPath} file
-4. Run 'sherlock test <connection>' to verify each connection
+4. Run 'sherlock doctor <connection>' to check each connection
 `);
 }

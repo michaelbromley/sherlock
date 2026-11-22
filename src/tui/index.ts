@@ -5,13 +5,13 @@
 import * as p from '@clack/prompts';
 import * as fs from 'fs';
 import * as path from 'path';
-import { RedisClient } from 'bun';
-import { createConnection } from '../db/connection';
-import { findConfigFile, getConfigDir, ensureConfigDir } from '../config/paths';
+import { diagnoseConnection } from '../doctor';
+import { passwordStatus } from '../credentials/status';
+import { findConfigFile, getConfigDir, ensureConfigDir, getEnvFilePath } from '../config/paths';
 import {
-    loadConfigFile,
+    listConnectionSummaries,
+    type ConnectionSummary,
     listConnections,
-    resolveConnection,
     parseConnectionUrl,
     sortConnectionNames,
     isConfigFromWorkingDirectory,
@@ -35,11 +35,13 @@ import {
 import { isProviderTunnel, type CommandTunnelConfig, type ProviderTunnelConfig } from '../tunnel/types';
 import {
     setKeychainPassword,
+    getKeychainPassword,
     hasKeychainPassword,
     deleteKeychainPassword,
 } from '../credentials/providers/keychain';
-import { initConfig, migrateConfig } from '../config/init';
-import { saveConfig } from '../config/write';
+import { migrateConfig } from '../config/init';
+import { loadOrCreateConfig, saveConfig as writeConfig, shadowingWarning, writableConfigPath } from '../config/write';
+import { stopTunnel } from '../tunnel/manager';
 
 // ============================================================================
 // Connection Manager Menu (main entry point)
@@ -99,8 +101,9 @@ export async function connectionManagerMenu(): Promise<void> {
             );
         }
 
+        // "init" is not offered: this menu only shows once a config exists,
+        // and `sherlock init` refuses to replace one.
         options.push(
-            { value: 'init', label: 'Initialize config template' },
             { value: 'migrate', label: 'Migrate legacy config' },
             { value: 'exit', label: 'Exit' },
         );
@@ -127,8 +130,6 @@ export async function connectionManagerMenu(): Promise<void> {
             await listConnectionsDisplay();
         } else if (action === 'keychain') {
             await keychainMenu();
-        } else if (action === 'init') {
-            await initConfig();
         } else if (action === 'migrate') {
             await migrateInteractive();
         }
@@ -166,66 +167,57 @@ async function selectConnection(
 }
 
 /**
- * Test a connection from the manage menu
+ * Test a connection from the manage menu, with the same checks as `sherlock
+ * doctor`, so a failure says what is wrong and what to change.
  */
 async function testConnectionMenu(connections: string[]): Promise<void> {
     const selected = await selectConnection('Select connection to test', connections);
 
     if (p.isCancel(selected)) return;
 
-    p.log.info(`Testing ${selected}...`);
+    const spinner = p.spinner();
+    spinner.start(`Checking "${selected}"`);
+    const report = await diagnoseConnection(selected);
+    spinner.stop(report.ok ? `"${selected}" works` : `"${selected}" does not work`);
 
-    try {
-        const config = await resolveConnection(selected);
-
-        if (isRedisConfig(config)) {
-            const client = new RedisClient(config.url);
-            await client.send('PING', []);
-            client.close();
-        } else {
-            const adapter = await createConnection(config);
-            try {
-                await adapter.unsafe('SELECT 1 AS test');
-            } finally {
-                await adapter.close();
-            }
+    for (const check of report.checks) {
+        const line = `${check.name}: ${check.detail}`;
+        if (check.status === 'pass') p.log.success(line);
+        else if (check.status === 'skip') p.log.info(line);
+        else {
+            p.log.error(line);
+            if (check.fix) p.log.info(`Fix: ${check.fix}`);
         }
-        p.log.success(`Connection "${selected}" successful!`);
-    } catch (error: unknown) {
-        const message = error instanceof Error ? error.message : String(error);
-        p.log.error(`Connection failed: ${message}`);
+    }
+    if (report.checks.some((check) => check.name === 'tunnel' && check.status === 'pass')) {
+        p.log.info(`The tunnel stays up until it goes unused. Stop it now with: sherlock tunnel stop ${selected}`);
     }
 }
 
 /**
- * Enhanced connection list showing type + host/database info
+ * Connection list showing what each connection points at, as `sherlock
+ * connection list` reports it
  */
 async function listConnectionsDisplay(): Promise<void> {
-    let config: SherlockConfig;
+    let summaries: ConnectionSummary[];
     try {
-        config = loadConfigFile();
+        summaries = listConnectionSummaries();
     } catch {
         p.log.warn('No config found.');
         return;
     }
 
-    const names = sortConnectionNames(Object.keys(config.connections));
-    if (names.length === 0) {
+    if (summaries.length === 0) {
         p.log.warn('No connections configured.');
         return;
     }
 
-    const lines = names.map(name => {
-        const conn = config.connections[name];
-        const type = conn.type || 'unknown';
-        if (type === DB_TYPES.SQLITE) {
-            const filename = conn.filename || conn.path || conn.database || '';
-            return `${name} (${type}) ${filename}`;
-        }
-        const host = typeof conn.host === 'string' ? conn.host : '';
-        const database = conn.database || '';
-        const sslTag = conn.ssl ? ' [ssl]' : '';
-        return `${name} (${type})${sslTag} ${host}${database ? ' - ' + database : ''}`;
+    const lines = summaries.map((summary) => {
+        const tunnel = summary.tunnel
+            ? `  via ${summary.tunnel.kind === 'provider' ? `${summary.tunnel.provider}: ` : ''}${summary.tunnel.target}`
+            : '';
+        const problem = summary.problem ? `  (${summary.problem})` : '';
+        return `${summary.name} (${summary.type}) ${summary.target}${tunnel}${problem}`;
     });
 
     p.note(lines.join('\n'), 'Configured Connections');
@@ -235,13 +227,8 @@ async function listConnectionsDisplay(): Promise<void> {
  * Dedicated delete connection wizard
  */
 async function deleteConnectionWizard(): Promise<void> {
-    let config: SherlockConfig;
-    try {
-        config = loadConfigFile();
-    } catch {
-        p.log.warn('No config found.');
-        return;
-    }
+    const config = loadWritableConfig();
+    if (!config) return;
 
     const connectionNames = Object.keys(config.connections);
     if (connectionNames.length === 0) {
@@ -264,12 +251,7 @@ async function deleteConnectionWizard(): Promise<void> {
 
     if (p.isCancel(confirmDelete) || !confirmDelete) return;
 
-    delete config.connections[connName];
-    if (hasKeychainPassword(connName)) {
-        deleteKeychainPassword(connName);
-    }
-    saveConfig(config);
-    p.log.success(`Connection "${connName}" deleted.`);
+    await removeConnection(config, connName);
 }
 
 /**
@@ -304,25 +286,18 @@ async function keychainMenu(): Promise<void> {
             setKeychainPassword(account as string, password as string);
             p.log.success(`Password stored for "${account}"`);
         } else if (action === 'check') {
-            let connections: string[] = [];
-            try {
-                connections = listConnections();
-            } catch {
-                p.log.warn('No config found.');
-                continue;
-            }
-
-            if (connections.length === 0) {
+            const config = loadWritableConfig();
+            if (!config) continue;
+            if (Object.keys(config.connections).length === 0) {
                 p.log.warn('No connections configured.');
                 continue;
             }
-
-            const lines = connections.map(name => {
-                const has = hasKeychainPassword(name);
-                const status = has ? '\x1b[32m✓\x1b[0m' : '\x1b[31m✗\x1b[0m';
-                return `  ${status} ${name}`;
+            const lines = sortConnectionNames(Object.keys(config.connections)).map(name => {
+                const { ok, source } = passwordStatus(name, config.connections[name]);
+                const status = ok ? '\x1b[32m✓\x1b[0m' : '\x1b[31m✗\x1b[0m';
+                return `  ${status} ${name}: ${source}`;
             });
-            p.note(lines.join('\n'), 'Keychain Status');
+            p.note(lines.join('\n'), 'Where each password comes from');
         } else if (action === 'delete') {
             const account = await p.text({
                 message: 'Account name to delete',
@@ -361,7 +336,11 @@ async function migrateInteractive(): Promise<void> {
 
     if (p.isCancel(fromPath)) return;
 
-    await migrateConfig(fromPath as string);
+    try {
+        await migrateConfig(fromPath as string);
+    } catch (error) {
+        p.log.error(error instanceof Error ? error.message : String(error));
+    }
 }
 
 // ============================================================================
@@ -465,13 +444,8 @@ async function addConnectionWizard(): Promise<void> {
         return;
     }
 
-    // Load existing config
-    let config: SherlockConfig;
-    try {
-        config = loadConfigFile();
-    } catch {
-        config = { version: '2.0', connections: {} };
-    }
+    const config = loadWritableConfig();
+    if (!config) return;
 
     // Check if connection name already exists
     if (config.connections[connection.name]) {
@@ -509,13 +483,8 @@ async function addConnectionWizard(): Promise<void> {
  * Interactive wizard to edit an existing connection
  */
 async function editConnectionWizard(): Promise<void> {
-    let config: SherlockConfig;
-    try {
-        config = loadConfigFile();
-    } catch {
-        p.log.warn('No config found.');
-        return;
-    }
+    const config = loadWritableConfig();
+    if (!config) return;
 
     const connectionNames = Object.keys(config.connections);
     if (connectionNames.length === 0) {
@@ -540,7 +509,7 @@ async function editConnectionWizard(): Promise<void> {
     type EditAction = 'edit' | 'password' | 'directory' | 'logging' | 'ssl' | 'tunnel' | 'delete';
     const editOptions: Array<{ value: EditAction; label: string; hint?: string }> = [
         { value: 'edit', label: 'Edit connection details' },
-        { value: 'password', label: 'Update password' },
+        ...(isSqlite ? [] : [{ value: 'password' as const, label: 'Update password' }]),
         { value: 'directory', label: 'Set project directory', hint: directoryHint },
         { value: 'logging', label: 'Toggle query logging', hint: `Currently ${loggingStatus}` },
     ];
@@ -590,12 +559,7 @@ async function editConnectionWizard(): Promise<void> {
         });
 
         if (confirmDelete && !p.isCancel(confirmDelete)) {
-            delete config.connections[connName];
-            if (hasKeychainPassword(connName)) {
-                deleteKeychainPassword(connName);
-            }
-            saveConfig(config);
-            p.log.success(`Connection "${connName}" deleted.`);
+            await removeConnection(config, connName);
         }
         return;
     }
@@ -654,6 +618,7 @@ async function editConnectionWizard(): Promise<void> {
     if (action === 'password') {
         const newPassword = await p.password({
             message: `New database password for "${connName}"`,
+            validate: (value) => (!value ? 'Enter the password, or press Escape to keep the current one' : undefined),
         });
 
         if (p.isCancel(newPassword)) return;
@@ -662,7 +627,7 @@ async function editConnectionWizard(): Promise<void> {
             message: 'Where should the password be stored?',
             options: [
                 { value: 'keychain', label: 'OS Keychain', hint: 'Most secure - encrypted by OS' },
-                { value: 'env', label: 'Environment file', hint: '~/.config/sherlock/.env' },
+                { value: 'env', label: 'Environment file', hint: getEnvFilePath() },
             ],
         });
 
@@ -684,6 +649,17 @@ async function editConnectionWizard(): Promise<void> {
     }
 
     // Edit connection details (password is handled separately via "Update password")
+    if (existingConn.url !== undefined) {
+        // The prompts ask for host, port and database separately. Saving
+        // their answers would replace the URL, and any reference it is
+        // stored behind, with whatever was typed.
+        p.log.warn(
+            `"${connName}" is defined by a connection URL, which these prompts cannot edit without ` +
+            `replacing it. Change "url" in ${writableConfigPath()}, or delete the connection and ` +
+            `add it again from the new URL.`
+        );
+        return;
+    }
     const connection = await promptForConnection(connName, existingConn);
     if (!connection) return;
 
@@ -700,12 +676,12 @@ async function editConnectionWizard(): Promise<void> {
         }
     }
 
-    // If name changed, delete old connection
+    // A rename moves the keychain entry named after the connection, since the
+    // entry is looked up by that name.
     if (connection.name !== connName) {
+        if (!moveKeychainEntry(connection.config, connName, connection.name)) return;
         delete config.connections[connName];
-        if (hasKeychainPassword(connName)) {
-            deleteKeychainPassword(connName);
-        }
+        await stopTunnel(connName).catch(() => undefined);
     }
 
     config.connections[connection.name] = connection.config;
@@ -762,17 +738,34 @@ async function promptForHost(initial?: string): Promise<string | null> {
     return p.isCancel(v) ? null : v;
 }
 
+/** Whether a setting is read from the environment or the keychain rather than written in */
+function isCredentialReference(value: ConnectionConfig['host']): value is Exclude<ConnectionConfig['host'], string | undefined> {
+    return typeof value === 'object' && value !== null;
+}
+
+/** Keep a referenced setting as it is, and say so, since a prompt would replace it */
+function keepReference(label: string, value: ConnectionConfig['host']): ConnectionConfig['host'] {
+    const where = typeof value === 'object' && value !== null && '$env' in value
+        ? `environment variable ${value.$env}`
+        : 'the OS keychain';
+    p.log.info(`${label} is read from ${where}. Kept as it is; change it in ${writableConfigPath()}.`);
+    return value;
+}
+
 async function promptForPort(defaultPort: number, initial?: number): Promise<number | null> {
     const v = await p.text({
         message: 'Port',
         placeholder: String(defaultPort),
         initialValue: initial?.toString() || String(defaultPort),
         validate: (value) => {
-            if (value && isNaN(parseInt(value))) return 'Port must be a number';
+            const port = Number(value);
+            if (!value || !Number.isInteger(port) || port < 1 || port > 65535) {
+                return 'Enter a port between 1 and 65535';
+            }
         },
     });
     if (p.isCancel(v)) return null;
-    return parseInt(v as string, 10);
+    return Number(v);
 }
 
 async function promptForDbName(initial?: string): Promise<string | null> {
@@ -845,7 +838,7 @@ async function promptForStorageMethod(): Promise<'keychain' | 'env' | null> {
         message: 'Where should the password be stored?',
         options: [
             { value: 'keychain', label: 'OS Keychain', hint: 'Recommended - encrypted by OS' },
-            { value: 'env', label: 'Environment file', hint: '~/.config/sherlock/.env' },
+            { value: 'env', label: 'Environment file', hint: getEnvFilePath() },
         ],
     });
     return p.isCancel(v) ? null : (v as 'keychain' | 'env');
@@ -914,9 +907,11 @@ async function promptForConnection(
 
     // ---- Redis branch ----
     if (type === DB_TYPES.REDIS) {
-        let host: string;
+        let host: ConnectionConfig['host'];
         if (prefill?.host != null) {
             host = prefill.host;
+        } else if (isCredentialReference(existingConfig?.host)) {
+            host = keepReference('Host', existingConfig!.host);
         } else {
             const v = await promptForHost(existingConfig?.host as string | undefined);
             if (v === null) return null;
@@ -990,9 +985,11 @@ async function promptForConnection(
     }
 
     // ---- Generic SQL branch (postgres / mysql / mssql) ----
-    let host: string;
+    let host: ConnectionConfig['host'];
     if (prefill?.host != null) {
         host = prefill.host;
+    } else if (isCredentialReference(existingConfig?.host)) {
+        host = keepReference('Host', existingConfig!.host);
     } else {
         const v = await promptForHost(existingConfig?.host as string | undefined);
         if (v === null) return null;
@@ -1017,9 +1014,11 @@ async function promptForConnection(
         database = v;
     }
 
-    let username: string;
+    let username: ConnectionConfig['username'];
     if (prefill?.username != null) {
         username = prefill.username;
+    } else if (isCredentialReference(existingConfig?.username)) {
+        username = keepReference('Username', existingConfig!.username);
     } else {
         const initial = typeof existingConfig?.username === 'string' ? existingConfig.username : undefined;
         const v = await promptForUsername(initial);
@@ -1550,6 +1549,85 @@ async function promptForDirectory(existingDirectory?: string): Promise<string | 
 }
 
 /**
+ * The config the wizard edits: the user config that `saveConfig` writes, not
+ * whichever file discovery would pick. Reading a project's .sherlock.json or
+ * SHERLOCK_CONFIG here would copy all of its connections, tunnels included,
+ * into the user config on the next save. Null when it cannot be read.
+ */
+function loadWritableConfig(): SherlockConfig | null {
+    try {
+        return loadOrCreateConfig();
+    } catch (error) {
+        p.log.error(`Could not read ${writableConfigPath()}: ${error instanceof Error ? error.message : String(error)}`);
+        return null;
+    }
+}
+
+/**
+ * Save the user config, and say so when commands run here read a different
+ * file and so will not see the change.
+ */
+function saveConfig(config: SherlockConfig): void {
+    writeConfig(config);
+    const shadowed = shadowingWarning();
+    if (shadowed) p.log.warn(shadowed);
+}
+
+/** Whether a password reference is the keychain entry named after a connection */
+export function usesOwnKeychainEntry(password: ConnectionConfig['password'], connName: string): boolean {
+    return typeof password === 'object' && password !== null && '$keychain' in password &&
+        (password.$keychain === connName ||
+            (typeof password.$keychain === 'object' && password.$keychain.account === connName &&
+                (password.$keychain.service ?? 'sherlock') === 'sherlock'));
+}
+
+/**
+ * Move a connection's keychain password to the entry for its new name, and
+ * point the config at it. Returns false, having said why, when it could not
+ * be moved; the rename should then not go ahead.
+ */
+function moveKeychainEntry(config: ConnectionConfig, oldName: string, newName: string): boolean {
+    if (!usesOwnKeychainEntry(config.password, oldName)) return true;
+
+    const secret = getKeychainPassword(oldName);
+    if (secret === null) {
+        // Nothing to move. Point at the new name so a password stored later lands there.
+        config.password = { $keychain: newName };
+        return true;
+    }
+    if (hasKeychainPassword(newName)) {
+        p.log.error(
+            `The keychain already has an entry for "${newName}", so the password of "${oldName}" ` +
+            `cannot be moved there. Nothing was renamed.`
+        );
+        return false;
+    }
+    setKeychainPassword(newName, secret);
+    config.password = { $keychain: newName };
+    deleteKeychainPassword(oldName);
+    p.log.info(`Moved the keychain password from "${oldName}" to "${newName}".`);
+    return true;
+}
+
+/**
+ * Delete a connection: its config, the keychain entry it uses if that entry
+ * is named after it, and its tunnel if one is running.
+ */
+async function removeConnection(config: SherlockConfig, connName: string): Promise<void> {
+    const conn = config.connections[connName];
+    delete config.connections[connName];
+    if (conn && usesOwnKeychainEntry(conn.password, connName) && hasKeychainPassword(connName)) {
+        deleteKeychainPassword(connName);
+    }
+    if (conn?.tunnel) await stopTunnel(connName).catch(() => undefined);
+    saveConfig(config);
+    p.log.success(`Connection "${connName}" deleted.`);
+    if (conn && typeof conn.password === 'object' && conn.password !== null && '$env' in conn.password) {
+        p.log.info(`Its password variable ${conn.password.$env} was left in place, in case anything else uses it.`);
+    }
+}
+
+/**
  * Handle password storage based on user's choice
  */
 async function handlePasswordStorage(
@@ -1570,7 +1648,7 @@ async function handlePasswordStorage(
  */
 async function saveToEnvFile(key: string, value: string): Promise<void> {
     ensureConfigDir();
-    const envPath = path.join(getConfigDir(), '.env');
+    const envPath = getEnvFilePath();
 
     let content = '';
     if (fs.existsSync(envPath)) {
@@ -1580,7 +1658,8 @@ async function saveToEnvFile(key: string, value: string): Promise<void> {
     // Check if key already exists
     const regex = new RegExp(`^${key}=.*$`, 'm');
     if (regex.test(content)) {
-        content = content.replace(regex, `${key}=${value}`);
+        // A function, so that "$&" or "$1" in a password is not expanded
+        content = content.replace(regex, () => `${key}=${value}`);
     } else {
         if (content && !content.endsWith('\n')) {
             content += '\n';

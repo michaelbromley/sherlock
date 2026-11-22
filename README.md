@@ -436,8 +436,11 @@ Credentials can come from:
 # Store a password
 sherlock keychain set prod-db
 
-# Check which connections have keychain passwords
+# Show where each connection's password comes from, and whether it is there
 sherlock keychain list
+
+# Check whether an entry exists (never prints the password)
+sherlock keychain get prod-db
 
 # Delete a password
 sherlock keychain delete prod-db
