@@ -1,26 +1,30 @@
 /**
- * Database connection handling
- * Manages creating and using database connections
+ * Database connection handling: open the driver for a connection's type, and
+ * classify everything it throws.
+ *
+ *   PostgreSQL  the `postgres` package     ./drivers/postgres
+ *   MySQL       `mysql2`                    ./drivers/mysql
+ *   SQLite      `bun:sqlite`                ./drivers/sqlite
+ *   SQL Server  `mssql`                     ./mssql-adapter
+ *
+ * Every statement run through the adapter is read-only at the database level
+ * as well as by sherlock's guard: see `./read-only`.
  */
 
-import { SQL } from 'bun';
-import { resolveConnection, PUBLIC_KEY_RETRIEVAL_PARAM } from '../config';
+import { resolveConnection } from '../config';
 import { startTunnelKeepalive } from '../tunnel/manager';
 import type { ResolvedConnectionConfig } from '../config/types';
-import { DB_TYPES, parseBoolParam } from '../db-types';
-import { MssqlAdapter, type SqlAdapter } from './mssql-adapter';
+import { DB_TYPES } from '../db-types';
+import { MssqlAdapter } from './mssql-adapter';
+import type { SqlAdapter } from './adapter';
 import { parseDuration } from '../tunnel/config';
 import type { WarningSink } from '../output/warnings';
-import { connectTimeoutFor, connectTimeoutSeconds } from './connect-timeout';
+import { connectTimeoutFor } from './connect-timeout';
 import { classifyDbError } from './errors';
-import {
-    DEFAULT_STATEMENT_TIMEOUT,
-    isUnknownTimeoutVariableError,
-    readOnlyWrapper,
-    runWrapped,
-    type MysqlTimeoutVariable,
-    type StatementRunner,
-} from './read-only';
+import { DEFAULT_STATEMENT_TIMEOUT } from './read-only';
+import { openPostgres } from './drivers/postgres';
+import { openMysql } from './drivers/mysql';
+import { openSqlite } from './drivers/sqlite';
 
 /** Re-export SqlAdapter so callers can use it as a type */
 export type { SqlAdapter };
@@ -40,155 +44,43 @@ function statementTimeoutFor(config: ResolvedConnectionConfig, options?: Connect
         ?? parseDuration(DEFAULT_STATEMENT_TIMEOUT);
 }
 
+/** Open the driver for the connection's type */
+async function openDriver(config: ResolvedConnectionConfig, statementTimeoutMs: number): Promise<SqlAdapter> {
+    const connectTimeoutMs = connectTimeoutFor(config);
+    switch (config.type) {
+        case DB_TYPES.POSTGRES:
+            return openPostgres({ url: config.url, connectTimeoutMs, statementTimeoutMs });
+        case DB_TYPES.MYSQL:
+            return openMysql({ url: config.url, connectTimeoutMs, statementTimeoutMs });
+        case DB_TYPES.SQLITE:
+            return openSqlite(config.url);
+        case DB_TYPES.MSSQL:
+            return MssqlAdapter.connect(config.url, { requestTimeoutMs: statementTimeoutMs, connectTimeoutMs });
+        default:
+            throw new Error(`Unsupported database type: ${config.type}`);
+    }
+}
+
 /**
- * Create a connection from resolved config.
- * Returns a SqlAdapter (either a Bun SQL wrapper or MssqlAdapter).
- *
- * Every statement run through the adapter is read-only at the database level
- * as well as by sherlock's guard: see `./read-only`.
+ * Create a connection from resolved config. Whatever the driver throws,
+ * opening or running a statement, comes out classified.
  */
 export async function createConnection(
     config: ResolvedConnectionConfig,
     options?: ConnectionOptions
 ): Promise<SqlAdapter> {
     const timeoutMs = statementTimeoutFor(config, options);
-
-    if (config.type === DB_TYPES.MSSQL) {
-        const adapter = await MssqlAdapter.connect(config.url, {
-            requestTimeoutMs: timeoutMs,
-            connectTimeoutMs: connectTimeoutFor(config),
-        }).catch((error) => {
-            throw classifyDbError(error, config);
+    const classified = <T>(run: () => Promise<T>): Promise<T> =>
+        run().catch((error: unknown) => {
+            throw classifyDbError(error, config, timeoutMs);
         });
-        return {
-            unsafe: (query: string) => adapter.unsafe(query).catch((error) => {
-                throw classifyDbError(error, config, timeoutMs);
-            }),
-            close: () => adapter.close(),
-        };
-    }
 
-    const sql = openBunSql(config);
-
-    if (config.type === DB_TYPES.SQLITE) {
-        // A local file: no transaction or timeout needed, but the connection
-        // itself refuses writes. Bun.SQL holds one connection for SQLite, so
-        // setting the pragma once covers every later statement.
-        let readOnly: Promise<unknown> | null = null;
-        return {
-            unsafe: async (query: string) => {
-                try {
-                    readOnly ??= sql.unsafe('PRAGMA query_only = ON');
-                    await readOnly;
-                    return (await sql.unsafe(query)) as unknown[];
-                } catch (error) {
-                    throw classifyDbError(error, config);
-                }
-            },
-            close: () => sql.close(),
-        };
-    }
-
-    // MySQL and MariaDB name the timeout variable differently. Try MySQL's
-    // first and remember which one the server knows.
-    let mysqlVariable: MysqlTimeoutVariable = 'max_execution_time';
-
-    const runReadOnly = async (query: string): Promise<unknown[]> => {
-        const wrapper = readOnlyWrapper(config.type, timeoutMs, mysqlVariable);
-        if (!wrapper) return (await sql.unsafe(query)) as unknown[];
-
-        // MySQL is opened with a single connection (see openBunSql), so every
-        // statement already shares one session.
-        if (config.type === DB_TYPES.MYSQL) {
-            return runWrapped(singleStatementRunner(sql), wrapper, query);
-        }
-
-        // Elsewhere, reserve a connection so the transaction and the statement
-        // are guaranteed to share a session.
-        const reserved = await sql.reserve();
-        try {
-            return await runWrapped(singleStatementRunner(reserved), wrapper, query);
-        } finally {
-            reserved.release();
-        }
-    };
-
-    // Statements are run one at a time. On a single connection, two wrapped
-    // statements running at once would interleave inside one transaction.
-    let queue: Promise<unknown> = Promise.resolve();
-    const serially = <T>(task: () => Promise<T>): Promise<T> => {
-        const run = queue.then(task, task);
-        queue = run.catch(() => undefined);
-        return run;
-    };
-
+    const adapter = await classified(() => openDriver(config, timeoutMs));
     return {
-        unsafe: (query: string) => serially(async () => {
-            try {
-                return await runReadOnly(query);
-            } catch (error) {
-                if (
-                    config.type === DB_TYPES.MYSQL &&
-                    mysqlVariable === 'max_execution_time' &&
-                    isUnknownTimeoutVariableError(error)
-                ) {
-                    mysqlVariable = 'max_statement_time';
-                    return runReadOnly(query).catch((retryError) => {
-                        throw classifyDbError(retryError, config, timeoutMs);
-                    });
-                }
-                throw classifyDbError(error, config, timeoutMs);
-            }
-        }),
-        close: () => sql.close(),
+        unsafe: (query) => classified(() => adapter.unsafe(query)),
+        fetch: (query, fetchOptions) => classified(() => adapter.fetch(query, fetchOptions)),
+        close: () => adapter.close(),
     };
-}
-
-/**
- * A runner whose `single` sends the statement as a tagged-template query with
- * no values. Bun prepares those, using the extended protocol on PostgreSQL and
- * a prepared statement on MySQL, and both servers refuse more than one
- * statement there. `unsafe` uses the simple protocol, which runs any number.
- */
-function singleStatementRunner(sql: SQL | Bun.ReservedSQL): StatementRunner {
-    return {
-        unsafe: (query) => sql.unsafe(query) as Promise<unknown[]>,
-        single: (query) => {
-            const strings = Object.assign([query], { raw: [query] }) as unknown as TemplateStringsArray;
-            return sql(strings) as Promise<unknown[]>;
-        },
-    };
-}
-
-/**
- * Bun.SQL reads `allowPublicKeyRetrieval` only from its constructor options,
- * not from the URL, so move it out of the URL.
- */
-function openBunSql(config: ResolvedConnectionConfig): SQL {
-    const connectionTimeout = connectTimeoutSeconds(connectTimeoutFor(config));
-    if (config.type !== DB_TYPES.MYSQL) {
-        // SQLite opens a file and has no connect timeout to set.
-        return config.type === DB_TYPES.SQLITE ? new SQL(config.url) : new SQL(config.url, { connectionTimeout });
-    }
-
-    // One connection, so the session settings and the transaction that the
-    // read-only wrapper opens apply to the statement that follows. Bun.SQL's
-    // reserve() cannot be used for this: after a SET SESSION on a reserved
-    // MySQL connection, the next reserve() never settles.
-    const pool = { max: 1, connectionTimeout };
-
-    let parsed: URL;
-    try {
-        parsed = new URL(config.url);
-    } catch {
-        // Leave the error to Bun.SQL, which reports unparseable URLs itself
-        return new SQL(config.url, pool);
-    }
-    const allowPublicKeyRetrieval = parseBoolParam(parsed.searchParams.get(PUBLIC_KEY_RETRIEVAL_PARAM)) === true;
-    parsed.searchParams.delete(PUBLIC_KEY_RETRIEVAL_PARAM);
-    // The Bun runtime supports this option, but the pinned bun-types predate it
-    const options = { ...pool, allowPublicKeyRetrieval } as Bun.SQL.PostgresOrMySQLOptions;
-    return new SQL(parsed.toString(), options);
 }
 
 /**

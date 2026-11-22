@@ -26,13 +26,26 @@ describe('readOnlyWrapper', () => {
 
     it('sets the session limit before the transaction on MySQL', () => {
         expect(readOnlyWrapper('mysql', 60_000)).toEqual({
-            before: ['SET SESSION max_execution_time = 60000', 'START TRANSACTION READ ONLY'],
+            before: ['SET SESSION TRANSACTION READ ONLY', 'SET SESSION max_execution_time = 60000', 'START TRANSACTION READ ONLY'],
             after: ['ROLLBACK'],
         });
     });
 
+    it('limits the rows MySQL returns when asked, and resets the limit afterwards', () => {
+        expect(readOnlyWrapper('mysql', 60_000, 'max_execution_time', 201)).toEqual({
+            before: [
+                'SET SESSION TRANSACTION READ ONLY',
+                'SET SESSION max_execution_time = 60000',
+                'SET SESSION sql_select_limit = 201',
+                'START TRANSACTION READ ONLY',
+            ],
+            after: ['ROLLBACK', 'SET SESSION sql_select_limit = DEFAULT'],
+        });
+        expect(() => readOnlyWrapper('mysql', 60_000, 'max_execution_time', 0)).toThrow();
+    });
+
     it('uses seconds for the MariaDB variable', () => {
-        expect(readOnlyWrapper('mysql', 1500, 'max_statement_time')?.before[0]).toBe(
+        expect(readOnlyWrapper('mysql', 1500, 'max_statement_time')?.before[1]).toBe(
             'SET SESSION max_statement_time = 1.5'
         );
     });
@@ -123,14 +136,13 @@ it('words the server\'s refusal of a second statement as sherlock does', () => {
     expect(explainMultipleStatements(other)).toBe(other);
 });
 
-it('runs the user\'s statement through the single-statement path when there is one', async () => {
+it('runs a body of its own between the opening and closing statements', async () => {
     const calls: string[] = [];
-    const runner = {
-        unsafe: async (query: string) => { calls.push(`unsafe ${query}`); return []; },
-        single: async (query: string) => { calls.push(`single ${query}`); return [{ ok: 1 }]; },
-    };
-    expect(await runWrapped(runner, readOnlyWrapper('postgres', 1000)!, 'SELECT 1')).toEqual([{ ok: 1 }]);
-    expect(calls).toEqual([
-        'unsafe BEGIN TRANSACTION READ ONLY', 'unsafe SET LOCAL statement_timeout = 1000', 'single SELECT 1', 'unsafe ROLLBACK',
-    ]);
+    const runner = { unsafe: async (query: string) => { calls.push(query); return []; } };
+    const result = await runWrapped(runner, readOnlyWrapper('postgres', 1000)!, async () => {
+        calls.push('body');
+        return 'done';
+    });
+    expect(result).toBe('done');
+    expect(calls).toEqual(['BEGIN TRANSACTION READ ONLY', 'SET LOCAL statement_timeout = 1000', 'body', 'ROLLBACK']);
 });

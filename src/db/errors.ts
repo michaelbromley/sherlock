@@ -1,9 +1,10 @@
 /**
  * Turn whatever a database driver throws into a SherlockError with a code.
  *
- * The drivers report causes as codes, not just messages: SQLSTATE on
- * PostgreSQL (`errno`), `errno` and `sqlState` on MySQL, `SQLITE_*` codes on
- * SQLite, and `code` plus a server `number` from mssql. Classification uses
+ * The drivers report causes as codes, not just messages: SQLSTATE in `code`
+ * on PostgreSQL, `errno` and `sqlState` on MySQL, `SQLITE_*` codes on SQLite,
+ * and `code` plus a server `number` from mssql. Network failures carry Node's
+ * codes, such as ECONNREFUSED. Classification uses
  * those, so a reworded driver message cannot change a code.
  */
 
@@ -24,7 +25,7 @@ interface DriverError {
 }
 
 /** Errors the drivers raise for a statement the database rejected */
-const DRIVER_ERROR_NAMES = new Set(['PostgresError', 'MySQLError', 'SQLiteError', 'RequestError']);
+const DRIVER_ERROR_NAMES = new Set(['PostgresError', 'SQLiteError', 'RequestError']);
 
 /** Certificate failures, as Node and Bun name them */
 const CERTIFICATE_CODES = new Set([
@@ -38,11 +39,23 @@ const CERTIFICATE_CODES = new Set([
     'ERR_TLS_CERT_ALTNAME_INVALID',
 ]);
 
+/** A PostgreSQL SQLSTATE, which the postgres package puts in `code` */
+function sqlStateOf(error: DriverError): string | undefined {
+    if (error.name === 'PostgresError' && typeof error.code === 'string' && /^[0-9A-Z]{5}$/.test(error.code)) return error.code;
+    return undefined;
+}
+
+/** Whether an error came from a MySQL server, rather than the network */
+function isMysqlServerError(error: DriverError): boolean {
+    return typeof error.sqlState === 'string' || (typeof error.code === 'string' && error.code.startsWith('ER_'));
+}
+
 /** The database's own code for an error: SQLSTATE, MySQL errno or SQL Server number */
 function dbCodeOf(error: DriverError): string | number | undefined {
-    if (typeof error.errno === 'string') return error.errno; // PostgreSQL SQLSTATE
+    const sqlState = sqlStateOf(error);
+    if (sqlState !== undefined) return sqlState;
     if (typeof error.code === 'string' && error.code.startsWith('SQLITE_')) return error.code;
-    if (typeof error.errno === 'number') return error.errno; // MySQL
+    if (typeof error.errno === 'number' && isMysqlServerError(error)) return error.errno;
     if (typeof error.number === 'number') return error.number; // SQL Server
     if (typeof error.sqlState === 'string') return error.sqlState;
     return undefined;
@@ -59,7 +72,8 @@ function usernameOf(url: string): string | undefined {
 }
 
 function isAuthFailure(error: DriverError, message: string): boolean {
-    return error.errno === '28P01' || error.errno === '28000' || // PostgreSQL
+    const sqlState = sqlStateOf(error);
+    return sqlState === '28P01' || sqlState === '28000' || // PostgreSQL
         error.errno === 1045 || error.sqlState === '28000' || // MySQL
         error.code === 'ELOGIN' || // SQL Server
         /^(WRONGPASS|NOAUTH)\b/.test(message); // Redis
@@ -69,7 +83,8 @@ function isAuthFailure(error: DriverError, message: string): boolean {
 function tlsFailure(error: DriverError, message: string): string | null {
     const code = typeof error.code === 'string' ? error.code : '';
     if (CERTIFICATE_CODES.has(code)) return code;
-    if (/^ERR_(POSTGRES|MYSQL|REDIS)_\w*(TLS|SSL)\w*$/.test(code)) return code;
+    // SSL_NOT_SUPPORTED (postgres), HANDSHAKE_SSL_ERROR and HANDSHAKE_NO_SSL_SUPPORT (mysql2), ERR_REDIS_TLS_* (Bun)
+    if (/(^|_)(TLS|SSL)(_|$)/.test(code)) return code;
     if (/server does not support ssl|ssl is not enabled on the server|certificate|tls handshake|ssl routines/i.test(message)) {
         return code || 'TLS';
     }
@@ -77,7 +92,7 @@ function tlsFailure(error: DriverError, message: string): string | null {
 }
 
 function isReadOnlyViolation(error: DriverError): boolean {
-    return error.errno === '25006' || error.sqlState === '25006' || // PostgreSQL, MySQL
+    return sqlStateOf(error) === '25006' || error.sqlState === '25006' || // PostgreSQL, MySQL
         error.errno === 1792 || // MySQL: statement in a READ ONLY transaction
         error.code === 'SQLITE_READONLY';
 }
@@ -102,7 +117,7 @@ export function classifyDbError(error: unknown, config: ResolvedConnectionConfig
     const driver = (error ?? {}) as DriverError;
     const message = error instanceof Error ? error.message : String(error);
 
-    if (driver.code === 'ERR_MYSQL_PUBLIC_KEY_RETRIEVAL_NOT_ALLOWED') {
+    if (driver.code === 'PUBLIC_KEY_RETRIEVAL_NOT_ALLOWED') {
         return new SherlockError(
             'TLS_FAILED',
             "MySQL needs TLS or the server's RSA public key to log in this user (caching_sha2_password).",

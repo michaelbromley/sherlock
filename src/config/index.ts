@@ -386,8 +386,8 @@ export function buildConnectionUrl(
 
 /**
  * Query param that carries the MySQL `allowPublicKeyRetrieval` option in a
- * connection URL, named as in JDBC. Bun.SQL only accepts the option in its
- * constructor, so `createConnection` strips the param and passes it there.
+ * connection URL, named as in JDBC. The MySQL driver reads it from the URL
+ * and refuses to ask the server for its key without it.
  */
 export const PUBLIC_KEY_RETRIEVAL_PARAM = 'allowPublicKeyRetrieval';
 
@@ -688,7 +688,7 @@ async function buildResolvedConnection(
     // Handle SQLite
     if (config.type === DB_TYPES.SQLITE) {
         const filename = config.filename || config.path || config.database || ':memory:';
-        // Bun.SQL requires file:// protocol for SQLite paths
+        // A file:// URL, which the SQLite driver reads the path from
         let url = filename;
         if (filename !== ':memory:' && !filename.startsWith('file:')) {
             url = `file://${filename}`;

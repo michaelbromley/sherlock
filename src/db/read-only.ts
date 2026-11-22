@@ -23,14 +23,10 @@ export const DEFAULT_STATEMENT_TIMEOUT = '60s';
 /** Something statements can be run on, one after another, on one connection */
 export interface StatementRunner {
     unsafe(query: string): Promise<unknown[]>;
-    /**
-     * Run exactly one statement, through a protocol on which the server itself
-     * refuses a second one. The user's statement is run this way when the
-     * database offers it, so that a statement the guard misjudged cannot end
-     * the read-only transaction and write after it.
-     */
-    single?(query: string): Promise<unknown[]>;
 }
+
+/** Makes every later transaction of a MySQL session read-only */
+const SESSION_READ_ONLY = 'SET SESSION TRANSACTION READ ONLY';
 
 /** Which variable a MySQL-family server limits statement time with */
 export type MysqlTimeoutVariable = 'max_execution_time' | 'max_statement_time';
@@ -49,14 +45,22 @@ export interface ReadOnlyWrapper {
  *
  * `timeoutMs` must be a positive integer. It is interpolated into SQL, so it
  * is checked here rather than trusted.
+ *
+ * On MySQL, `selectLimit` stops the server after that many rows with
+ * `sql_select_limit`, without changing the query. A LIMIT in the query itself
+ * still wins.
  */
 export function readOnlyWrapper(
     type: DbType,
     timeoutMs: number,
-    mysqlTimeoutVariable: MysqlTimeoutVariable = 'max_execution_time'
+    mysqlTimeoutVariable: MysqlTimeoutVariable = 'max_execution_time',
+    selectLimit?: number
 ): ReadOnlyWrapper | null {
     if (!Number.isInteger(timeoutMs) || timeoutMs <= 0) {
         throw new Error(`Statement timeout must be a positive whole number of milliseconds, got ${timeoutMs}.`);
+    }
+    if (selectLimit !== undefined && (!Number.isInteger(selectLimit) || selectLimit <= 0)) {
+        throw new Error(`Row limit must be a positive whole number, got ${selectLimit}.`);
     }
 
     if (type === DB_TYPES.POSTGRES) {
@@ -69,12 +73,24 @@ export function readOnlyWrapper(
     if (type === DB_TYPES.MYSQL) {
         // Session variables, set before the transaction: neither server accepts
         // a transaction-scoped form. The session is sherlock's own.
+        //
+        // The session itself is made read-only too. A DDL statement such as
+        // CREATE TABLE commits the open transaction implicitly and then runs
+        // outside it, so a read-only transaction alone does not stop it; a
+        // read-only session covers the transaction that follows.
         const limit = mysqlTimeoutVariable === 'max_execution_time'
             ? `SET SESSION max_execution_time = ${timeoutMs}`
             : `SET SESSION max_statement_time = ${timeoutMs / 1000}`;
+        if (selectLimit === undefined) {
+            return {
+                before: [SESSION_READ_ONLY, limit, 'START TRANSACTION READ ONLY'],
+                after: ['ROLLBACK'],
+            };
+        }
         return {
-            before: [limit, 'START TRANSACTION READ ONLY'],
-            after: ['ROLLBACK'],
+            before: [SESSION_READ_ONLY, limit, `SET SESSION sql_select_limit = ${selectLimit}`, 'START TRANSACTION READ ONLY'],
+            // The session outlives the statement: later statements must not be limited.
+            after: ['ROLLBACK', 'SET SESSION sql_select_limit = DEFAULT'],
         };
     }
 
@@ -82,22 +98,27 @@ export function readOnlyWrapper(
 }
 
 /**
- * Run one statement inside a wrapper on a single connection. The closing
- * statements always run, and a failure in them never hides the statement's
- * own error.
+ * Run a statement, or a body that runs statements, inside a wrapper on a
+ * single connection. The closing statements always run, and a failure in them
+ * never hides the body's own error.
+ *
+ * The driver decides how the user's statement is run inside it, through a
+ * protocol on which the server itself refuses a second statement where there is
+ * one, so that a statement the guard misjudged cannot end the read-only
+ * transaction and write after it.
  */
-export async function runWrapped(
+export async function runWrapped<T = unknown[]>(
     runner: StatementRunner,
     wrapper: ReadOnlyWrapper,
-    query: string
-): Promise<unknown[]> {
+    body: string | (() => Promise<T>)
+): Promise<T> {
     let opened = 0;
     try {
         for (const statement of wrapper.before) {
             await runner.unsafe(statement);
             opened += 1;
         }
-        return await (runner.single ? runner.single(query) : runner.unsafe(query));
+        return typeof body === 'string' ? await runner.unsafe(body) as T : await body();
     } finally {
         // Nothing to roll back if not even the first statement ran.
         if (opened > 0) {

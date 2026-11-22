@@ -4,7 +4,7 @@
  */
 
 import { DB_TYPES, type DbType } from '../db-types';
-import type { SqlAdapter } from './mssql-adapter';
+import type { SqlAdapter } from './adapter';
 import { SherlockError, usageError } from '../errors';
 
 /** Valid SQL identifier pattern (prevents injection via malicious names) */
@@ -53,24 +53,10 @@ export async function validateTableExists(
     }
 }
 
-/** Result from executing a query */
-export interface QueryResult {
-    rowCount?: number;
-    rows?: unknown[];
-    error?: string;
-}
-
 /** Table description result */
 export interface TableDescription {
     table: string;
     columns: unknown[];
-}
-
-/** Sample result */
-export interface SampleResult {
-    table: string;
-    rowCount: number;
-    rows: unknown[];
 }
 
 /** Indexes result */
@@ -196,14 +182,15 @@ export async function describeTable(
 }
 
 /**
- * Get random sample rows from a table
+ * The statement that picks random sample rows from a table, once the table is
+ * known to exist. Its rows are fetched as a result like the user's own query.
  */
-export async function sampleTable(
+export async function sampleQuery(
     sql: SqlAdapter,
     dbType: DbType,
     tableName: string,
     limit: number
-): Promise<SampleResult> {
+): Promise<string> {
     await validateTableExists(sql, dbType, tableName);
 
     const quotedTable = quoteIdentifier(tableName, dbType);
@@ -217,13 +204,7 @@ export async function sampleTable(
         // PostgreSQL and SQLite both use RANDOM()
         query = `SELECT * FROM ${quotedTable} ORDER BY RANDOM() LIMIT ${limit}`;
     }
-
-    const result = await sql.unsafe(query);
-    return {
-        table: tableName,
-        rowCount: Array.isArray(result) ? result.length : 0,
-        rows: result,
-    };
+    return query;
 }
 
 /**
@@ -531,20 +512,4 @@ export async function introspectSchema(
     }
 
     return schema;
-}
-
-/**
- * Execute a read-only SQL query
- */
-export async function executeQuery(
-    sql: SqlAdapter,
-    query: string
-): Promise<QueryResult> {
-    // A failure is thrown, already classified by the connection, so a query
-    // the database rejects fails the command rather than printing as a result.
-    const result = await sql.unsafe(query);
-    return {
-        rowCount: Array.isArray(result) ? result.length : 0,
-        rows: result,
-    };
 }

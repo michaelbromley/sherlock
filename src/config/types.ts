@@ -51,6 +51,15 @@ export interface ConnectionConfig {
      */
     connectTimeout?: string;
 
+    /** Most rows a result returns, unless a command says otherwise. Default 200. */
+    maxRows?: number;
+
+    /** Most characters of a text cell in a result. Default 500. */
+    maxCellChars?: number;
+
+    /** Most bytes of a whole result, as compact JSON. Default 32768 (about 8,000 tokens). */
+    maxBytes?: number;
+
     /**
      * Port-forwarding process to run before connecting, for databases that are
      * only reachable through a tunnel. When set, the connection's host and port

@@ -55,10 +55,38 @@ export function formatAsMarkdown(rows: unknown[]): string {
 }
 
 /**
+ * Format rows that come as arrays, with their column names given once, as a
+ * markdown table. Duplicate column names stay separate columns.
+ */
+export function formatRowsAsMarkdown(columns: Array<{ name: string }>, rows: unknown[][]): string {
+    if (columns.length === 0) return '_No columns_';
+    const header = '| ' + columns.map((column) => column.name.replace(/\|/g, '\\|')).join(' | ') + ' |';
+    const separator = '| ' + columns.map(() => '---').join(' | ') + ' |';
+    if (rows.length === 0) return [header, separator, '', '_No rows returned_'].join('\n');
+    const dataRows = rows.map((row) => '| ' + columns.map((_, i) => escapeMarkdownCell(row[i])).join(' | ') + ' |');
+    return [header, separator, ...dataRows].join('\n');
+}
+
+/** A result's columns and rows, when the data is one */
+function asResult(data: unknown): { columns: Array<{ name: string }>; rows: unknown[][]; note: string } | null {
+    if (typeof data !== 'object' || data === null) return null;
+    const d = data as { columns?: unknown; rows?: unknown; preview?: unknown; rowCount?: number; truncated?: unknown; file?: string };
+    const rows = d.rows ?? d.preview;
+    if (!Array.isArray(d.columns) || !Array.isArray(rows) || !rows.every(Array.isArray)) return null;
+    const notes: string[] = [];
+    if (d.file) notes.push(`${d.rowCount} rows written to ${d.file}; the first ${rows.length} are shown`);
+    else notes.push(`${d.rowCount ?? rows.length} rows`);
+    if (d.truncated) notes.push('cut to fit; see the warnings');
+    return { columns: d.columns as Array<{ name: string }>, rows: rows as unknown[][], note: notes.join(', ') };
+}
+
+/**
  * Format output based on format option
  */
 export function formatOutput(data: unknown, format: OutputFormat): string {
     if (format === 'markdown') {
+        const result = asResult(data);
+        if (result) return `${result.note}\n\n${formatRowsAsMarkdown(result.columns, result.rows)}`;
         // If data has a 'rows' property, format those as a table
         if (typeof data === 'object' && data !== null && 'rows' in data) {
             const d = data as { rows: unknown[]; rowCount?: number };

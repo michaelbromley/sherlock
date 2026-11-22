@@ -3,7 +3,7 @@
  *
  * A tunnel accepts connections locally even when its far end is gone, so
  * without a limit a dead tunnel looks like a database that is thinking. The
- * drivers' own defaults are long (30s for Bun.SQL), and a command that runs
+ * drivers' own defaults are long (30s for the postgres package), and a command that runs
  * several connections multiplies them. A short limit, and an error that names
  * the tunnel, turns that into an answer.
  */
@@ -20,15 +20,16 @@ export function connectTimeoutFor(config: ResolvedConnectionConfig): number {
     return config.connectTimeoutMs ?? parseDuration(DEFAULT_CONNECT_TIMEOUT);
 }
 
-/** Bun.SQL takes the connect timeout in whole seconds */
-export function connectTimeoutSeconds(ms: number): number {
-    return Math.max(1, Math.ceil(ms / 1000));
-}
-
 const TIMEOUT_CODES = new Set([
-    'ERR_POSTGRES_CONNECTION_TIMEOUT',
-    'ERR_MYSQL_CONNECTION_TIMEOUT',
-    'ERR_REDIS_CONNECTION_TIMEOUT',
+    'CONNECT_TIMEOUT', // postgres
+    'ETIMEDOUT', // mysql2, and the network itself
+    'ERR_REDIS_CONNECTION_TIMEOUT', // Bun's Redis client
+]);
+
+/** The far end closed the connection, as each driver says it */
+const CLOSED_CODES = new Set([
+    'CONNECTION_CLOSED', 'CONNECTION_ENDED', 'CONNECTION_DESTROYED', // postgres
+    'PROTOCOL_CONNECTION_LOST', 'ECONNRESET', // mysql2, and the network itself
 ]);
 
 /** Whether an error says the connection could not be opened in time */
@@ -47,7 +48,7 @@ export function isConnectTimeoutError(error: unknown): boolean {
  */
 function isClosedBeforeEstablished(error: unknown): boolean {
     const { code, message } = (error ?? {}) as { code?: unknown; message?: unknown };
-    return code === 'ERR_POSTGRES_CONNECTION_FAILED' || code === 'ERR_MYSQL_CONNECTION_FAILED' ||
+    return (typeof code === 'string' && CLOSED_CODES.has(code)) ||
         (typeof message === 'string' && /closed before the connection was established/i.test(message));
 }
 
@@ -56,9 +57,9 @@ function formatMs(ms: number): string {
 }
 
 const REFUSED_CODES = new Set([
-    'ERR_POSTGRES_CONNECTION_REFUSED',
-    'ERR_MYSQL_CONNECTION_REFUSED',
-    'ERR_REDIS_CONNECTION_CLOSED',
+    // The network itself, as the postgres and mysql2 drivers report it
+    'ECONNREFUSED', 'ENOTFOUND', 'EAI_AGAIN', 'EHOSTUNREACH', 'ENETUNREACH',
+    'ERR_REDIS_CONNECTION_CLOSED', // Bun's Redis client
 ]);
 
 /**

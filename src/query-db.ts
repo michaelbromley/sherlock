@@ -40,6 +40,10 @@ import { initConfig, migrateConfig } from './config/init';
 // Query validation
 import { validateReadOnlyQuery, queryRefusedError } from './query-validation';
 
+// Results
+import { buildResult, DEFAULT_CAPS, fetchLimit, NO_CAPS, type Caps } from './db/result';
+import { ResultFile, resultFileFormat } from './output/result-file';
+
 // Errors and the response envelope
 import { SherlockError, usageError, errorMessage } from './errors';
 import { Invocation, printEnvelope } from './output/envelope';
@@ -51,12 +55,11 @@ import { parseDuration } from './tunnel/config';
 import {
     getTables,
     describeTable,
-    sampleTable,
+    sampleQuery,
     getIndexes,
     getForeignKeys,
     getTableStats,
     introspectSchema,
-    executeQuery,
 } from './db/operations';
 
 // Redis
@@ -142,6 +145,11 @@ interface CliOptions {
     config?: string;
     log?: boolean;
     format?: string;
+    maxRows?: string;
+    maxCell?: string;
+    maxBytes?: string;
+    /** False when --no-limit is given */
+    limit?: boolean;
     /** Set by requireConnection for an ad hoc --url connection */
     _resolvedConfig?: ResolvedConnectionConfig;
 }
@@ -297,6 +305,80 @@ function certainDbType(opts: ConnectedOptions): DbType | undefined {
     if (config.url === undefined) return config.type ?? DB_TYPES.POSTGRES;
     if (typeof config.url === 'string') return detectDbTypeFromUrl(config.url) ?? config.type ?? DB_TYPES.POSTGRES;
     return undefined;
+}
+
+/**
+ * The caps on a result: each flag, else the connection's own setting, else
+ * the default. --no-limit removes them all. A command that asks for a number
+ * of rows itself, as `sample -n` does, passes it as `maxRows`.
+ */
+function capsFor(opts: ConnectedOptions, maxRows?: number): Caps {
+    if (opts.limit === false) return maxRows !== undefined ? { ...NO_CAPS, maxRows } : NO_CAPS;
+    const connection = opts._resolvedConfig ? {} : getConnectionConfig(opts.connection, opts.config, invocation.warnings);
+    const setting = (key: 'maxRows' | 'maxCellChars' | 'maxBytes'): number | undefined => {
+        const value = connection[key];
+        if (value === undefined) return undefined;
+        if (!Number.isInteger(value) || value < 1) {
+            throw new SherlockError('CONFIG_INVALID', `"${key}" of connection "${opts.connection}" must be a positive whole number.`, {
+                fix: `Set "${key}" to a number such as ${DEFAULT_CAPS[key]}, or remove it.`,
+                details: { connection: opts.connection, setting: key },
+            });
+        }
+        return value;
+    };
+    const flag = (value: string | undefined, name: string) =>
+        value === undefined ? undefined : parsePositiveInt(value, name);
+    return {
+        maxRows: maxRows ?? flag(opts.maxRows, 'max-rows') ?? setting('maxRows') ?? DEFAULT_CAPS.maxRows,
+        maxCellChars: flag(opts.maxCell, 'max-cell') ?? setting('maxCellChars') ?? DEFAULT_CAPS.maxCellChars,
+        maxBytes: flag(opts.maxBytes, 'max-bytes') ?? setting('maxBytes') ?? DEFAULT_CAPS.maxBytes,
+    };
+}
+
+/** Rows shown from a result written with --out */
+const OUT_PREVIEW_ROWS = 20;
+
+/**
+ * Run a statement whose rows are the command's result: capped, with any cut
+ * reported as a warning, or written whole to a file with --out, returning the
+ * file, the row count, the columns and a preview.
+ */
+async function fetchResult(sql: SqlAdapter, query: string, caps: Caps, out?: string): Promise<unknown> {
+    if (out === undefined) {
+        const fetched = await sql.fetch(query, { maxRows: fetchLimit(caps) });
+        const { result, warnings } = buildResult(fetched, caps);
+        for (const warning of warnings) invocation.warnings.add(warning);
+        return result;
+    }
+
+    const file = new ResultFile(out);
+    const preview: unknown[][] = [];
+    try {
+        const fetched = await sql.fetch(query, {
+            onRows: (rows, columns) => {
+                file.write(rows, columns);
+                for (const row of rows) {
+                    if (preview.length >= OUT_PREVIEW_ROWS) break;
+                    preview.push(row);
+                }
+            },
+        });
+        file.finish(fetched.columns);
+        const { result } = buildResult(
+            { columns: fetched.columns, rows: preview, more: false, rowsFetched: preview.length },
+            { ...caps, maxRows: OUT_PREVIEW_ROWS }
+        );
+        return {
+            file: file.path,
+            format: file.format,
+            rowCount: fetched.rowsFetched,
+            columns: fetched.columns,
+            preview: result.rows,
+        };
+    } catch (error) {
+        file.abort();
+        throw error;
+    }
 }
 
 /** Largest SQL file `query --file` will read */
@@ -594,6 +676,10 @@ function setupCLI() {
         .option('--config <path>', 'path to config file')
         .option('--no-log', 'disable query logging')
         .option('-f, --format <format>', 'output format: json or markdown', DEFAULT_OUTPUT_FORMAT)
+        .option('--max-rows <n>', `most rows a result returns (default ${DEFAULT_CAPS.maxRows})`)
+        .option('--max-cell <n>', `most characters of a text cell (default ${DEFAULT_CAPS.maxCellChars})`)
+        .option('--max-bytes <n>', `most bytes of a whole result as JSON (default ${DEFAULT_CAPS.maxBytes})`)
+        .option('--no-limit', 'remove the caps on rows, cells and size')
         .hook('preAction', (thisCommand, actionCommand) => {
             invocation.command = commandPath(actionCommand);
             const opts = thisCommand.opts<CliOptions>();
@@ -708,25 +794,27 @@ function setupCLI() {
         .command('sample <table>')
         .description('Get random sample rows from a table')
         .option('-n, --limit <number>', 'number of rows to sample', String(DEFAULT_SAMPLE_LIMIT))
-        .action(async (tableName: string, cmdOpts: { limit: string }) => {
+        .option('--out <file>', 'write every sampled row to a .jsonl or .csv file, with no caps')
+        .action(async (tableName: string, cmdOpts: { limit: string; out?: string }) => {
             const opts = program.opts<CliOptions>();
             requireConnection(opts);
             requireSqlConnection(opts);
 
             const limit = parsePositiveInt(cmdOpts.limit, 'limit', MAX_SAMPLE_LIMIT);
+            if (cmdOpts.out !== undefined) resultFileFormat(cmdOpts.out);
+            // -n is how many rows the caller asked for, so it is the row cap too.
+            const caps = capsFor(opts, limit);
 
             await runWithSqlConnection(opts, async (sql, dbType) => {
-                const result = await sampleTable(sql, dbType as DbType, tableName, limit);
+                const query = await sampleQuery(sql, dbType as DbType, tableName, limit);
+                const result = await fetchResult(sql, query, caps, cmdOpts.out) as { rowCount: number; rows?: unknown[][] };
 
                 // Log if enabled (ad hoc --url connections have logging disabled)
                 if (!opts._resolvedConfig) {
                     const connConfig = getConnectionConfig(opts.connection, opts.config, invocation.warnings);
                     const loggingEnabled = connConfig.logging === true && opts.log !== false;
                     if (loggingEnabled) {
-                        logQuery(opts.connection, `-- sherlock sample ${tableName} --limit ${limit}`, {
-                            rowCount: result.rowCount,
-                            rows: result.rows,
-                        });
+                        logQuery(opts.connection, `-- sherlock sample ${tableName} --limit ${limit}`, result);
                     }
                 }
 
@@ -807,19 +895,26 @@ function setupCLI() {
         .description('Execute a read-only SQL query')
         .option('--file <path>', 'read the query from a file, or from stdin with "-"')
         .option('--timeout <duration>', 'cancel the query after this long, e.g. 30s or 5m (default: the connection\'s statementTimeout, else 60s)')
+        .option('--out <file>', 'write the whole result to a .jsonl or .csv file, with no caps, and return a preview')
         .addHelpText('after', `
 The query can be given three ways:
   sherlock -c <conn> query "SELECT 1"
   sherlock -c <conn> query --file check.sql
   sherlock -c <conn> query - < check.sql
 
-Every query runs in a read-only transaction that is rolled back afterwards.`)
-        .action(async (sqlArg: string | undefined, cmdOpts: { file?: string; timeout?: string }) => {
+Every query runs in a read-only transaction that is rolled back afterwards.
+
+A result is capped at 200 rows, 500 characters per cell and 32 KB in all,
+unless --max-rows, --max-cell, --max-bytes or --no-limit say otherwise.
+Anything cut is reported. --out writes every row to a file instead.`)
+        .action(async (sqlArg: string | undefined, cmdOpts: { file?: string; timeout?: string; out?: string }) => {
             const opts = program.opts<CliOptions>();
             requireConnection(opts);
             requireSqlConnection(opts);
 
             const sqlQuery = await readQueryText(sqlArg, cmdOpts.file);
+            if (cmdOpts.out !== undefined) resultFileFormat(cmdOpts.out);
+            const caps = capsFor(opts);
             let options: ConnectionOptions = {};
             if (cmdOpts.timeout !== undefined) {
                 let timeoutMs: number;
@@ -852,7 +947,7 @@ Every query runs in a read-only transaction that is rolled back afterwards.`)
 
                 let result;
                 try {
-                    result = await executeQuery(sql, sqlQuery);
+                    result = await fetchResult(sql, sqlQuery, caps, cmdOpts.out) as { rowCount: number; rows?: unknown[][] };
                 } catch (error: unknown) {
                     if (loggingEnabled) logQuery(opts.connection, sqlQuery, { error: errorMessage(error) });
                     throw error;

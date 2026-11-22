@@ -23,10 +23,10 @@ function classify(error: unknown, config: ResolvedConnectionConfig, timeoutMs?: 
 describe('classifyDbError', () => {
     const cases: Array<[string, unknown, ResolvedConnectionConfig, string, Record<string, unknown> | undefined]> = [
         ['PostgreSQL wrong password',
-            driverError('PostgresError', 'password authentication failed for user "app"', { code: 'ERR_POSTGRES_SERVER_ERROR', errno: '28P01' }),
+            driverError('PostgresError', 'password authentication failed for user "app"', { code: '28P01', severity: 'FATAL' }),
             PG, 'AUTH_FAILED', { username: 'app' }],
         ['MySQL wrong password',
-            driverError('MySQLError', "Access denied for user 'root'@'172.17.0.1' (using password: YES)", { code: 'ERR_MYSQL_SERVER_ERROR', errno: 1045, sqlState: '28000' }),
+            driverError('Error', "Access denied for user 'root'@'172.17.0.1' (using password: YES)", { code: 'ER_ACCESS_DENIED_ERROR', errno: 1045, sqlState: '28000' }),
             MYSQL, 'AUTH_FAILED', { username: 'root' }],
         ['SQL Server login failed',
             driverError('ConnectionError', "Login failed for user 'sa'.", { code: 'ELOGIN' }),
@@ -35,28 +35,31 @@ describe('classifyDbError', () => {
             new Error('WRONGPASS invalid username-password pair or user is disabled.'),
             REDIS, 'AUTH_FAILED', undefined],
         ['PostgreSQL without TLS',
-            driverError('PostgresError', 'Server does not support SSL', { code: 'ERR_POSTGRES_TLS_NOT_AVAILABLE' }),
-            PG, 'TLS_FAILED', { reason: 'ERR_POSTGRES_TLS_NOT_AVAILABLE' }],
+            driverError('Error', 'SSL_NOT_SUPPORTED: The server does not support SSL connections', { code: 'SSL_NOT_SUPPORTED' }),
+            PG, 'TLS_FAILED', { reason: 'SSL_NOT_SUPPORTED' }],
+        ['MySQL TLS handshake failure',
+            driverError('Error', 'self signed certificate in certificate chain', { code: 'HANDSHAKE_SSL_ERROR', errno: 0 }),
+            MYSQL, 'TLS_FAILED', { reason: 'HANDSHAKE_SSL_ERROR' }],
         ['a certificate that does not verify',
             Object.assign(new Error('self signed certificate in certificate chain'), { code: 'SELF_SIGNED_CERT_IN_CHAIN' }),
             PG, 'TLS_FAILED', { reason: 'SELF_SIGNED_CERT_IN_CHAIN' }],
         ['MySQL asking for the public key',
-            driverError('MySQLError', 'The server requested RSA public key retrieval', { code: 'ERR_MYSQL_PUBLIC_KEY_RETRIEVAL_NOT_ALLOWED' }),
+            driverError('Error', 'The server requested RSA public key retrieval', { code: 'PUBLIC_KEY_RETRIEVAL_NOT_ALLOWED' }),
             MYSQL, 'TLS_FAILED', { reason: 'PUBLIC_KEY_RETRIEVAL' }],
         ['PostgreSQL write in a read-only transaction',
-            driverError('PostgresError', 'cannot execute nextval() in a read-only transaction', { code: 'ERR_POSTGRES_SERVER_ERROR', errno: '25006' }),
+            driverError('PostgresError', 'cannot execute nextval() in a read-only transaction', { code: '25006' }),
             PG, 'READ_ONLY_VIOLATION', { dbCode: '25006' }],
         ['MySQL write in a read-only transaction',
-            driverError('MySQLError', 'Cannot execute statement in a READ ONLY transaction.', { code: 'ERR_MYSQL_SERVER_ERROR', errno: 1792, sqlState: '25006' }),
+            driverError('Error', 'Cannot execute statement in a READ ONLY transaction.', { code: 'ER_CANT_EXECUTE_IN_READ_ONLY_TRANSACTION', errno: 1792, sqlState: '25006' }),
             MYSQL, 'READ_ONLY_VIOLATION', { dbCode: 1792 }],
         ['SQLite write on a query_only connection',
             driverError('SQLiteError', 'attempt to write a readonly database', { code: 'SQLITE_READONLY', errno: 8 }),
             SQLITE, 'READ_ONLY_VIOLATION', { dbCode: 'SQLITE_READONLY' }],
         ['PostgreSQL unknown column',
-            driverError('PostgresError', 'column "nope" does not exist', { code: 'ERR_POSTGRES_SERVER_ERROR', errno: '42703' }),
+            driverError('PostgresError', 'column "nope" does not exist', { code: '42703' }),
             PG, 'QUERY_FAILED', { dbCode: '42703' }],
         ['MySQL unknown column',
-            driverError('MySQLError', "Unknown column 'nope' in 'field list'", { code: 'ERR_MYSQL_SERVER_ERROR', errno: 1054, sqlState: '42S22' }),
+            driverError('Error', "Unknown column 'nope' in 'field list'", { code: 'ER_BAD_FIELD_ERROR', errno: 1054, sqlState: '42S22' }),
             MYSQL, 'QUERY_FAILED', { dbCode: 1054 }],
         ['SQLite unknown column',
             driverError('SQLiteError', 'no such column: nope', { code: 'SQLITE_ERROR', errno: 1 }),
@@ -68,10 +71,13 @@ describe('classifyDbError', () => {
             new Error('WRONGTYPE Operation against a key holding the wrong kind of value'),
             REDIS, 'QUERY_FAILED', { dbCode: 'WRONGTYPE' }],
         ['a second statement the server refused',
-            driverError('PostgresError', 'cannot insert multiple commands into a prepared statement', { code: 'ERR_POSTGRES_SYNTAX_ERROR', errno: '42601' }),
+            driverError('PostgresError', 'cannot insert multiple commands into a prepared statement', { code: '42601' }),
             PG, 'QUERY_FAILED', { dbCode: '42601' }],
         ['nothing listening',
-            driverError('PostgresError', 'Failed to connect', { code: 'ERR_POSTGRES_CONNECTION_REFUSED' }),
+            driverError('Error', 'connect ECONNREFUSED db:5432', { code: 'ECONNREFUSED', errno: -61 }),
+            PG, 'CONNECT_REFUSED', { host: 'db', port: 5432 }],
+        ['a host that does not resolve',
+            driverError('Error', 'getaddrinfo ENOTFOUND db', { code: 'ENOTFOUND', errno: 4 }),
             PG, 'CONNECT_REFUSED', { host: 'db', port: 5432 }],
         ['no socket at all',
             new Error('FailedToOpenSocket failed to connect to postgresql'),
@@ -89,12 +95,12 @@ describe('classifyDbError', () => {
     }
 
     it('classifies a cancelled statement as QUERY_TIMEOUT when given the timeout', () => {
-        const error = driverError('PostgresError', 'canceling statement due to statement timeout', { errno: '57014' });
+        const error = driverError('PostgresError', 'canceling statement due to statement timeout', { code: '57014' });
         expect(classify(error, PG, 30_000)).toMatchObject({ code: 'QUERY_TIMEOUT', details: { timeoutMs: 30_000 } });
     });
 
     it('never puts the password in a message, fix or details', () => {
-        const error = driverError('PostgresError', 'password authentication failed', { errno: '28P01' });
+        const error = driverError('PostgresError', 'password authentication failed', { code: '28P01' });
         const classified = classify(error, PG);
         expect(`${classified.message} ${classified.fix} ${JSON.stringify(classified.details)}`).not.toContain('hunter2');
     });
@@ -107,6 +113,11 @@ describe('classifyDbError', () => {
     it('leaves an error from outside the driver unclassified', () => {
         const error = new TypeError('x is not a function');
         expect(classifyDbError(error, PG)).toBe(error);
+    });
+
+    it('does not take a network error with an errno for a MySQL server error', () => {
+        const error = driverError('Error', 'write EPIPE', { code: 'EPIPE', errno: -32 });
+        expect(classifyDbError(error, MYSQL)).toBe(error);
     });
 
     it('does not read a Redis-style prefix into a SQL error', () => {
