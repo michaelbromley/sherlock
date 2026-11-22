@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'bun:test';
 import { spawnSync } from 'node:child_process';
+import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
 import { SherlockError, toErrorBody, exitCodeFor, usageError } from '../errors';
 import { CONTRACT_VERSION, Invocation, type Envelope } from './envelope';
@@ -124,5 +126,29 @@ describe('a failing command', () => {
         const version = spawnSync('bun', [CLI, '--version'], { encoding: 'utf-8' });
         expect(version.status).toBe(0);
         expect(version.stdout.trim()).toMatch(/^\d+\.\d+\.\d+/);
+    });
+});
+
+describe('warnings', () => {
+    it('are in the envelope of a command that then fails, and on stderr', () => {
+        const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sherlock-envelope-'));
+        try {
+            const configPath = path.join(dir, 'config.json');
+            fs.writeFileSync(configPath, JSON.stringify({
+                connections: {
+                    // Nothing listens on port 1, so the command fails after resolving the connection
+                    prod: { type: 'postgres', host: '127.0.0.1', port: 1, username: 'u', database: 'd', password: 'literal' },
+                },
+            }));
+            const { status, lines, stderr } = sherlock('--config', configPath, '-c', 'prod', 'tables');
+            const envelope = JSON.parse(lines[0]) as Envelope;
+            expect(status).toBe(1);
+            expect(envelope.error?.code).toBe('CONNECT_REFUSED');
+            expect(envelope.meta).toMatchObject({ connection: 'prod', dbType: 'postgres' });
+            expect(envelope.warnings).toEqual([expect.objectContaining({ code: 'PLAINTEXT_PASSWORD', details: { connection: 'prod' } })]);
+            expect(stderr).toContain('Warning: The password of connection "prod" is stored as plaintext');
+        } finally {
+            fs.rmSync(dir, { recursive: true, force: true });
+        }
     });
 });

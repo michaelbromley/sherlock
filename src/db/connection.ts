@@ -10,6 +10,7 @@ import type { ResolvedConnectionConfig } from '../config/types';
 import { DB_TYPES, parseBoolParam } from '../db-types';
 import { MssqlAdapter, type SqlAdapter } from './mssql-adapter';
 import { parseDuration } from '../tunnel/config';
+import type { WarningSink } from '../output/warnings';
 import { connectTimeoutFor, connectTimeoutSeconds } from './connect-timeout';
 import { classifyDbError } from './errors';
 import {
@@ -28,6 +29,8 @@ export type { SqlAdapter };
 export interface ConnectionOptions {
     /** Statement timeout in milliseconds, overriding the connection's */
     statementTimeoutMs?: number;
+    /** Where warnings met while resolving the connection go; stderr when not given */
+    warnings?: WarningSink;
 }
 
 /** The statement timeout to use: an override, the connection's own, or the default */
@@ -223,7 +226,7 @@ export async function withConnection<T>(
     let stopKeepalive: (() => void) | null = null;
 
     try {
-        const config = await resolveConnection(connectionName, configPath);
+        const config = await resolveConnection(connectionName, configPath, options?.warnings);
         stopKeepalive = startTunnelKeepalive(connectionName);
         sql = await createConnection(config, options);
         return await handler(sql, config.type);

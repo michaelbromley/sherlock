@@ -11,7 +11,14 @@ import { Command, CommanderError } from 'commander';
 import * as p from '@clack/prompts';
 
 // Config
-import { listConnections, listConnectionSummaries, getConnectionConfig, detectConnectionFromCwd } from './config';
+import {
+    listConnections,
+    listConnectionSummaries,
+    getConnectionConfig,
+    detectConnectionFromCwd,
+    loadConfigFile,
+    tlsVerifyThroughTunnelWarning,
+} from './config';
 import { DB_TYPES, isRedisConfig, detectDbTypeFromUrl, type DbType } from './db-types';
 import type { ResolvedConnectionConfig } from './config/types';
 import type { ConnectionAddOptions } from './config/connection-input';
@@ -36,6 +43,7 @@ import { validateReadOnlyQuery, queryRefusedError } from './query-validation';
 // Errors and the response envelope
 import { SherlockError, usageError, errorMessage } from './errors';
 import { Invocation, printEnvelope } from './output/envelope';
+import { printWarning, type SherlockWarning } from './output/warnings';
 
 // Database
 import { withConnection, withConnectionFromConfig, type ConnectionOptions, type SqlAdapter } from './db/connection';
@@ -109,23 +117,22 @@ function listConnectionsAction(configPath?: string): void {
     }, null, 2));
 }
 
-/**
- * Things worth knowing about a connection just added, printed to stderr so
- * the JSON on stdout stays clean.
- */
-function connectionAddNotes(config: import('./config/types').ConnectionConfig): string[] {
-    const notes: string[] = [];
+/** Things worth knowing about a connection just added, as warnings */
+function connectionAddWarnings(name: string, config: import('./config/types').ConnectionConfig): SherlockWarning[] {
+    const warnings: SherlockWarning[] = [];
     const isSqlite = config.type === DB_TYPES.SQLITE;
     if (!isSqlite && config.password === undefined && config.url === undefined) {
-        notes.push('No password is stored for this connection. Add --password-stdin or --password-env if the database needs one.');
+        warnings.push({
+            code: 'NO_PASSWORD',
+            message: `No password is stored for connection "${name}".`,
+            fix: 'Add --password-stdin or --password-env if the database needs one.',
+            details: { connection: name },
+        });
     }
     if (config.tunnel && typeof config.ssl === 'object' && config.ssl.rejectUnauthorized) {
-        notes.push(
-            '--ssl verify cannot work through a tunnel: the certificate names the real host, not the ' +
-            'tunnel\'s local address. Use --ssl require to encrypt without verifying the host name.'
-        );
+        warnings.push(tlsVerifyThroughTunnelWarning(name));
     }
-    return notes;
+    return warnings;
 }
 
 /** The global options, as commander parses them */
@@ -246,7 +253,7 @@ function requireSqlConnection(opts: ConnectedOptions): void {
 
 /** A configured connection's type, as far as the config says without resolving it */
 function connectionType(opts: ConnectedOptions): string {
-    const config = getConnectionConfig(opts.connection, opts.config);
+    const config = getConnectionConfig(opts.connection, opts.config, invocation.warnings);
     return isRedisConfig(config) ? DB_TYPES.REDIS : certainDbType(opts) ?? config.type ?? DB_TYPES.POSTGRES;
 }
 
@@ -267,6 +274,7 @@ async function runWithSqlConnection<T>(
 ): Promise<T> {
     // The type is only certain once the connection is resolved: a URL held in
     // the keychain says which database it is only when read.
+    invocation.dbType = certainDbType(opts);
     const recordType = (sql: SqlAdapter, dbType: string) => {
         invocation.dbType = dbType;
         return handler(sql, dbType);
@@ -274,7 +282,7 @@ async function runWithSqlConnection<T>(
     if (opts._resolvedConfig) {
         return withConnectionFromConfig(opts._resolvedConfig, recordType, options);
     }
-    return withConnection(opts.connection, opts.config, recordType, options);
+    return withConnection(opts.connection, opts.config, recordType, { ...options, warnings: invocation.warnings });
 }
 
 /**
@@ -285,7 +293,7 @@ async function runWithSqlConnection<T>(
  */
 function certainDbType(opts: ConnectedOptions): DbType | undefined {
     if (opts._resolvedConfig) return opts._resolvedConfig.type;
-    const config = getConnectionConfig(opts.connection, opts.config);
+    const config = getConnectionConfig(opts.connection, opts.config, invocation.warnings);
     if (config.url === undefined) return config.type ?? DB_TYPES.POSTGRES;
     if (typeof config.url === 'string') return detectDbTypeFromUrl(config.url) ?? config.type ?? DB_TYPES.POSTGRES;
     return undefined;
@@ -351,7 +359,7 @@ async function runWithRedisConnection<T>(
     if (opts._resolvedConfig) {
         return withRedisConnectionFromConfig(opts._resolvedConfig, handler);
     }
-    return withRedisConnection(opts.connection, opts.config, handler);
+    return withRedisConnection(opts.connection, opts.config, handler, invocation.warnings);
 }
 
 // ============================================================================
@@ -595,6 +603,18 @@ function setupCLI() {
             if (opts.format && !['json', 'markdown'].includes(opts.format)) {
                 throw usageError(`Invalid format "${opts.format}". Must be 'json' or 'markdown'.`, '--format');
             }
+            // Read the config once here, with the collector, so a warning about
+            // the file itself (a legacy config.ts) is collected: later reads
+            // come from the cache and warn no more. A command that needs the
+            // config reports its absence itself; one that does not, such as
+            // guide or update, must not fail for it.
+            if (!opts.url) {
+                try {
+                    loadConfigFile(opts.config, invocation.warnings);
+                } catch {
+                    // Reported by the command, if it reads the config
+                }
+            }
         });
 
     // ========================================================================
@@ -700,7 +720,7 @@ function setupCLI() {
 
                 // Log if enabled (ad hoc --url connections have logging disabled)
                 if (!opts._resolvedConfig) {
-                    const connConfig = getConnectionConfig(opts.connection, opts.config);
+                    const connConfig = getConnectionConfig(opts.connection, opts.config, invocation.warnings);
                     const loggingEnabled = connConfig.logging === true && opts.log !== false;
                     if (loggingEnabled) {
                         logQuery(opts.connection, `-- sherlock sample ${tableName} --limit ${limit}`, {
@@ -828,7 +848,7 @@ Every query runs in a read-only transaction that is rolled back afterwards.`)
 
                 // Log if enabled (ad hoc --url connections have logging disabled)
                 const loggingEnabled = !opts._resolvedConfig &&
-                    getConnectionConfig(opts.connection, opts.config).logging === true && opts.log !== false;
+                    getConnectionConfig(opts.connection, opts.config, invocation.warnings).logging === true && opts.log !== false;
 
                 let result;
                 try {
@@ -966,15 +986,15 @@ Every query runs in a read-only transaction that is rolled back afterwards.`)
 
             console.log(`Testing connection: ${connectionName}...`);
 
-            const connConfig = getConnectionConfig(connectionName, opts.config);
+            const connConfig = getConnectionConfig(connectionName, opts.config, invocation.warnings);
             if (isRedisConfig(connConfig)) {
                 await withRedisConnection(connectionName, opts.config, async (client) => {
                     await client.send('PING', []);
-                });
+                }, invocation.warnings);
             } else {
                 await withConnection(connectionName, opts.config, async (sql) => {
                     await sql.unsafe('SELECT 1');
-                });
+                }, { warnings: invocation.warnings });
             }
             console.log(`\x1b[32m✓ Connection "${connectionName}" successful!\x1b[0m`);
         });
@@ -1019,7 +1039,7 @@ Exits 1 when a check fails.`)
             }
             invocation.connection = target;
             const { diagnoseConnection } = await import('./doctor');
-            const report = await diagnoseConnection(target, configPath);
+            const report = await diagnoseConnection(target, configPath, invocation.warnings);
             console.log(JSON.stringify(report, null, 2));
             if (!report.ok) process.exitCode = 1;
         });
@@ -1067,7 +1087,7 @@ Exits 1 when a check fails.`)
         .option('--force', 'replace an existing connection of the same name')
         .action(async (name: string, cmdOpts: ConnectionAddOptions & { force?: boolean }) => {
             const { buildConnectionConfig } = await import('./config/connection-input');
-            const { addConnection, connectionExists, shadowingWarning } = await import('./config/write');
+            const { addConnection, connectionExists, shadowedConfigWarning } = await import('./config/write');
             const { summarizeTunnel } = await import('./config');
 
             // -u/--url is a global option meaning "connect to this URL now", so
@@ -1111,9 +1131,9 @@ Exits 1 when a check fails.`)
                 force: cmdOpts.force,
             });
 
-            const shadowed = shadowingWarning();
-            if (shadowed) console.error(`Warning: ${shadowed}`);
-            for (const note of connectionAddNotes(config)) console.error(`Note: ${note}`);
+            const shadowed = shadowedConfigWarning();
+            if (shadowed) invocation.warnings.add(shadowed);
+            for (const warning of connectionAddWarnings(name, config)) invocation.warnings.add(warning);
 
             // A tunnel is opened by the first command, so check it with
             // doctor first; otherwise start with a command that lists something.
@@ -1306,9 +1326,8 @@ A connection whose name already exists is skipped unless --force is given.`)
         .description('Show where each connection\'s password comes from, and whether it is there')
         .action(async () => {
             const opts = program.opts<CliOptions>();
-            const { loadConfigFile } = await import('./config');
             const { passwordStatus } = await import('./credentials/status');
-            const config = loadConfigFile(opts.config);
+            const config = loadConfigFile(opts.config, invocation.warnings);
             const passwords = listConnections(opts.config).map((name) => ({
                 connection: name,
                 ...passwordStatus(name, config.connections[name]),
@@ -1374,6 +1393,11 @@ function keychainEntryNotFound(account: string): SherlockError {
     });
 }
 
+/** Warnings are for people too: each one goes to stderr as well as into the envelope */
+function printWarnings(): void {
+    for (const warning of invocation.warnings.list) printWarning(warning);
+}
+
 /**
  * Run the command. Any error it throws, or commander's own usage errors, is
  * reported once, here, in the envelope, with the exit code that goes with it.
@@ -1383,6 +1407,7 @@ async function main(): Promise<void> {
     const program = setupCLI();
     try {
         await program.parseAsync(process.argv);
+        printWarnings();
     } catch (thrown: unknown) {
         let error = thrown;
         if (error instanceof CommanderError) {
@@ -1396,6 +1421,7 @@ async function main(): Promise<void> {
         if (process.env.DEBUG && error instanceof Error && error.stack) {
             process.stderr.write(`${error.stack}\n`);
         }
+        printWarnings();
         const code = printEnvelope(invocation.fail(error));
         // Exit once stdout has taken the envelope: pending work such as a
         // tunnel keepalive timer must not keep the process alive, and exiting

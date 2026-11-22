@@ -6,6 +6,7 @@
  */
 
 import { usageError } from '../errors';
+import type { SherlockWarning } from '../output/warnings';
 import * as fs from 'fs';
 import * as path from 'path';
 import { getConfigDir, ensureConfigDir, findConfig, describeConfigSource, type ConfigSource, type FoundConfig } from './paths';
@@ -45,6 +46,12 @@ export function shadowingConfig(): FoundConfig | null {
  * naming what to change, or null when they will.
  */
 export function shadowingWarning(): string | null {
+    const warning = shadowedConfigWarning();
+    return warning ? [warning.message, warning.fix].filter(Boolean).join(' ') : null;
+}
+
+/** The same, as a CONFIG_SHADOWED warning for the envelope */
+export function shadowedConfigWarning(): SherlockWarning | null {
     const found = shadowingConfig();
     if (!found) return null;
     const remedies: Record<ConfigSource, string> = {
@@ -56,8 +63,14 @@ export function shadowingWarning(): string | null {
         user: '',
     };
     const remedy = remedies[found.source as ConfigSource];
-    return `Sherlock commands run here read ${found.path} (${describeConfigSource(found.source)}), ` +
-        `not ${writableConfigPath()}, so they will not see the new connections. ${remedy}`.trim();
+    const written = writableConfigPath();
+    return {
+        code: 'CONFIG_SHADOWED',
+        message: `Sherlock commands run here read ${found.path} (${describeConfigSource(found.source)}), ` +
+            `not ${written}, so they will not see the new connections.`,
+        ...(remedy && { fix: remedy }),
+        details: { written, read: found.path },
+    };
 }
 
 /** Write the config, replacing whatever was there */

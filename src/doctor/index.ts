@@ -31,6 +31,7 @@ import { createConnection } from '../db/connection';
 import { credentialSource } from '../credentials/status';
 import { classifyDbError } from '../db/errors';
 import { isSherlockError, type ErrorCode } from '../errors';
+import type { WarningSink } from '../output/warnings';
 import { createRedisConnection } from '../redis/connection';
 import { resolveTunnel, type DiagnosticCheck, type ResolvedTunnel } from '../tunnel/providers';
 import { startTunnelKeepalive } from '../tunnel/manager';
@@ -172,7 +173,7 @@ function credentialsStep(connectionName: string, configPath: string | undefined,
         }
 
         try {
-            await resolveConnectionCredentials(connectionName, configPath);
+            await resolveConnectionCredentials(connectionName, configPath, state.warnings);
         } catch (error) {
             return [failedCheck('credentials', error, 'CREDENTIAL_MISSING', credentialsFix(errorMessage(error)))];
         }
@@ -210,6 +211,8 @@ function credentialsFix(detail: string): string {
 
 /** What the steps learn and pass on to the next */
 interface DoctorState {
+    /** Where warnings met while resolving the connection go */
+    warnings?: WarningSink;
     config?: ConnectionConfig;
     dbType?: DbType;
     tunnel?: ResolvedTunnel;
@@ -271,7 +274,7 @@ function connectSteps(connectionName: string, configPath: string | undefined, st
 
     const tunnelStep: DoctorStep = async () => {
         try {
-            resolved = await resolveConnection(connectionName, configPath);
+            resolved = await resolveConnection(connectionName, configPath, state.warnings);
         } catch (error) {
             if (!state.tunnel) {
                 return [failedCheck('connect', error, 'INTERNAL')];
@@ -369,8 +372,12 @@ function connectSteps(connectionName: string, configPath: string | undefined, st
 }
 
 /** Diagnose a connection. Resolves rather than throws: failures are checks. */
-export async function diagnoseConnection(connectionName: string, configPath?: string): Promise<DoctorReport> {
-    const state: DoctorState = {};
+export async function diagnoseConnection(
+    connectionName: string,
+    configPath?: string,
+    warnings?: WarningSink
+): Promise<DoctorReport> {
+    const state: DoctorState = { warnings };
     const { ok, checks } = await runSteps([
         configStep(connectionName, configPath, state),
         targetStep(state),

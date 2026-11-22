@@ -10,6 +10,7 @@ import {
 } from './paths';
 import { getCredentialResolver } from '../credentials';
 import { SherlockError, isSherlockError, errorMessage } from '../errors';
+import { stderrWarnings, type SherlockWarning, type WarningSink } from '../output/warnings';
 import type { SherlockConfig, ConnectionConfig, ResolvedConnectionConfig, CredentialRef, SslConfig } from './types';
 import type { TunnelConfig } from '../tunnel/types';
 import { connectionEnvVarName, getEnvVarForConnection } from '../credentials/providers/env';
@@ -67,9 +68,10 @@ function loadEnvFile(): void {
 }
 
 /**
- * Load the Sherlock configuration from file
+ * Load the Sherlock configuration from file. A warning about the file itself,
+ * such as a legacy config.ts, goes to `warnings` the first time it is read.
  */
-export function loadConfigFile(configPath?: string): SherlockConfig {
+export function loadConfigFile(configPath?: string, warnings: WarningSink = stderrWarnings): SherlockConfig {
     // Load .env file from config directory
     loadEnvFile();
 
@@ -91,13 +93,15 @@ export function loadConfigFile(configPath?: string): SherlockConfig {
     const resolvedPath = found.path;
     cachedConfigSource = found.source;
 
-    // Check if it's a legacy TypeScript config
-    if (resolvedPath.endsWith('.ts')) {
-        return loadLegacyConfig(resolvedPath);
-    }
-
     // Use cached config if available
     if (cachedConfig && cachedConfigPath === resolvedPath) {
+        return cachedConfig;
+    }
+
+    // Check if it's a legacy TypeScript config
+    if (resolvedPath.endsWith('.ts')) {
+        cachedConfig = loadLegacyConfig(resolvedPath, warnings);
+        cachedConfigPath = resolvedPath;
         return cachedConfig;
     }
 
@@ -127,11 +131,13 @@ export function loadConfigFile(configPath?: string): SherlockConfig {
 /**
  * Load legacy TypeScript config file (for backwards compatibility)
  */
-function loadLegacyConfig(configPath: string): SherlockConfig {
-    console.warn(
-        '\x1b[33m[sherlock] Warning: Using legacy config.ts format.\n' +
-        "Run 'sherlock migrate' to convert to the new JSON format.\x1b[0m\n"
-    );
+function loadLegacyConfig(configPath: string, warnings: WarningSink): SherlockConfig {
+    warnings.add({
+        code: 'CONFIG_LEGACY',
+        message: `Using the legacy config.ts format, from ${configPath}.`,
+        fix: "Run 'sherlock migrate' to convert it to the JSON format.",
+        details: { path: configPath },
+    });
 
     // eslint-disable-next-line @typescript-eslint/no-var-requires
     const legacyConfig = require(configPath);
@@ -159,9 +165,10 @@ function loadLegacyConfig(configPath: string): SherlockConfig {
  */
 export function getConnectionConfig(
     connectionName: string,
-    configPath?: string
+    configPath?: string,
+    warnings?: WarningSink
 ): ConnectionConfig {
-    const config = loadConfigFile(configPath);
+    const config = loadConfigFile(configPath, warnings);
 
     if (!Object.prototype.hasOwnProperty.call(config.connections, connectionName)) {
         const available = Object.keys(config.connections);
@@ -522,7 +529,8 @@ async function applyTunnel(
     connectionName: string,
     config: ConnectionConfig,
     resolved: ResolvedConnectionConfig,
-    configPath?: string
+    configPath: string | undefined,
+    warnings: WarningSink
 ): Promise<ResolvedConnectionConfig> {
     if (!config.tunnel) return resolved;
 
@@ -538,11 +546,7 @@ async function applyTunnel(
     // Certificate verification checks the hostname, which after tunnelling is a
     // loopback address rather than the database's real name, so it never matches.
     if (normalizeSsl(config.ssl).verify) {
-        console.warn(
-            `\x1b[33m[sherlock] Warning: connection "${connectionName}" tunnels to a local address but ` +
-            `requests full certificate verification. The server certificate will not match it.\n` +
-            `  Use "ssl": true to encrypt without hostname verification.\x1b[0m`
-        );
+        warnings.add(tlsVerifyThroughTunnelWarning(connectionName));
     }
 
     const { host, port } = await ensureTunnel(connectionName, config.tunnel, configPath);
@@ -560,10 +564,11 @@ async function applyTunnel(
  */
 export async function resolveConnection(
     connectionName: string,
-    configPath?: string
+    configPath?: string,
+    warnings: WarningSink = stderrWarnings
 ): Promise<ResolvedConnectionConfig> {
-    const config = getConnectionConfig(connectionName, configPath);
-    const resolved = await buildResolvedConnection(connectionName, config);
+    const config = getConnectionConfig(connectionName, configPath, warnings);
+    const resolved = await buildResolvedConnection(connectionName, config, warnings);
     resolved.connectionName = connectionName;
     if (config.statementTimeout !== undefined) {
         resolved.statementTimeoutMs = resolveDurationSetting(connectionName, 'statementTimeout', config.statementTimeout);
@@ -571,7 +576,7 @@ export async function resolveConnection(
     if (config.connectTimeout !== undefined) {
         resolved.connectTimeoutMs = resolveDurationSetting(connectionName, 'connectTimeout', config.connectTimeout);
     }
-    return applyTunnel(connectionName, config, resolved, configPath);
+    return applyTunnel(connectionName, config, resolved, configPath, warnings);
 }
 
 /**
@@ -581,9 +586,10 @@ export async function resolveConnection(
  */
 export async function resolveConnectionCredentials(
     connectionName: string,
-    configPath?: string
+    configPath?: string,
+    warnings: WarningSink = stderrWarnings
 ): Promise<ResolvedConnectionConfig> {
-    return buildResolvedConnection(connectionName, getConnectionConfig(connectionName, configPath));
+    return buildResolvedConnection(connectionName, getConnectionConfig(connectionName, configPath, warnings), warnings);
 }
 
 /**
@@ -633,7 +639,8 @@ function credentialsFor(connectionName: string) {
  */
 async function buildResolvedConnection(
     connectionName: string,
-    config: ConnectionConfig
+    config: ConnectionConfig,
+    warnings: WarningSink
 ): Promise<ResolvedConnectionConfig> {
     const resolver = credentialsFor(connectionName);
 
@@ -697,10 +704,13 @@ async function buildResolvedConnection(
 
     // Warn if password is stored as plaintext in config (but not for empty passwords)
     if (config.password && typeof config.password === 'string' && config.password.length > 0) {
-        console.warn(
-            '\x1b[33m[sherlock] Warning: Password for connection "' + connectionName + '" is stored as plaintext.\n' +
-            '  Consider using { "$env": "' + connectionEnvVarName(connectionName, 'PASSWORD') + '" } for better security.\x1b[0m'
-        );
+        warnings.add({
+            code: 'PLAINTEXT_PASSWORD',
+            message: `The password of connection "${connectionName}" is stored as plaintext in the config.`,
+            fix: `Use { "$env": "${connectionEnvVarName(connectionName, 'PASSWORD')}" }, or store it in the ` +
+                `keychain with: sherlock manage`,
+            details: { connection: connectionName },
+        });
     }
 
     // Try environment variable auto-detection first
@@ -905,4 +915,20 @@ export function clearConfigCache(): void {
     cachedConfig = null;
     cachedConfigPath = null;
     cachedConfigSource = null;
+}
+
+/**
+ * Full certificate verification cannot work through a tunnel: the certificate
+ * names the database's real host, and the connection goes to a loopback address.
+ */
+export function tlsVerifyThroughTunnelWarning(connectionName: string): SherlockWarning {
+    return {
+        code: 'TLS_VERIFY_THROUGH_TUNNEL',
+        message:
+            `Connection "${connectionName}" goes through a tunnel but asks for full certificate ` +
+            `verification. The server's certificate names its real host, not the tunnel's local address, ` +
+            `so it will not match.`,
+        fix: 'Use "ssl": true (--ssl require) to encrypt without verifying the host name.',
+        details: { connection: connectionName },
+    };
 }
