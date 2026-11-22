@@ -411,3 +411,87 @@ describe('northflank provider', () => {
         });
     });
 });
+
+describe('northflank setup questions', () => {
+    const login = { name: 'kbart', token: TOKEN, host: 'https://api.northflank.com' };
+    const lister = {
+        listProjects: async () => [{ id: 'artsupplies', name: 'Art Supplies' }, { id: 'staging', name: 'staging' }],
+        listAddons: async (_context: unknown, project: string) => project === 'artsupplies'
+            ? [
+                { id: 'postgresql', name: 'PostgreSQL', type: 'postgresql', status: 'running' },
+                { id: 'minio', name: 'MinIO', type: 'minio', status: 'running' },
+                { id: 'redis2', name: 'Redis2', type: 'redis', status: 'paused' },
+            ]
+            : [],
+    };
+    const setupWith = (overrides: Partial<Parameters<typeof createNorthflankProvider>[0]> = {}) =>
+        createNorthflankProvider({
+            createClient: async () => { throw new Error('the wizard must not open a tunnel'); },
+            loadContext: () => login,
+            listContexts: () => ['vendure-cloud', 'kbart'],
+            lister,
+            ...overrides,
+        }).setup!;
+    const field = (setup: ReturnType<typeof setupWith>, key: string) => setup.fields.find((f) => f.key === key)!;
+
+    it('asks for the config directory, context, project, addon and endpoint, in that order', () => {
+        expect(setupWith().fields.map((f) => f.key)).toEqual(['configDir', 'context', 'project', 'addon', 'endpoint']);
+    });
+
+    it('offers the contexts in the CLI config, from the directory given', async () => {
+        const seen: unknown[] = [];
+        const setup = setupWith({ listContexts: (dir) => { seen.push(dir); return ['kbart']; } });
+        expect(await field(setup, 'context').choices!({ configDir: '/nf' })).toEqual({ options: [{ value: 'kbart', label: 'kbart' }] });
+        await field(setup, 'context').choices!({ configDir: '' });
+        expect(seen).toEqual(['/nf', undefined]);
+    });
+
+    it('lets the user type a context when the CLI config cannot be read', async () => {
+        const setup = setupWith({ listContexts: () => { throw new Error('Cannot read the Northflank CLI config'); } });
+        expect(await field(setup, 'context').choices!({})).toEqual({ unavailable: 'Cannot read the Northflank CLI config' });
+    });
+
+    it('offers the projects the chosen context can see, with their names', async () => {
+        expect(await field(setupWith(), 'project').choices!({ context: 'kbart' })).toEqual({
+            options: [
+                { value: 'artsupplies', label: 'artsupplies', hint: 'Art Supplies' },
+                { value: 'staging', label: 'staging', hint: undefined },
+            ],
+        });
+    });
+
+    it('offers only database addons, with their type and status', async () => {
+        expect(await field(setupWith(), 'addon').choices!({ context: 'kbart', project: 'artsupplies' })).toEqual({
+            options: [
+                { value: 'postgresql', label: 'postgresql', hint: 'postgresql, running' },
+                { value: 'redis2', label: 'redis2', hint: 'redis, paused' },
+            ],
+        });
+        const none = await field(setupWith(), 'addon').choices!({ context: 'kbart', project: 'empty' });
+        expect(none).toEqual({ unavailable: expect.stringContaining('no database addons') });
+    });
+
+    it('explains a rejected login without showing the token', async () => {
+        const setup = setupWith({
+            lister: { ...lister, listProjects: async () => { throw new NorthflankApiError(`Unauthorized ${TOKEN}`, 401); } },
+        });
+        const result = await field(setup, 'project').choices!({ context: 'kbart' });
+        expect(result).toEqual({ unavailable: expect.stringContaining('northflank login --name kbart') });
+        expect(JSON.stringify(result)).not.toContain(TOKEN);
+    });
+
+    it('redacts the token from any other listing failure', async () => {
+        const setup = setupWith({
+            lister: { ...lister, listAddons: async () => { throw new Error(`socket hang up with ${TOKEN}`); } },
+        });
+        const result = await field(setup, 'addon').choices!({ context: 'kbart', project: 'artsupplies' });
+        expect(JSON.stringify(result)).toContain('[redacted]');
+        expect(JSON.stringify(result)).not.toContain(TOKEN);
+    });
+
+    it('offers the automatic, read and primary endpoints, automatic meaning the setting is left out', async () => {
+        const result = await field(setupWith(), 'endpoint').choices!({});
+        expect('options' in result && result.options.map((o) => o.value)).toEqual(['', 'read', 'primary']);
+        expect(field(setupWith(), 'endpoint').optional).toBe(true);
+    });
+});

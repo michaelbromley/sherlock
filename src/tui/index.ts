@@ -24,8 +24,15 @@ import {
     hasPortPlaceholder,
     parseDuration,
 } from '../tunnel/config';
-import { describeTunnel, tunnelShorthand } from '../tunnel/providers';
-import { isProviderTunnel, type CommandTunnelConfig } from '../tunnel/types';
+import {
+    describeTunnel,
+    resolveTunnel,
+    tunnelProviderId,
+    tunnelSetups,
+    type TunnelSetupEntry,
+    type TunnelSetupField,
+} from '../tunnel/providers';
+import { isProviderTunnel, type CommandTunnelConfig, type ProviderTunnelConfig } from '../tunnel/types';
 import {
     setKeychainPassword,
     hasKeychainPassword,
@@ -636,8 +643,9 @@ async function editConnectionWizard(): Promise<void> {
 
         if (isConfigFromWorkingDirectory()) {
             p.log.warn(
-                'This config was loaded from the current directory, and tunnels are ignored there ' +
-                'because they run a shell command. Move it to your user config directory to use it.'
+                'This config was loaded from the current directory, where tunnels are refused: a ' +
+                'tunnel runs a command or uses your platform login, so a cloned repository must not ' +
+                'be able to define one. Move the connection to your user config directory to use it.'
             );
         }
         return;
@@ -899,6 +907,7 @@ async function promptForConnection(
             logging,
         };
         if (directory) config.directory = directory;
+        carryOverUnprompted(existingConfig, config);
 
         return { name, config, password: '', storageMethod: 'env' };
     }
@@ -975,6 +984,7 @@ async function promptForConnection(
         if (ssl) config.ssl = ssl;
         if (directory) config.directory = directory;
         if (tunnel) config.tunnel = tunnel;
+        carryOverUnprompted(existingConfig, config);
 
         return { name, config, password, storageMethod };
     }
@@ -1070,8 +1080,22 @@ async function promptForConnection(
     }
     if (directory) config.directory = directory;
     if (tunnel) config.tunnel = tunnel;
+    carryOverUnprompted(existingConfig, config);
 
     return { name, config, password, storageMethod };
+}
+
+/**
+ * Settings the wizard has no prompt for. The edited connection is rebuilt from
+ * the answers, so without this, editing a connection would drop them.
+ */
+const UNPROMPTED_SETTINGS = ['statementTimeout', 'connectTimeout'] as const;
+
+export function carryOverUnprompted(existing: ConnectionConfig | undefined, config: ConnectionConfig): void {
+    if (!existing) return;
+    for (const key of UNPROMPTED_SETTINGS) {
+        if (existing[key] !== undefined) config[key] = existing[key];
+    }
 }
 
 /**
@@ -1227,38 +1251,26 @@ async function promptForOptionalTunnel(): Promise<
     return tunnel === null ? CANCELLED : tunnel;
 }
 
+/** The way of reaching a database that means "run a shell command" */
+const COMMAND_METHOD = 'command';
+
 /**
  * Prompt for tunnel settings. Returns the new tunnel config, `undefined` to
  * remove the tunnel, or null if the user cancelled.
+ *
+ * The user first picks how the database is reached: one of the providers that
+ * offer a setup, or a shell command. Providers describe their own questions,
+ * so nothing here knows about any one of them.
  */
 async function promptForTunnel(
     current?: ConnectionConfig['tunnel']
 ): Promise<ConnectionConfig['tunnel'] | null | undefined> {
-    // The prompts below build a command tunnel. A provider tunnel has settings
-    // of its own that they cannot edit, so it can only be kept, removed or
-    // replaced here.
-    let existing: CommandTunnelConfig | undefined;
-    if (current && isProviderTunnel(current)) {
-        p.log.info(
-            `This connection's tunnel is opened by a provider:\n  ${describeTunnel('', current)}\n\n` +
-            `Its settings are edited in config.json, under the connection's "tunnel".`
-        );
-        const choice = await p.select({
-            message: 'Tunnel',
-            options: [
-                { value: 'keep', label: 'Keep it' },
-                { value: 'replace', label: 'Replace it with a command tunnel' },
-                { value: 'remove', label: 'Remove tunnel', hint: 'connect directly instead' },
-            ],
-        });
-        if (p.isCancel(choice) || choice === 'keep') return null;
-        if (choice === 'remove') return undefined;
-    } else if (current) {
-        existing = current;
+    if (current) {
+        p.log.info(`Current tunnel: ${describeTunnel('this connection', current)}`);
         const keep = await p.select({
             message: 'Tunnel',
             options: [
-                { value: 'edit', label: 'Edit tunnel settings' },
+                { value: 'edit', label: 'Change tunnel settings' },
                 { value: 'remove', label: 'Remove tunnel', hint: 'connect directly instead' },
             ],
         });
@@ -1266,14 +1278,133 @@ async function promptForTunnel(
         if (keep === 'remove') return undefined;
     }
 
+    const setups = tunnelSetups();
+    const currentMethod = current ? tunnelProviderId(current) : undefined;
+    const method = await p.select({
+        message: 'How is this database reached?',
+        initialValue: currentMethod ?? setups[0]?.providerId ?? COMMAND_METHOD,
+        options: [
+            ...setups.map((setup) => ({ value: setup.providerId, label: setup.label, hint: setup.hint })),
+            {
+                value: COMMAND_METHOD,
+                label: 'A port-forwarding command',
+                hint: 'ssh -L, kubectl port-forward, cloud-sql-proxy, ...',
+            },
+        ],
+    });
+    if (p.isCancel(method)) return null;
+
+    // Settings from the current tunnel carry over only to the same kind of
+    // tunnel. A command's fields mean nothing to a provider, and back.
+    if (method === COMMAND_METHOD) {
+        return promptForCommandTunnel(current && !isProviderTunnel(current) ? current : undefined);
+    }
+    const setup = setups.find((candidate) => candidate.providerId === method)!;
+    return promptForProviderTunnel(
+        setup,
+        current && isProviderTunnel(current) && current.provider === method ? current : undefined
+    );
+}
+
+/**
+ * Ask a provider's setup questions and build its tunnel block. Invalid answers
+ * are reported and asked again, with what was typed kept as the starting point.
+ */
+async function promptForProviderTunnel(
+    setup: TunnelSetupEntry,
+    existing?: ProviderTunnelConfig
+): Promise<ProviderTunnelConfig | null> {
+    if (setup.intro) p.log.info(setup.intro);
+
+    let previous: Record<string, string> = Object.fromEntries(
+        Object.entries(existing ?? {})
+            .filter(([key, value]) => key !== 'provider' && value !== undefined)
+            .map(([key, value]) => [key, String(value)])
+    );
+
+    for (;;) {
+        const answers: Record<string, string> = {};
+
+        for (const field of setup.fields) {
+            const answer = await askSetupField(field, answers, previous[field.key]);
+            if (answer === null) return null;
+            answers[field.key] = answer;
+        }
+
+        const tunnel: ProviderTunnelConfig = { provider: setup.providerId };
+        for (const field of setup.fields) {
+            const value = answers[field.key].trim();
+            if (value !== '') tunnel[field.key] = value;
+        }
+        // Timeouts are not asked about here; keep any that were set by hand.
+        if (existing?.idleTimeout) tunnel.idleTimeout = existing.idleTimeout;
+        if (existing?.readyTimeout) tunnel.readyTimeout = existing.readyTimeout;
+
+        try {
+            resolveTunnel('this connection', tunnel);
+            return tunnel;
+        } catch (error) {
+            p.log.error(error instanceof Error ? error.message : String(error));
+            previous = answers;
+        }
+    }
+}
+
+/** The option chosen to type a value in place of picking from a list. No real value contains a NUL. */
+const TYPE_IT_IN = '\u0000type-it-in';
+
+/** Ask one setup question: as a pick-list when it can be listed, else as text */
+async function askSetupField(
+    field: TunnelSetupField,
+    answers: Readonly<Record<string, string>>,
+    initial: string | undefined
+): Promise<string | null> {
+    if (field.choices) {
+        const spinner = p.spinner();
+        spinner.start('Looking up the choices');
+        const choices = await field.choices(answers);
+        spinner.stop('options' in choices ? field.message : 'Could not list the choices');
+
+        if ('options' in choices) {
+            const known = choices.options.some((option) => option.value === initial);
+            const picked = await p.select<string>({
+                message: field.message,
+                initialValue: known ? initial : choices.options[0]?.value,
+                options: [
+                    ...choices.options,
+                    { value: TYPE_IT_IN, label: 'Something else', hint: 'type it in' },
+                ],
+            });
+            if (p.isCancel(picked)) return null;
+            if (picked !== TYPE_IT_IN) return picked;
+        } else {
+            p.log.warn(choices.unavailable);
+        }
+    }
+
+    const typed = await p.text({
+        message: field.message,
+        placeholder: field.placeholder,
+        initialValue: initial,
+        validate: (value) => (!field.optional && (!value || value.trim() === '') ? 'This is required' : undefined),
+    });
+    if (p.isCancel(typed)) return null;
+    return typed ?? '';
+}
+
+/**
+ * Prompt for a shell-command tunnel. Returns the tunnel config, or null if the
+ * user cancelled.
+ */
+async function promptForCommandTunnel(existing?: CommandTunnelConfig): Promise<CommandTunnelConfig | null> {
     p.log.info(
         'The command must forward the remote database to a local port.\n\n' +
         'If it takes a port, write {{port}} and sherlock fills in a free one:\n' +
         '  ssh -N -L {{port}}:db.internal:5432 bastion.example.com\n' +
         '  kubectl port-forward svc/postgres {{port}}:5432\n\n' +
         'If it picks its own port and prints it, leave {{port}} out. Sherlock\n' +
-        'then reads the port from the output, using the next answer:\n' +
-        '  northflank forward addon --project my-proj --addon pg --skipHostnames'
+        'then reads the port from the output, using a pattern you give it:\n' +
+        '  kubectl port-forward svc/postgres :5432'
     );
 
     const command = await p.text({
@@ -1302,7 +1433,7 @@ async function promptForTunnel(
                 {
                     value: 'discover',
                     label: 'It picks a port and prints it',
-                    hint: 'northflank forward --skipHostnames',
+                    hint: 'kubectl port-forward svc/postgres :5432',
                 },
             ],
         });
@@ -1327,16 +1458,15 @@ async function promptForTunnel(
             p.log.info(
                 'Give a regular expression matching the line the command prints.\n' +
                 'It needs a (?<port>...) group, and may have a (?<host>...) group.\n\n' +
-                'northflank prints:\n' +
-                "  > Addon 'pg' is exposed locally on 127.0.0.1:44109 (TCP)\n" +
-                'which the suggested pattern below matches. Run your command once\n' +
-                'and copy the wording if it differs.'
+                'kubectl prints:\n' +
+                '  Forwarding from 127.0.0.1:54321 -> 5432\n' +
+                'which "Forwarding from (?<host>[\\d.]+):(?<port>\\d+)" matches. Run your\n' +
+                'command once and copy the wording it prints.'
             );
             const patternValue = await p.text({
                 message: 'Endpoint pattern',
-                // Pre-filled rather than hinted: this is fiddly to type, and the
-                // default already matches northflank's output.
-                initialValue: existing?.endpointPattern ?? tunnelShorthand('northflank')?.endpointPattern,
+                placeholder: 'Forwarding from (?<host>[\\d.]+):(?<port>\\d+)',
+                initialValue: existing?.endpointPattern,
                 validate: (value) => {
                     if (!value || !value.includes('(?<port>')) {
                         return 'Must contain a named "port" group, e.g. (?<port>\\d+)';

@@ -98,6 +98,26 @@ export function loadNorthflankContext(
     };
 }
 
+/**
+ * The names of the contexts in a CLI config, for offering as choices. Never
+ * returns tokens. Throws with the same messages as `loadNorthflankContext`.
+ */
+export function listNorthflankContextNames(
+    configDir?: string,
+    env: Record<string, string | undefined> = process.env
+): string[] {
+    const file = path.join(northflankConfigDir(configDir, env), 'config.json');
+    let parsed: { contexts?: unknown };
+    try {
+        parsed = JSON.parse(fs.readFileSync(file, 'utf-8'));
+    } catch {
+        throw new Error(`Cannot read the Northflank CLI config at ${file}. Log in with "northflank login" first.`);
+    }
+    return (Array.isArray(parsed.contexts) ? parsed.contexts : [])
+        .map((entry) => (entry as { name?: unknown })?.name)
+        .filter((name): name is string => typeof name === 'string' && name !== '');
+}
+
 /** Remove a token from text that is about to be shown or logged */
 export function redactToken(text: string, token: string): string {
     return token ? text.split(token).join('[redacted]') : text;

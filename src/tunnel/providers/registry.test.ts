@@ -62,3 +62,28 @@ describe('tunnel provider registry', () => {
         expect(tunnelShorthand('nope')).toBeUndefined();
     });
 });
+
+describe('tunnel setups for the wizard', () => {
+    it('lists the providers that offer a setup, not the command provider', async () => {
+        const { tunnelSetups } = await import('./index');
+        const setups = tunnelSetups();
+        expect(setups.map((setup) => setup.providerId)).toEqual(['northflank']);
+        expect(setups[0].label).toBe('Northflank addon');
+    });
+});
+
+describe('a tunnel block with neither command nor provider', () => {
+    it('suggests the provider whose settings it has', () => {
+        expect(() => resolveTunnel('prod', { context: 'c', project: 'p', addon: 'a' } as never)).toThrow(
+            /no "provider" or "command".*did you mean to add "provider": "northflank"/
+        );
+    });
+
+    it('says what is needed otherwise', () => {
+        expect(() => resolveTunnel('prod', { idleTimeout: '5m' } as never)).toThrow(/give either "command".*or "provider" \(one of: northflank\)/);
+    });
+
+    it('still reports an empty command as a command problem', () => {
+        expect(() => resolveTunnel('prod', { command: '  ' })).toThrow(/"command" is required/);
+    });
+});

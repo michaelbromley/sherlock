@@ -45,8 +45,8 @@ export function withSudoHint(message: string, output: string): string {
         `The tunnel runs in the background with no terminal, so sudo cannot prompt for a password. ` +
         `Either grant the command passwordless sudo in /etc/sudoers, or use "sudo -A" with ` +
         `SUDO_ASKPASS set to a helper that supplies the password without a terminal. ` +
-        `Many forwarding tools also have a flag that avoids root entirely ` +
-        `(northflank has --skipHostnames).`
+        `Many forwarding tools also have a flag that avoids root entirely, and a tunnel ` +
+        `provider ("provider" in the tunnel block) never needs root.`
     );
 }
 

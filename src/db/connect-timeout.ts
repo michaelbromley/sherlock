@@ -54,11 +54,41 @@ function formatMs(ms: number): string {
     return ms % 1000 === 0 ? `${ms / 1000}s` : `${ms}ms`;
 }
 
+const REFUSED_CODES = new Set([
+    'ERR_POSTGRES_CONNECTION_REFUSED',
+    'ERR_MYSQL_CONNECTION_REFUSED',
+    'ERR_REDIS_CONNECTION_CLOSED',
+]);
+
 /**
- * Replace a connect timeout with an error that says what to check. Through a
- * tunnel the likely cause is the tunnel itself, not the database.
+ * Whether an error says nothing was listening, or the host does not resolve.
+ * Bun reports both as "Failed to connect", and Redis as "Max reconnection
+ * attempts reached", without saying where.
  */
-export function explainConnectTimeout(error: unknown, config: ResolvedConnectionConfig): unknown {
+function isRefused(error: unknown): boolean {
+    const { code, name, message } = (error ?? {}) as { code?: unknown; name?: unknown; message?: unknown };
+    if (typeof code === 'string' && REFUSED_CODES.has(code)) return true;
+    // mssql: ESOCKET, "Failed to connect to host:port - ..."
+    return name === 'ConnectionError' && code === 'ESOCKET' ||
+        (typeof message === 'string' && /^(failed to connect|max reconnection attempts reached)$/i.test(message.trim()));
+}
+
+/** "host:port" from a connection URL, never its credentials */
+function endpointOf(url: string): string | null {
+    try {
+        const parsed = new URL(url);
+        return parsed.port ? `${parsed.hostname}:${parsed.port}` : parsed.hostname || null;
+    } catch {
+        return null;
+    }
+}
+
+/**
+ * Replace a failed connection with an error that says where it failed and
+ * what to check. Through a tunnel the likely cause is the tunnel itself, not
+ * the database. Errors that are not about reaching the server pass through.
+ */
+export function explainConnectFailure(error: unknown, config: ResolvedConnectionConfig): unknown {
     const name = config.connectionName;
     const nextSteps = name
         ? `Restart the tunnel with 'sherlock tunnel stop ${name}' and try again, or run 'sherlock doctor ${name}'.`
@@ -69,6 +99,22 @@ export function explainConnectTimeout(error: unknown, config: ResolvedConnection
             `The tunnel accepted the connection and then closed it before the database answered, so ` +
             `the tunnel's far end is the problem: the forward may have lost its link, or a proxy or ` +
             `firewall may be blocking it. ${nextSteps}`.trim()
+        );
+    }
+
+    if (isRefused(error)) {
+        const where = endpointOf(config.url);
+        if (config.tunnelled) {
+            return new Error(
+                `Could not connect to the tunnel${where ? ` on ${where}` : ''}: it is no longer accepting ` +
+                `connections. ${nextSteps}`.trim()
+            );
+        }
+        return new Error(
+            `Could not connect to ${where ?? 'the database'}: nothing answered there, or the host name ` +
+            `does not resolve. Check the host and port` +
+            (name ? `, or run 'sherlock doctor ${name}'` : '') +
+            `. A database that is only reachable through a port-forward needs a "tunnel" on the connection.`
         );
     }
 

@@ -110,6 +110,25 @@ function listConnectionsAction(configPath?: string): void {
     }
 }
 
+/**
+ * Things worth knowing about a connection just added, printed to stderr so
+ * the JSON on stdout stays clean.
+ */
+function connectionAddNotes(config: import('./config/types').ConnectionConfig): string[] {
+    const notes: string[] = [];
+    const isSqlite = config.type === DB_TYPES.SQLITE;
+    if (!isSqlite && config.password === undefined && config.url === undefined) {
+        notes.push('No password is stored for this connection. Add --password-stdin or --password-env if the database needs one.');
+    }
+    if (config.tunnel && typeof config.ssl === 'object' && config.ssl.rejectUnauthorized) {
+        notes.push(
+            '--ssl verify cannot work through a tunnel: the certificate names the real host, not the ' +
+            'tunnel\'s local address. Use --ssl require to encrypt without verifying the host name.'
+        );
+    }
+    return notes;
+}
+
 /** Get error message from unknown error */
 function getErrorMessage(error: unknown): string {
     if (error instanceof Error) {
@@ -237,6 +256,20 @@ async function runWithSqlConnection<T>(
         return withConnectionFromConfig(opts._resolvedConfig, handler, options);
     }
     return withConnection(opts.connection, opts.config, handler, options);
+}
+
+/**
+ * The database type of a connection when the config alone settles it: a
+ * literal URL, or host-and-port settings. Undefined when the URL is held in
+ * the keychain or the environment, which only resolving the connection reads.
+ * Follows the same precedence as resolving: the URL's scheme wins.
+ */
+function certainDbType(opts: Record<string, any>): DbType | undefined {
+    if (opts._resolvedConfig) return opts._resolvedConfig.type;
+    const config = getConnectionConfig(opts.connection, opts.config);
+    if (config.url === undefined) return config.type ?? DB_TYPES.POSTGRES;
+    if (typeof config.url === 'string') return detectDbTypeFromUrl(config.url) ?? config.type ?? DB_TYPES.POSTGRES;
+    return undefined;
 }
 
 /** Largest SQL file `query --file` will read */
@@ -491,7 +524,7 @@ async function importConfigAction(
             `Imported ${imported.length} connection${imported.length === 1 ? '' : 's'} into ${configPath}`
         );
         if (imported.some(c => c.tunnel)) {
-            p.log.info('Tunnel commands run on this machine when you query. Check they are what you expect.');
+            p.log.info('Tunnels open on this machine when you query: a command tunnel runs its command here, and a provider tunnel uses this machine\'s login for that platform. Check they are what you expect.');
         }
         if (removedEntries.length > 0) {
             p.log.info(`Deleted keychain entries the replaced connections no longer use: ${removedEntries.join(', ')}`);
@@ -756,6 +789,14 @@ Every query runs in a read-only transaction that is rolled back afterwards.`)
                 process.exit(1);
             };
 
+            // When the config already says which database this is, refuse a
+            // bad query before a tunnel is started or a connection opened.
+            const knownType = certainDbType(opts);
+            if (knownType) {
+                const early = validateReadOnlyQuery(sqlQuery, knownType);
+                if (!early.valid) reject(early.error);
+            }
+
             await runWithSqlConnection(opts, async (sql, dbType) => {
                 // Enforce read-only, with the dialect the connection resolved
                 // to: the one the database will read the query with. The type
@@ -990,26 +1031,27 @@ Exits 1 when a check fails.`)
         .option('--database <name>', 'database name, or file path for sqlite')
         .option('--ssl <mode>', 'off, require, or verify')
         .option('--logging', 'record queries for this connection')
-        .option('--directory <path>', 'auto-select this connection when inside this directory')
+        .option('--directory <path>', 'auto-select this connection when inside this directory (stored as an absolute path)')
         .option('--password-stdin', 'read the password from stdin and store it in the OS keychain')
         .option('--password-env <var>', 'read the password from this environment variable at query time')
         .option('--tunnel-command <cmd>', 'port-forwarding command; use {{port}} where it takes a local port')
-        .option('--tunnel-northflank <project/addon>', 'shorthand for a northflank CLI command tunnel')
+        .option('--tunnel-northflank <project/addon>', 'a northflank CLI command tunnel (prefer --tunnel-provider northflank)')
         .option('--tunnel-provider <id>', 'open the tunnel with a provider instead of a command, e.g. northflank')
         .option(
             '--tunnel-option <key=value>',
-            'a setting for --tunnel-provider; repeat for each one',
+            'a setting for --tunnel-provider; repeat for each one ' +
+                '(northflank: context, project, addon, endpoint, port, team, configDir)',
             (value: string, previous: string[] = []) => [...previous, value]
         )
         .option('--tunnel-local-port <port>', 'fixed local port, when the command cannot be told one')
         .option('--tunnel-endpoint-pattern <regex>', 'read the endpoint from the command output')
-        .option('--tunnel-idle-timeout <duration>', 'shut the tunnel down after this long unused')
-        .option('--tunnel-ready-timeout <duration>', 'how long to wait for the tunnel to accept')
+        .option('--tunnel-idle-timeout <duration>', 'shut the tunnel down after this long unused, e.g. 30m (default 10m)')
+        .option('--tunnel-ready-timeout <duration>', 'how long to wait for the tunnel to accept, e.g. 1m (default 30s)')
         .option('--force', 'replace an existing connection of the same name')
         .action(async (name: string, cmdOpts: ConnectionAddOptions & { force?: boolean }) => {
             const { buildConnectionConfig } = await import('./config/connection-input');
             const { addConnection, connectionExists, shadowingWarning } = await import('./config/write');
-            const { describeTunnel } = await import('./tunnel/providers');
+            const { summarizeTunnel } = await import('./config');
 
             // -u/--url is a global option meaning "connect to this URL now", so
             // it never reaches this command. Say so rather than reporting the
@@ -1035,6 +1077,12 @@ Exits 1 when a check fails.`)
                     );
                 }
 
+                if (cmdOpts.passwordStdin && process.stdin.isTTY) {
+                    throw new Error(
+                        '--password-stdin reads the password from a pipe, and stdin is a terminal. ' +
+                        "Pipe it in, e.g. printf '%s' \"$PASSWORD\" | sherlock connection add ..."
+                    );
+                }
                 if (cmdOpts.passwordStdin) {
                     const password = await readPasswordFromStdin();
                     if (password === null) {
@@ -1050,13 +1098,20 @@ Exits 1 when a check fails.`)
 
                 const shadowed = shadowingWarning();
                 if (shadowed) console.error(`Warning: ${shadowed}`);
+                for (const note of connectionAddNotes(config)) console.error(`Note: ${note}`);
+
+                // A tunnel is opened by the first command, so check it with
+                // doctor first; otherwise start with a command that lists something.
+                const next = config.tunnel
+                    ? `sherlock doctor ${name}`
+                    : isRedisConfig(config) ? `sherlock -c ${name} info` : `sherlock -c ${name} tables`;
 
                 console.log(JSON.stringify({
                     connection: name,
                     action: replaced ? 'replaced' : 'added',
                     config: configPath,
-                    tunnel: config.tunnel ? describeTunnel(name, config.tunnel) : null,
-                    next: `sherlock -c ${name} tables`,
+                    tunnel: config.tunnel ? summarizeTunnel(name, config.tunnel) : null,
+                    next,
                 }, null, 2));
             } catch (error: unknown) {
                 console.error(`Error: ${getErrorMessage(error)}`);

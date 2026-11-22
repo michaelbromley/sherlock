@@ -25,10 +25,11 @@ import {
     summarizeConnection,
 } from '../config';
 import type { ConnectionConfig, CredentialRef } from '../config/types';
+import { getEnvFilePath } from '../config/paths';
 import { getEnvVarForConnection } from '../credentials/providers/env';
 import { DB_TYPES, isRedisConfig, type DbType } from '../db-types';
 import { createConnection } from '../db/connection';
-import { explainConnectTimeout } from '../db/connect-timeout';
+import { explainConnectFailure } from '../db/connect-timeout';
 import { createRedisConnection } from '../redis/connection';
 import { resolveTunnel, type DiagnosticCheck, type ResolvedTunnel } from '../tunnel/providers';
 import { startTunnelKeepalive } from '../tunnel/manager';
@@ -174,12 +175,8 @@ function credentialsStep(connectionName: string, configPath: string | undefined,
         try {
             await resolveConnectionCredentials(connectionName, configPath);
         } catch (error) {
-            return [{
-                name: 'credentials',
-                status: 'fail',
-                detail: errorMessage(error),
-                fix: `Store the password again with: sherlock manage, or 'echo <password> | sherlock connection add ${connectionName} --password-stdin --force ...'`,
-            }];
+            const detail = errorMessage(error);
+            return [{ name: 'credentials', status: 'fail', detail, fix: credentialsFix(detail) }];
         }
 
         const fields = (['url', 'host', 'username', 'password'] as const)
@@ -195,6 +192,22 @@ function credentialsStep(connectionName: string, configPath: string | undefined,
                 (noPassword && !isRedisConfig(config) ? '; no password configured' : ''),
         }];
     };
+}
+
+/** What to do about a credential that does not resolve, by why it did not */
+function credentialsFix(detail: string): string {
+    const envVar = /environment variable not set: (\S+)/i.exec(detail)?.[1];
+    if (envVar) {
+        return `Set ${envVar} in the environment sherlock runs in, or in ${getEnvFilePath()}.`;
+    }
+    if (/keychain/i.test(detail)) {
+        return 'Store the password again with sherlock manage > Edit connection > Update password. Typing it ' +
+            'there keeps it out of the shell history.';
+    }
+    if (/missing required connection parameters/i.test(detail)) {
+        return 'Add the missing settings to the connection, or set the environment variables the error names.';
+    }
+    return 'Check the connection\'s url, host, username and password settings.';
 }
 
 /** What the steps learn and pass on to the next */
@@ -225,7 +238,7 @@ function readTlsResult(dbType: DbType, rows: unknown[]): { encrypted: boolean; p
 
 /** Which check a connection failure belongs to, by what went wrong */
 function failedCheckName(message: string, fallback: 'query' | 'connect'): string {
-    if (/did not answer within|tunnel accepted the connection/.test(message)) return 'connect';
+    if (/did not answer within|tunnel accepted the connection|Could not connect to/.test(message)) return 'connect';
     if (looksLikeTlsError(message)) return 'tls';
     return fallback;
 }
@@ -283,7 +296,7 @@ function connectSteps(connectionName: string, configPath: string | undefined, st
                 try {
                     await client.send('PING', []);
                 } catch (error) {
-                    const message = errorMessage(explainConnectTimeout(error, resolved!));
+                    const message = errorMessage(explainConnectFailure(error, resolved!));
                     return [{
                         name: failedCheckName(message, 'query'),
                         status: 'fail',

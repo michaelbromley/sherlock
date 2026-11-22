@@ -69,9 +69,10 @@ describe('summarizeConnection', () => {
             tunnel: { provider: 'northflank', context: 'kbart', project: 'artsupplies', addon: 'postgresql' },
         });
         expect(summary.tunnel).toMatchObject({
+            kind: 'provider',
             provider: 'northflank',
             target: 'artsupplies/postgresql',
-            details: { context: 'kbart', project: 'artsupplies', addon: 'postgresql' },
+            details: { context: 'kbart', project: 'artsupplies', addon: 'postgresql', endpoint: 'auto' },
         });
     });
 
@@ -80,7 +81,12 @@ describe('summarizeConnection', () => {
             type: 'postgres', host: 'h', database: 'app', username: 'u',
             tunnel: { command: 'northflank forward addon --project cloud --addon control-plane-db --skipHostnames', endpointPattern: 'on (?<port>\\d+)' },
         });
-        expect(summary.tunnel).toMatchObject({ provider: 'northflank', details: { project: 'cloud', addon: 'control-plane-db' } });
+        // A command tunnel, recognised as the northflank CLI so its target can be checked.
+        expect(summary.tunnel).toMatchObject({
+            kind: 'command', provider: 'command',
+            target: 'cloud/control-plane-db (northflank CLI)',
+            details: { project: 'cloud', addon: 'control-plane-db' },
+        });
     });
 
     it('reports a broken tunnel instead of failing the whole list', () => {

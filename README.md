@@ -197,6 +197,15 @@ Config lives at `~/.config/sherlock/config.json`:
 }
 ```
 
+### Timeouts
+
+Two settings on a connection limit how long sherlock waits. Both take a duration such as `"30s"`, `"5m"` or `"2h"`.
+
+| Setting | Default | What it limits |
+|---|---|---|
+| `statementTimeout` | `60s` | How long one statement may run before the database cancels it. `query --timeout 5m` overrides it for one query. |
+| `connectTimeout` | `10s` | How long to wait for the database to answer when connecting. Through a tunnel whose far end is gone this is what makes the connection fail quickly, with an error that says the tunnel is the problem. |
+
 ### SSL/TLS
 
 Add `ssl` to any connection to enable encryption. Managed databases (Northflank, Supabase, Neon, RDS, Azure SQL) typically require this:
@@ -342,7 +351,7 @@ Sherlock detects this failure and lists these three options in the error.
 
 The connection's `host` and `port` are replaced by the tunnel's local endpoint, so they can be left out or left pointing at the real remote address, whichever documents the connection better.
 
-The `sherlock manage` wizard asks whether a connection needs a tunnel when you add one, and "Configure tunnel" in the edit menu changes it later.
+The `sherlock manage` wizard asks whether a connection needs a tunnel when you add one, and "Configure tunnel" in the edit menu changes it later. It asks how the database is reached: through a provider, or a command. For a Northflank addon it lists the contexts in your Northflank CLI config, then that context's projects and their database addons, so nothing has to be typed or looked up.
 
 To set one up in a single command, `sherlock connection add` takes the same settings as flags:
 
@@ -372,7 +381,22 @@ sherlock tunnel stop                   # Stop all tunnels
 
 Sherlock waits for the local port to start accepting before it connects, so a tunnel that fails to come up reports the provider's or the forwarding command's own error rather than a connection refusal. Each tunnel's log is kept in `~/.config/sherlock/tunnels/`.
 
-`sherlock connection list` shows each connection's tunnel provider and target, for example `northflank: my-project/postgresql (read)`.
+`sherlock connection list` reports each connection's tunnel the same way `connection add` and `tunnel status` do:
+
+```json
+"tunnel": {
+  "kind": "provider",
+  "provider": "northflank",
+  "target": "my-project/postgresql (read)",
+  "details": { "context": "my-team", "project": "my-project", "addon": "postgresql", "endpoint": "read" }
+}
+```
+
+`kind` is `command` for a command tunnel. A `northflank forward` command is still a command tunnel, but its `details` name the project and addon so `doctor` can check them.
+
+- **Tunnels are refused in a project-local `.sherlock.json`.** A command tunnel runs a shell command, and a provider tunnel uses your platform login. Honouring one from the current directory would mean that cloning a repository and running any sherlock command runs what that repository put in the file. A connection there that has a tunnel fails with an error saying so. Tunnels are read only from your user config directory, a config next to the binary, `--config`, or `SHERLOCK_CONFIG`.
+- **`{ "rejectUnauthorized": true }` cannot work through a tunnel.** Certificate verification checks the hostname, which after tunnelling is a loopback address and will never match the database's certificate. Use `"ssl": true` (`--ssl require`) to keep the connection encrypted without hostname verification. Sherlock warns if you configure both.
+
 
 #### When a connection does not work
 
@@ -396,8 +420,6 @@ It prints JSON and exits 1 when a check fails.
 
 Providers live in `src/tunnel/providers/`, one directory each, and implement the `TunnelProvider` interface in `types.ts`: validate the block, describe the target, open the forward, and optionally diagnose it and recognise the platform's CLI in a command tunnel. Register it in `providers/index.ts`. Nothing else in sherlock refers to a particular provider.
 
-- **Tunnels are ignored in a project-local `.sherlock.json`.** A command tunnel runs a shell command, and a provider tunnel uses your platform login. Reading one from the current directory would mean that cloning a repository and running any sherlock command executes the command that repository put in the file. Tunnels are read only from your user config directory, a config next to the binary, `--config`, or `SHERLOCK_CONFIG`.
-- **`{ "rejectUnauthorized": true }` cannot work through a tunnel.** Certificate verification checks the hostname, which after tunnelling is `127.0.0.1` and will never match the database's certificate. Use `"ssl": true` to keep the connection encrypted without hostname verification. Sherlock warns if you configure both.
 
 ### Credential Sources
 
