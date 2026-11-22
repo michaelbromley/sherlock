@@ -7,11 +7,12 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { diagnoseConnection } from '../doctor';
 import { passwordStatus } from '../credentials/status';
+import { ownKeychainEntry, planKeychainMove, type KeychainAccess } from '../credentials/ownership';
 import { findConfigFile, getConfigDir, ensureConfigDir, getEnvFilePath } from '../config/paths';
 import {
     listConnectionSummaries,
+    clearConfigCache,
     type ConnectionSummary,
-    listConnections,
     parseConnectionUrl,
     sortConnectionNames,
     isConfigFromWorkingDirectory,
@@ -75,14 +76,14 @@ export async function connectionManagerMenu(): Promise<void> {
         }
     }
 
+    // Every menu item reads and writes the same file: the user config. Say
+    // once when commands run here would read another one instead.
+    const shadowed = shadowingWarning();
+    if (shadowed) p.log.warn(`This menu edits ${writableConfigPath()}. ${shadowed}`);
+
     // Main menu loop
     while (true) {
-        let connections: string[] = [];
-        try {
-            connections = listConnections();
-        } catch {
-            // No config yet
-        }
+        const connections = Object.keys(loadWritableConfig()?.connections ?? {});
 
         const hasConnections = connections.length > 0;
 
@@ -101,8 +102,6 @@ export async function connectionManagerMenu(): Promise<void> {
             );
         }
 
-        // "init" is not offered: this menu only shows once a config exists,
-        // and `sherlock init` refuses to replace one.
         options.push(
             { value: 'migrate', label: 'Migrate legacy config' },
             { value: 'exit', label: 'Exit' },
@@ -177,7 +176,7 @@ async function testConnectionMenu(connections: string[]): Promise<void> {
 
     const spinner = p.spinner();
     spinner.start(`Checking "${selected}"`);
-    const report = await diagnoseConnection(selected);
+    const report = await diagnoseConnection(selected, writableConfigPath());
     spinner.stop(report.ok ? `"${selected}" works` : `"${selected}" does not work`);
 
     for (const check of report.checks) {
@@ -201,7 +200,7 @@ async function testConnectionMenu(connections: string[]): Promise<void> {
 async function listConnectionsDisplay(): Promise<void> {
     let summaries: ConnectionSummary[];
     try {
-        summaries = listConnectionSummaries();
+        summaries = listConnectionSummaries(writableConfigPath());
     } catch {
         p.log.warn('No config found.');
         return;
@@ -340,6 +339,10 @@ async function migrateInteractive(): Promise<void> {
         await migrateConfig(fromPath as string);
     } catch (error) {
         p.log.error(error instanceof Error ? error.message : String(error));
+    } finally {
+        // migrate writes config.json itself. A copy cached before it would
+        // otherwise be saved back over the migrated file by the next edit.
+        clearConfigCache();
     }
 }
 
@@ -663,6 +666,15 @@ async function editConnectionWizard(): Promise<void> {
     const connection = await promptForConnection(connName, existingConn);
     if (!connection) return;
 
+    const renamed = connection.name !== connName;
+    if (renamed && config.connections[connection.name]) {
+        p.log.error(
+            `A connection named "${connection.name}" already exists. Pick another name, or delete ` +
+            `that connection first. Nothing was changed.`
+        );
+        return;
+    }
+
     // Only handle password storage for new connections (edit skips password prompt)
     if (connection.password) {
         await handlePasswordStorage(connection.name, connection.password);
@@ -678,14 +690,24 @@ async function editConnectionWizard(): Promise<void> {
 
     // A rename moves the keychain entry named after the connection, since the
     // entry is looked up by that name.
-    if (connection.name !== connName) {
-        if (!moveKeychainEntry(connection.config, connName, connection.name)) return;
+    let commitMove = (): void => undefined;
+    if (renamed) {
+        const move = planKeychainMove(connection.config, connName, connection.name, keychain);
+        if (!move.ok) {
+            p.log.error(move.reason);
+            return;
+        }
+        commitMove = () => {
+            move.commit();
+            if (move.message) p.log.info(move.message);
+        };
         delete config.connections[connName];
-        await stopTunnel(connName).catch(() => undefined);
     }
 
     config.connections[connection.name] = connection.config;
     saveConfig(config);
+    commitMove();
+    if (renamed) await stopTunnel(connName).catch(() => undefined);
 
     p.log.success(`Connection "${connection.name}" updated!`);
 }
@@ -1573,41 +1595,13 @@ function saveConfig(config: SherlockConfig): void {
     if (shadowed) p.log.warn(shadowed);
 }
 
-/** Whether a password reference is the keychain entry named after a connection */
-export function usesOwnKeychainEntry(password: ConnectionConfig['password'], connName: string): boolean {
-    return typeof password === 'object' && password !== null && '$keychain' in password &&
-        (password.$keychain === connName ||
-            (typeof password.$keychain === 'object' && password.$keychain.account === connName &&
-                (password.$keychain.service ?? 'sherlock') === 'sherlock'));
-}
-
-/**
- * Move a connection's keychain password to the entry for its new name, and
- * point the config at it. Returns false, having said why, when it could not
- * be moved; the rename should then not go ahead.
- */
-function moveKeychainEntry(config: ConnectionConfig, oldName: string, newName: string): boolean {
-    if (!usesOwnKeychainEntry(config.password, oldName)) return true;
-
-    const secret = getKeychainPassword(oldName);
-    if (secret === null) {
-        // Nothing to move. Point at the new name so a password stored later lands there.
-        config.password = { $keychain: newName };
-        return true;
-    }
-    if (hasKeychainPassword(newName)) {
-        p.log.error(
-            `The keychain already has an entry for "${newName}", so the password of "${oldName}" ` +
-            `cannot be moved there. Nothing was renamed.`
-        );
-        return false;
-    }
-    setKeychainPassword(newName, secret);
-    config.password = { $keychain: newName };
-    deleteKeychainPassword(oldName);
-    p.log.info(`Moved the keychain password from "${oldName}" to "${newName}".`);
-    return true;
-}
+/** The OS keychain, as the ownership helpers use it */
+const keychain: KeychainAccess = {
+    get: (account) => getKeychainPassword(account),
+    set: (account, password) => setKeychainPassword(account, password),
+    has: (account) => hasKeychainPassword(account),
+    delete: (account) => deleteKeychainPassword(account),
+};
 
 /**
  * Delete a connection: its config, the keychain entry it uses if that entry
@@ -1615,12 +1609,12 @@ function moveKeychainEntry(config: ConnectionConfig, oldName: string, newName: s
  */
 async function removeConnection(config: SherlockConfig, connName: string): Promise<void> {
     const conn = config.connections[connName];
+    const entry = ownKeychainEntry(conn, connName, keychain);
     delete config.connections[connName];
-    if (conn && usesOwnKeychainEntry(conn.password, connName) && hasKeychainPassword(connName)) {
-        deleteKeychainPassword(connName);
-    }
-    if (conn?.tunnel) await stopTunnel(connName).catch(() => undefined);
     saveConfig(config);
+    // Only once the config no longer refers to it
+    if (entry) keychain.delete(entry);
+    if (conn?.tunnel) await stopTunnel(connName).catch(() => undefined);
     p.log.success(`Connection "${connName}" deleted.`);
     if (conn && typeof conn.password === 'object' && conn.password !== null && '$env' in conn.password) {
         p.log.info(`Its password variable ${conn.password.$env} was left in place, in case anything else uses it.`);

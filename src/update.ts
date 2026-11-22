@@ -217,11 +217,10 @@ export async function runUpdate(): Promise<void> {
         release = await fetchReleaseInfo();
     } catch (err) {
         spin.stop('');
+        process.exitCode = 1;
         if (err instanceof TypeError && err.message.includes('fetch')) {
-            process.exitCode = 1;
             p.log.error('Could not check for updates. Check your internet connection.');
         } else {
-            process.exitCode = 1;
             p.log.error(err instanceof Error ? err.message : String(err));
         }
         return;
@@ -276,11 +275,10 @@ export async function runUpdate(): Promise<void> {
     } catch (err) {
         spin.stop('');
         const msg = err instanceof Error ? err.message : String(err);
+        process.exitCode = 1;
         if (msg.includes('EACCES') || msg.includes('permission denied')) {
-            process.exitCode = 1;
             p.log.error('Permission denied. Try: sudo sherlock update');
         } else {
-            process.exitCode = 1;
             p.log.error(msg);
         }
         return;

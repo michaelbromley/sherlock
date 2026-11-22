@@ -43,17 +43,3 @@ describe('carryOverUnprompted', () => {
     });
 });
 
-describe('usesOwnKeychainEntry', () => {
-    it('is true only for the sherlock keychain entry named after the connection', async () => {
-        const { usesOwnKeychainEntry } = await import('./index');
-        expect(usesOwnKeychainEntry({ $keychain: 'prod' }, 'prod')).toBe(true);
-        expect(usesOwnKeychainEntry({ $keychain: { account: 'prod' } }, 'prod')).toBe(true);
-        expect(usesOwnKeychainEntry({ $keychain: { service: 'sherlock', account: 'prod' } }, 'prod')).toBe(true);
-        // Someone else's entry, or one in another service, is not the connection's to move or delete.
-        expect(usesOwnKeychainEntry({ $keychain: 'shared-db-password' }, 'prod')).toBe(false);
-        expect(usesOwnKeychainEntry({ $keychain: { service: 'sherlock-url', account: 'prod' } }, 'prod')).toBe(false);
-        expect(usesOwnKeychainEntry({ $env: 'PROD_PW' }, 'prod')).toBe(false);
-        expect(usesOwnKeychainEntry('plain', 'prod')).toBe(false);
-        expect(usesOwnKeychainEntry(undefined, 'prod')).toBe(false);
-    });
-});

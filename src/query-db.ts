@@ -971,7 +971,7 @@ Every query runs in a read-only transaction that is rolled back afterwards.`)
             try {
                 process.stdout.write(guideText(topic, pkg.version));
             } catch (error: unknown) {
-                fail(`${getErrorMessage(error)}`);
+                fail(getErrorMessage(error));
             }
         });
 
@@ -1115,7 +1115,7 @@ Exits 1 when a check fails.`)
                     next,
                 }, null, 2));
             } catch (error: unknown) {
-                fail(`${getErrorMessage(error)}`);
+                fail(getErrorMessage(error));
             }
         });
 
@@ -1236,7 +1236,7 @@ A connection whose name already exists is skipped unless --force is given.`)
             try {
                 await migrateConfig(cmdOpts.from);
             } catch (error: unknown) {
-                fail(`${getErrorMessage(error)}`);
+                fail(getErrorMessage(error));
             }
         });
 
@@ -1314,7 +1314,7 @@ A connection whose name already exists is skipped unless --force is given.`)
                 console.log(JSON.stringify({ passwords }, null, 2));
                 if (passwords.some((entry) => !entry.ok)) process.exitCode = 1;
             } catch (error: unknown) {
-                fail(`${getErrorMessage(error)}`);
+                fail(getErrorMessage(error));
             }
         });
 

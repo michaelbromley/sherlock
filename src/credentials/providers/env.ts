@@ -30,10 +30,23 @@ export class EnvProvider implements CredentialProvider {
 }
 
 /**
+ * The environment variable sherlock reads a connection's setting from when the
+ * config leaves it out: SHERLOCK_<CONNECTION>_<FIELD>, with hyphens in the
+ * connection name as underscores. Every message that names one uses this, so
+ * it names the variable sherlock actually reads.
+ */
+export function connectionEnvVarName(connectionName: string, field: string): string {
+    return `SHERLOCK_${connectionName.toUpperCase().replace(/-/g, '_')}_${field.toUpperCase()}`;
+}
+
+/**
  * Auto-detect environment variables for a connection
  * Convention: SHERLOCK_<CONNECTION>_<FIELD>
  */
-export function getEnvVarForConnection(connectionName: string, field: string): string | undefined {
-    const envVarName = `SHERLOCK_${connectionName.toUpperCase().replace(/-/g, '_')}_${field.toUpperCase()}`;
-    return process.env[envVarName];
+export function getEnvVarForConnection(
+    connectionName: string,
+    field: string,
+    env: Record<string, string | undefined> = process.env
+): string | undefined {
+    return env[connectionEnvVarName(connectionName, field)];
 }

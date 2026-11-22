@@ -97,7 +97,7 @@ Next steps:
 export async function migrateConfig(fromPath: string): Promise<void> {
     const absoluteFromPath = path.resolve(fromPath);
 
-    // Thrown rather than exiting, so that `sherlock manage` can ask again.
+    // Thrown rather than exiting, so that `sherlock manage` reports it and returns to its menu.
     if (!fs.existsSync(absoluteFromPath)) {
         throw new Error(`Legacy config not found: ${absoluteFromPath}`);
     }

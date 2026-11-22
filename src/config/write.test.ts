@@ -180,3 +180,17 @@ describe('shadowingWarning', () => {
         }
     });
 });
+
+describe('loadOrCreateConfig after the file changed', () => {
+    it('reads the file as it is now, not as an earlier read cached it', () => {
+        // What `sherlock manage` hits after "Migrate legacy config": the menu had
+        // already read config.json when migrate wrote a new one.
+        addConnection('before', { type: 'sqlite', filename: 'a.db' });
+        expect(Object.keys(loadOrCreateConfig().connections)).toEqual(['before']);
+
+        const file = path.join(tempDir, 'sherlock', 'config.json');
+        fs.writeFileSync(file, JSON.stringify({ connections: { migrated: { type: 'sqlite', filename: 'b.db' } } }));
+
+        expect(Object.keys(loadOrCreateConfig().connections)).toEqual(['migrated']);
+    });
+});

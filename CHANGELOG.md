@@ -28,15 +28,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **Renaming a connection in `sherlock manage` deleted its keychain password**, leaving the renamed connection pointing at an entry that no longer existed. The password now moves to the new name, and the rename is refused if that name already has an entry
-- **`sherlock manage` edited the wrong file.** It read whichever config discovery picked, such as a project's `.sherlock.json` or `SHERLOCK_CONFIG`, then saved all of it to the user config, copying that file's connections and tunnels in, and deleted connections came back. It now reads and writes the user config, and warns when commands run here read a different file
+- **Renaming a connection in `sherlock manage` deleted its keychain password**, leaving the renamed connection pointing at an entry that no longer existed. The password now moves to the new name, and the old entry is deleted only once the config is saved. The rename is refused if the new name belongs to another connection or already has a keychain entry
+- **`sherlock manage` edited the wrong file.** It read whichever config discovery picked, such as a project's `.sherlock.json` or `SHERLOCK_CONFIG`, then saved all of it to the user config, copying that file's connections and tunnels in, and deleted connections came back. It now reads and writes the user config for every menu item, including the list and Test, and warns when commands run here read a different file. Running "Migrate legacy config" and then editing no longer writes the pre-migration connections back
 - Editing connection details in `sherlock manage` keeps a host or username read from an environment variable or the keychain, instead of replacing it with what is typed. A connection defined by a URL is no longer rewritten as separate fields; the wizard says how to change the URL
 - Deleting a connection removes only the keychain entry it uses, and stops its tunnel
 - "Update password" refuses an empty password, which pointed the connection at a password that was never stored, and is not offered for SQLite
 - Updating a password in the `.env` file no longer corrupts one containing `$&` or `$1`
 - `sherlock migrate` backs up an existing `.env` instead of overwriting it, and `sherlock init` leaves an existing `.env` alone. A missing legacy config no longer ends the `manage` session
 - `sherlock keychain get` reports whether an entry exists instead of printing the password
-- `sherlock keychain list` and the keychain check in `manage` show where each password comes from (keychain, environment variable, plaintext, URL, none), not only whether a keychain entry is named after the connection
+- `sherlock keychain list` and the keychain check in `manage` show where each password comes from (keychain, environment variable, plaintext, URL, none), not only whether a keychain entry is named after the connection. `keychain list` now prints JSON (`{"passwords": [{"connection", "ok", "source"}]}`) and exits 1 when any password cannot be found
+- Messages that name sherlock's default variables, such as `SHERLOCK_PROD_DB_PASSWORD`, spell a hyphenated connection name with underscores, as sherlock reads it
 - "Test connection" in `manage` runs the same checks as `sherlock doctor`, and the connection list there shows each connection's target and tunnel
 - Every non-interactive command reports errors as `{"error": "..."}` on stderr and exits 1. Some printed a plain `Error:` line. `tunnel stop <name>` exits 1 when no such tunnel is running, and `update` exits 1 when it fails
 - The "no configuration file" error and the steps `init` and `migrate` print point at `manage`, `connection add`, `connection list` and `doctor`, rather than hidden commands. The unreachable "Initialize config template" menu item is gone
