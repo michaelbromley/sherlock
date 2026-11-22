@@ -8,7 +8,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { getConfigDir, ensureConfigDir, findConfig, describeConfigSource, type ConfigSource, type FoundConfig } from './paths';
-import { loadConfigFile } from './index';
+import { clearConfigCache, loadConfigFile } from './index';
 import type { SherlockConfig, ConnectionConfig } from './types';
 
 /** Config may hold credentials, so it is readable by its owner only */
@@ -65,6 +65,8 @@ export function saveConfig(config: SherlockConfig): void {
     const configPath = writableConfigPath();
     fs.writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf-8');
     fs.chmodSync(configPath, SECURE_FILE_MODE);
+    // The cache holds the file as it was read. Later reads must see this write.
+    clearConfigCache();
 }
 
 /**
@@ -84,6 +86,10 @@ export function loadOrCreateConfig(): SherlockConfig {
     if (!fs.existsSync(configPath)) {
         return { version: CONFIG_VERSION, connections: {} };
     }
+    // Read fresh rather than from the cache: something else, such as
+    // `sherlock migrate`, may have written the file since it was cached, and
+    // the caller is about to save what it reads.
+    clearConfigCache();
     return loadConfigFile(configPath);
 }
 

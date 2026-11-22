@@ -10,7 +10,7 @@ import {
 import { getCredentialResolver } from '../credentials';
 import type { SherlockConfig, ConnectionConfig, ResolvedConnectionConfig, CredentialRef, SslConfig } from './types';
 import type { TunnelConfig } from '../tunnel/types';
-import { getEnvVarForConnection } from '../credentials/providers/env';
+import { connectionEnvVarName, getEnvVarForConnection } from '../credentials/providers/env';
 import { DB_TYPES, DEFAULT_PORTS, detectDbTypeFromUrl, parseBoolParam, type DbType } from '../db-types';
 import { ensureTunnel } from '../tunnel/manager';
 import { resolveTunnel } from '../tunnel/providers';
@@ -76,7 +76,8 @@ export function loadConfigFile(configPath?: string): SherlockConfig {
     if (!found) {
         throw new Error(
             `No configuration file found.\n\n` +
-            `Run 'sherlock init' to create one, or create a config file at:\n` +
+            `Run 'sherlock manage' to set up a connection, or add one with ` +
+            `'sherlock connection add <name> ...' (see --help). Sherlock reads a config file at:\n` +
             `  - ./.sherlock.json (project-local)\n` +
             `  - ${path.join(getConfigDir(), 'config.json')} (user config)\n\n` +
             `Or set SHERLOCK_CONFIG environment variable to your config file path.`
@@ -631,7 +632,7 @@ async function buildResolvedConnection(
     if (config.password && typeof config.password === 'string' && config.password.length > 0) {
         console.warn(
             '\x1b[33m[sherlock] Warning: Password for connection "' + connectionName + '" is stored as plaintext.\n' +
-            '  Consider using { "$env": "SHERLOCK_' + connectionName.toUpperCase() + '_PASSWORD" } for better security.\x1b[0m'
+            '  Consider using { "$env": "' + connectionEnvVarName(connectionName, 'PASSWORD') + '" } for better security.\x1b[0m'
         );
     }
 
@@ -662,7 +663,7 @@ async function buildResolvedConnection(
         throw new Error(
             `Missing required connection parameters for "${connectionName}": ${missing.join(', ')}\n\n` +
             `Either provide them in the config file, or set environment variables:\n` +
-            missing.map(f => `  SHERLOCK_${connectionName.toUpperCase()}_${f.toUpperCase()}`).join('\n')
+            missing.map(f => `  ${connectionEnvVarName(connectionName, f)}`).join('\n')
         );
     }
 
@@ -800,7 +801,7 @@ export function summarizeConnection(name: string, config: ConnectionConfig): Con
         target = typeof config.url === 'string' ? urlTarget(config.url) : `url from ${describeReference(config.url)}`;
     } else {
         const host = config.host === undefined
-            ? `$env:SHERLOCK_${name.toUpperCase()}_HOST`
+            ? `$env:${connectionEnvVarName(name, 'HOST')}`
             : typeof config.host === 'string' ? config.host : describeReference(config.host);
         target = config.port ? `${host}:${config.port}` : host;
     }

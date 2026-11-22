@@ -24,11 +24,11 @@ import {
     resolveConnectionCredentials,
     summarizeConnection,
 } from '../config';
-import type { ConnectionConfig, CredentialRef } from '../config/types';
+import type { ConnectionConfig } from '../config/types';
 import { getEnvFilePath } from '../config/paths';
-import { getEnvVarForConnection } from '../credentials/providers/env';
 import { DB_TYPES, isRedisConfig, type DbType } from '../db-types';
 import { createConnection } from '../db/connection';
+import { credentialSource } from '../credentials/status';
 import { explainConnectFailure } from '../db/connect-timeout';
 import { createRedisConnection } from '../redis/connection';
 import { resolveTunnel, type DiagnosticCheck, type ResolvedTunnel } from '../tunnel/providers';
@@ -67,26 +67,6 @@ export async function runSteps(steps: DoctorStep[]): Promise<{ ok: boolean; chec
 
 function errorMessage(error: unknown): string {
     return error instanceof Error ? error.message : String(error);
-}
-
-/** Where a credential comes from, without its value */
-function credentialSource(
-    connectionName: string,
-    field: 'url' | 'host' | 'username' | 'password',
-    value: string | CredentialRef | undefined
-): string | null {
-    if (value === undefined) {
-        const envField = field === 'username' ? 'USERNAME' : field.toUpperCase();
-        const envVar = `SHERLOCK_${connectionName.toUpperCase()}_${envField}`;
-        if (field === 'url') return null;
-        return getEnvVarForConnection(connectionName, envField) !== undefined
-            ? `environment variable ${envVar}`
-            : null;
-    }
-    if (typeof value === 'string') return field === 'password' || field === 'url' ? 'plaintext in config.json' : 'config.json';
-    if ('$env' in value) return `environment variable ${value.$env}`;
-    const ref = value.$keychain;
-    return `OS keychain (${typeof ref === 'string' ? ref : `${ref.service ?? 'sherlock'}/${ref.account}`})`;
 }
 
 function configStep(connectionName: string, configPath: string | undefined, state: DoctorState): DoctorStep {
@@ -181,8 +161,8 @@ function credentialsStep(connectionName: string, configPath: string | undefined,
 
         const fields = (['url', 'host', 'username', 'password'] as const)
             .map((field) => [field, credentialSource(connectionName, field, config[field])] as const)
-            .filter(([, source]) => source !== null)
-            .map(([field, source]) => `${field} from ${source}`);
+            .filter(([, status]) => status !== null)
+            .map(([field, status]) => `${field} from ${status!.source}`);
         const noPassword = config.url === undefined && credentialSource(connectionName, 'password', config.password) === null;
 
         return [{

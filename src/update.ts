@@ -200,6 +200,7 @@ export async function runUpdate(): Promise<void> {
     // 2. Platform check
     const assetName = getAssetName();
     if (!assetName) {
+        process.exitCode = 1;
         p.log.error(
             `No prebuilt binary for ${process.platform}/${process.arch}, so sherlock cannot update itself here. ` +
                 `Pull and rebuild from source: https://github.com/${REPO}#from-source`,
@@ -216,6 +217,7 @@ export async function runUpdate(): Promise<void> {
         release = await fetchReleaseInfo();
     } catch (err) {
         spin.stop('');
+        process.exitCode = 1;
         if (err instanceof TypeError && err.message.includes('fetch')) {
             p.log.error('Could not check for updates. Check your internet connection.');
         } else {
@@ -259,6 +261,7 @@ export async function runUpdate(): Promise<void> {
     // 8. Find asset URL
     const asset = release.assets.find((a) => a.name === assetName);
     if (!asset) {
+        process.exitCode = 1;
         p.log.error(
             `No binary found for your platform (${assetName}). Download manually from https://github.com/${REPO}/releases`,
         );
@@ -272,6 +275,7 @@ export async function runUpdate(): Promise<void> {
     } catch (err) {
         spin.stop('');
         const msg = err instanceof Error ? err.message : String(err);
+        process.exitCode = 1;
         if (msg.includes('EACCES') || msg.includes('permission denied')) {
             p.log.error('Permission denied. Try: sudo sherlock update');
         } else {
