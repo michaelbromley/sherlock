@@ -62,3 +62,12 @@ describe('tunnel provider registry', () => {
         expect(tunnelShorthand('nope')).toBeUndefined();
     });
 });
+
+describe('tunnel setups for the wizard', () => {
+    it('lists the providers that offer a setup, not the command provider', async () => {
+        const { tunnelSetups } = await import('./index');
+        const setups = tunnelSetups();
+        expect(setups.map((setup) => setup.providerId)).toEqual(['northflank']);
+        expect(setups[0].label).toBe('Northflank addon');
+    });
+});

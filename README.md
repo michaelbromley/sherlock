@@ -342,7 +342,7 @@ Sherlock detects this failure and lists these three options in the error.
 
 The connection's `host` and `port` are replaced by the tunnel's local endpoint, so they can be left out or left pointing at the real remote address, whichever documents the connection better.
 
-The `sherlock manage` wizard asks whether a connection needs a tunnel when you add one, and "Configure tunnel" in the edit menu changes it later.
+The `sherlock manage` wizard asks whether a connection needs a tunnel when you add one, and "Configure tunnel" in the edit menu changes it later. It asks how the database is reached: through a provider, or a command. For a Northflank addon it lists the contexts in your Northflank CLI config, then that context's projects and their database addons, so nothing has to be typed or looked up.
 
 To set one up in a single command, `sherlock connection add` takes the same settings as flags:
 

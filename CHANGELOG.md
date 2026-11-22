@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Tunnel providers.** A `tunnel` block can name a `provider` instead of giving a `command`. The first is `northflank`, which forwards an addon through the Northflank API using a named context from the Northflank CLI config (`"context"`, `"project"`, `"addon"`). It never reads or changes the CLI's current context, needs no root, and defaults to the addon's read replica when it has one (`"endpoint": "read" | "primary"`). `"configDir"` points at a separate CLI config directory. A `tunnel` block with no `provider` behaves exactly as before
 - `connection add --tunnel-provider <id> --tunnel-option key=value` sets up a provider tunnel without the wizard
+- The `sherlock manage` wizard sets up provider tunnels too. It first asks how the database is reached, then asks the provider's own questions: for Northflank, pick a context from the CLI config, then a project and a database addon listed from the API. An existing provider tunnel can be edited there rather than only in config.json
 - `sherlock doctor <connection>` checks a connection in order: config, tunnel target against the configured host, provider access, credentials, tunnel, TLS and `SELECT 1`. It stops at the first failure and says what to change
 - `query --file <path>`, and `query -` to read the query from stdin
 - `query --timeout <duration>` and a `statementTimeout` connection setting. Statements are cancelled after 60s by default

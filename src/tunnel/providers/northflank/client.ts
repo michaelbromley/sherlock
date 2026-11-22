@@ -52,6 +52,67 @@ export interface NorthflankClient {
     stop(): Promise<void>;
 }
 
+/** A project or addon, for offering as a choice */
+export interface NorthflankListing {
+    id: string;
+    name: string;
+    /** Addons only, e.g. "postgresql" */
+    type?: string;
+    /** Addons only, e.g. "running" */
+    status?: string;
+}
+
+/** Listing what a login can see, for the setup wizard */
+export interface NorthflankLister {
+    listProjects(context: NorthflankContext, team?: string): Promise<NorthflankListing[]>;
+    listAddons(context: NorthflankContext, project: string, team?: string): Promise<NorthflankListing[]>;
+}
+
+async function apiFor(context: NorthflankContext) {
+    const { ApiClient, ApiClientInMemoryContextProvider } = await import('@northflank/js-client');
+    const contextProvider = new ApiClientInMemoryContextProvider();
+    contextProvider.addContext({
+        name: context.name,
+        token: context.token,
+        host: context.host,
+        ...(context.tokenScope ? { tokenScope: context.tokenScope } : {}),
+        ...(context.team ? { team: context.team } : {}),
+    });
+    contextProvider.useContext(context.name);
+    return new ApiClient(contextProvider, { throwErrorOnHttpErrorCode: true, customUserAgent: 'sherlock' });
+}
+
+/** The real lister, backed by `@northflank/js-client`. Lists the first 100 of each. */
+export const northflankLister: NorthflankLister = {
+    async listProjects(context, team) {
+        try {
+            const api = await apiFor(context);
+            const { data } = await api.list.projects({
+                ...(team ? { parameters: { teamId: team } } : {}),
+                options: { per_page: 100 },
+            } as Parameters<typeof api.list.projects>[0]);
+            return data.projects.map((project) => ({ id: project.id, name: project.name }));
+        } catch (error) {
+            throw toApiError(error);
+        }
+    },
+    async listAddons(context, project, team) {
+        try {
+            const api = await apiFor(context);
+            const { data } = await api.list.addons({
+                parameters: { projectId: project, ...(team ? { teamId: team } : {}) },
+                options: { per_page: 100 },
+            } as Parameters<typeof api.list.addons>[0]);
+            return data.addons.map((addon) => {
+                const details = addon as unknown as { status?: string; spec?: { type?: string } };
+                return { id: addon.id, name: addon.name, type: details.spec?.type, status: details.status };
+            });
+        } catch (error) {
+            throw toApiError(error);
+        }
+    },
+};
+
 export type NorthflankClientFactory = (
     context: NorthflankContext,
     target: NorthflankTargetRef

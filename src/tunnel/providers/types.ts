@@ -141,7 +141,44 @@ export interface TunnelProvider<C = unknown> {
      * `connection add --tunnel-<name>` flags that predate providers.
      */
     shorthands?: Record<string, TunnelShorthand>;
+
+    /**
+     * The questions the `sherlock manage` wizard asks to build this provider's
+     * tunnel block. A provider without `setup` can only be configured by hand.
+     */
+    setup?: TunnelSetup;
 }
+
+/** How the wizard offers a provider, and what it asks */
+export interface TunnelSetup {
+    /** Shown in the list of ways to reach a database, e.g. "Northflank addon" */
+    label: string;
+    /** One line under the label, e.g. "through the Northflank API" */
+    hint?: string;
+    /** Shown before the first question */
+    intro?: string;
+    /** Asked in order. Each answer becomes the tunnel setting of the same key. */
+    fields: TunnelSetupField[];
+}
+
+/** One question. An empty answer to an optional question leaves the setting out. */
+export interface TunnelSetupField {
+    /** The tunnel setting this answers, e.g. "project" */
+    key: string;
+    message: string;
+    optional?: boolean;
+    placeholder?: string;
+    /**
+     * Answers to pick from, given the answers so far. When they cannot be
+     * listed (no login, no network), the wizard says why and lets the user
+     * type the value instead.
+     */
+    choices?(answers: Readonly<Record<string, string>>): Promise<TunnelSetupChoices>;
+}
+
+export type TunnelSetupChoices =
+    | { options: { value: string; label: string; hint?: string }[] }
+    | { unavailable: string };
 
 /** A shortcut from one short value to a full tunnel block */
 export interface TunnelShorthand {

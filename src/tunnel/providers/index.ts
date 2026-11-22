@@ -22,6 +22,7 @@ import type {
     OpenTunnelContext,
     TunnelInspection,
     TunnelProvider,
+    TunnelSetup,
     TunnelShorthand,
 } from './types';
 
@@ -124,6 +125,18 @@ export function describeTunnel(connectionName: string, tunnel: TunnelConfig): st
     }
 }
 
+/** A provider the wizard can set up, with its questions */
+export interface TunnelSetupEntry extends TunnelSetup {
+    providerId: string;
+}
+
+/** Every provider the `sherlock manage` wizard can set up, in registry order */
+export function tunnelSetups(): TunnelSetupEntry[] {
+    return PROVIDERS.flatMap((provider) =>
+        provider.setup ? [{ ...provider.setup, providerId: provider.id }] : []
+    );
+}
+
 /** A shorthand registered by any provider, by name */
 export function tunnelShorthand(name: string): TunnelShorthand | undefined {
     for (const provider of PROVIDERS) {
@@ -142,6 +155,9 @@ export type {
     TunnelEndpoint,
     TunnelInspection,
     TunnelProvider,
+    TunnelSetup,
+    TunnelSetupChoices,
+    TunnelSetupField,
     TunnelShorthand,
     TunnelTarget,
 } from './types';
