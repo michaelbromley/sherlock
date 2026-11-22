@@ -16,10 +16,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `query --file <path>`, and `query -` to read the query from stdin
 - `query --timeout <duration>` and a `statementTimeout` connection setting. Statements are cancelled after 60s by default
 - `connection list` reports each connection's type, target and tunnel alongside the names
+- `sherlock guide` prints the instructions for AI agents, built into the binary so they always match its version. `sherlock guide transfer` replaces the skill's `references/transfer.md`
 - A `connectTimeout` connection setting, default 10s. A connection through a tunnel whose far end is gone now fails within it, with an error that says the tunnel is the problem and how to restart it, instead of waiting 30s per connection
 
 ### Changed
 
+- **The agent skill is now a short pointer to `sherlock guide`.** It keeps the description that tells agents when to use sherlock, how to find the binary, and the rules that apply to every version. Everything else moved into the guide, so updating the binary updates what agents are told. Update the skill with `npx skills update sherlock -g`
 - Every PostgreSQL and MySQL/MariaDB statement now runs in a read-only transaction that is rolled back, so the database refuses writes the keyword check cannot see, such as those made by functions. The statement is sent as a prepared statement, so the server also refuses a second statement chained after it. SQLite connections refuse writes with `query_only`
 - The read-only check ignores string literals, quoted identifiers and comments, following the quoting rules of the database the connection resolves to. Line comments end at a carriage return as well as a line feed. `WHERE action = 'delete'` and `SELECT 'a;b'` are no longer rejected. `SELECT ... INTO` and MySQL executable comments (`/*! ... */`) are now rejected
 - The default Northflank `endpointPattern` also matches the CLI's newer `exposed locally on` wording
