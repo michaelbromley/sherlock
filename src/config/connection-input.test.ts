@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'bun:test';
 import { buildConnectionConfig } from './connection-input';
-import { NORTHFLANK_ENDPOINT_PATTERN } from '../tunnel/config';
+import { NORTHFLANK_ENDPOINT_PATTERN } from '../tunnel/providers/northflank/command';
 import { DB_TYPES } from '../db-types';
 
 const BASE = { type: 'postgres', host: 'db.example.com', database: 'app', username: 'u' };
@@ -130,6 +130,50 @@ describe('buildConnectionConfig — tunnels', () => {
                 'northflank forward addon --project cloud --addon control-plane-db --skipHostnames',
             endpointPattern: NORTHFLANK_ENDPOINT_PATTERN,
         });
+    });
+
+    it('builds a provider tunnel from --tunnel-provider and its options', () => {
+        const config = buildConnectionConfig('nf', {
+            ...BASE,
+            tunnelProvider: 'northflank',
+            tunnelOption: ['context=kbart', 'project=artsupplies', 'addon=postgresql', 'endpoint=read'],
+            tunnelIdleTimeout: '5m',
+        });
+        expect(config.tunnel).toEqual({
+            provider: 'northflank',
+            context: 'kbart',
+            project: 'artsupplies',
+            addon: 'postgresql',
+            endpoint: 'read',
+            idleTimeout: '5m',
+        });
+    });
+
+    it('has the provider validate its options as the connection is written', () => {
+        expect(() =>
+            buildConnectionConfig('nf', { ...BASE, tunnelProvider: 'northflank', tunnelOption: ['context=kbart'] })
+        ).toThrow(/"project" is required/);
+    });
+
+    it('rejects an unknown provider and a malformed option', () => {
+        expect(() => buildConnectionConfig('nf', { ...BASE, tunnelProvider: 'flyio' })).toThrow(
+            /Invalid --tunnel-provider "flyio". Use one of: northflank/
+        );
+        expect(() =>
+            buildConnectionConfig('nf', { ...BASE, tunnelProvider: 'northflank', tunnelOption: ['context'] })
+        ).toThrow(/Use key=value/);
+    });
+
+    it('keeps command-only flags away from a provider tunnel', () => {
+        expect(() =>
+            buildConnectionConfig('nf', { ...BASE, tunnelProvider: 'northflank', tunnelLocalPort: '5432' })
+        ).toThrow(/only applies to --tunnel-command/);
+        expect(() =>
+            buildConnectionConfig('nf', { ...BASE, tunnelCommand: 'fwd {{port}}', tunnelOption: ['a=b'] })
+        ).toThrow(/--tunnel-option needs --tunnel-provider/);
+        expect(() =>
+            buildConnectionConfig('nf', { ...BASE, tunnelCommand: 'fwd {{port}}', tunnelProvider: 'northflank' })
+        ).toThrow(/cannot both be given/);
     });
 
     it('rejects a northflank spec that is not project/addon', () => {

@@ -11,7 +11,7 @@ import { Command } from 'commander';
 import * as p from '@clack/prompts';
 
 // Config
-import { listConnections, getConnectionConfig, detectConnectionFromCwd } from './config';
+import { listConnections, listConnectionSummaries, getConnectionConfig, detectConnectionFromCwd } from './config';
 import { DB_TYPES, isRedisConfig, detectDbTypeFromUrl, type DbType } from './db-types';
 import type { ResolvedConnectionConfig } from './config/types';
 import type { ConnectionAddOptions } from './config/connection-input';
@@ -34,7 +34,8 @@ import { initConfig, migrateConfig } from './config/init';
 import { validateReadOnlyQuery } from './query-validation';
 
 // Database
-import { withConnection, withConnectionFromConfig } from './db/connection';
+import { withConnection, withConnectionFromConfig, type ConnectionOptions, type SqlAdapter } from './db/connection';
+import { parseDuration } from './tunnel/config';
 import {
     getTables,
     describeTable,
@@ -93,10 +94,16 @@ const MAX_SAMPLE_LIMIT = 1000;
 // Helpers
 // ============================================================================
 
-/** Print every configured connection name as JSON */
+/**
+ * Print every configured connection as JSON: the names, as before, and what
+ * each one points at.
+ */
 function listConnectionsAction(configPath?: string): void {
     try {
-        console.log(JSON.stringify({ connections: listConnections(configPath) }, null, 2));
+        console.log(JSON.stringify({
+            connections: listConnections(configPath),
+            details: listConnectionSummaries(configPath),
+        }, null, 2));
     } catch (error: unknown) {
         console.error(JSON.stringify({ error: getErrorMessage(error) }));
         process.exit(1);
@@ -223,12 +230,76 @@ function parsePositiveInt(value: string, name: string, max?: number): number {
 /** Route to the right SQL connection handler based on whether we have a pre-resolved config */
 async function runWithSqlConnection<T>(
     opts: Record<string, any>,
-    handler: (sql: ReturnType<typeof import('bun').SQL>, dbType: string) => Promise<T>
+    handler: (sql: SqlAdapter, dbType: string) => Promise<T>,
+    options?: ConnectionOptions
 ): Promise<T> {
     if (opts._resolvedConfig) {
-        return withConnectionFromConfig(opts._resolvedConfig, handler);
+        return withConnectionFromConfig(opts._resolvedConfig, handler, options);
     }
-    return withConnection(opts.connection, opts.config, handler);
+    return withConnection(opts.connection, opts.config, handler, options);
+}
+
+/**
+ * The SQL dialect a connection speaks, as far as can be told without resolving
+ * credentials or starting a tunnel. Undefined when it depends on a URL held in
+ * the keychain or the environment, in which case the guard checks every dialect.
+ */
+function sqlDialectFor(opts: Record<string, any>): DbType | undefined {
+    if (opts._resolvedConfig) return opts._resolvedConfig.type;
+    const config = getConnectionConfig(opts.connection, opts.config);
+    if (config.type) return config.type;
+    if (config.url === undefined) return DB_TYPES.POSTGRES;
+    return typeof config.url === 'string' ? detectDbTypeFromUrl(config.url) ?? undefined : undefined;
+}
+
+/** Largest SQL file `query --file` will read */
+const MAX_QUERY_FILE_BYTES = 1024 * 1024;
+
+/**
+ * Read the SQL for `query`: from the argument, from a file, or from stdin when
+ * either is "-". Long statements with quotes in them survive a file or a pipe
+ * where they would not survive a shell argument.
+ */
+async function readQueryText(sqlArg: string | undefined, file: string | undefined): Promise<string> {
+    if (sqlArg !== undefined && file !== undefined) {
+        throw new Error('Give the query as an argument or with --file, not both.');
+    }
+
+    const source = file ?? (sqlArg === '-' ? '-' : undefined);
+    if (source === undefined) {
+        if (sqlArg === undefined) {
+            throw new Error('Give the query as an argument, with --file <path>, or on stdin with "query -".');
+        }
+        // Fix shell escaping artifacts: some shells/tools escape ! to \!
+        // which is never valid SQL, so safely strip it
+        return sqlArg.replace(/\\!/g, '!');
+    }
+
+    let text: string;
+    if (source === '-') {
+        if (process.stdin.isTTY) {
+            throw new Error('"query -" reads the query from stdin, but stdin is a terminal. Pipe the query in.');
+        }
+        const chunks: Buffer[] = [];
+        let size = 0;
+        for await (const chunk of process.stdin) {
+            size += chunk.length;
+            if (size > MAX_QUERY_FILE_BYTES) throw new Error('The query on stdin is larger than 1 MB.');
+            chunks.push(Buffer.from(chunk));
+        }
+        text = Buffer.concat(chunks).toString('utf-8');
+    } else {
+        const fs = await import('fs');
+        const stat = fs.statSync(source, { throwIfNoEntry: false });
+        if (!stat?.isFile()) throw new Error(`${source} does not exist or is not a file.`);
+        if (stat.size > MAX_QUERY_FILE_BYTES) throw new Error(`${source} is larger than 1 MB.`);
+        text = fs.readFileSync(source, 'utf-8');
+    }
+
+    // A byte-order mark would stop the query starting with SELECT.
+    text = text.replace(/^\uFEFF/, '').trim();
+    if (text === '') throw new Error(`The query ${source === '-' ? 'on stdin' : `in ${source}`} is empty.`);
+    return text;
 }
 
 /** Route to the right Redis connection handler based on whether we have a pre-resolved config */
@@ -665,19 +736,36 @@ function setupCLI() {
 
     // Query command
     program
-        .command('query <sql>')
+        .command('query [sql]')
         .description('Execute a read-only SQL query')
-        .action(async (sqlQuery: string) => {
-            // Fix shell escaping artifacts: some shells/tools escape ! to \!
-            // which is never valid SQL, so safely strip it
-            sqlQuery = sqlQuery.replace(/\\!/g, '!');
+        .option('--file <path>', 'read the query from a file, or from stdin with "-"')
+        .option('--timeout <duration>', 'cancel the query after this long, e.g. 30s or 5m (default: the connection\'s statementTimeout, else 60s)')
+        .addHelpText('after', `
+The query can be given three ways:
+  sherlock -c <conn> query "SELECT 1"
+  sherlock -c <conn> query --file check.sql
+  sherlock -c <conn> query - < check.sql
 
+Every query runs in a read-only transaction that is rolled back afterwards.`)
+        .action(async (sqlArg: string | undefined, cmdOpts: { file?: string; timeout?: string }) => {
             const opts = program.opts();
             requireConnection(opts);
             requireSqlConnection(opts);
 
+            let sqlQuery: string;
+            let options: ConnectionOptions = {};
+            try {
+                sqlQuery = await readQueryText(sqlArg, cmdOpts.file);
+                if (cmdOpts.timeout !== undefined) {
+                    options = { statementTimeoutMs: Math.round(parseDuration(cmdOpts.timeout)) };
+                }
+            } catch (error: unknown) {
+                console.error(JSON.stringify({ error: getErrorMessage(error) }));
+                process.exit(1);
+            }
+
             // Enforce read-only
-            const validation = validateReadOnlyQuery(sqlQuery);
+            const validation = validateReadOnlyQuery(sqlQuery, sqlDialectFor(opts));
             if (!validation.valid) {
                 console.error(JSON.stringify({ error: validation.error }));
                 process.exit(1);
@@ -697,7 +785,7 @@ function setupCLI() {
 
                 const format = opts.format as OutputFormat;
                 console.log(formatOutput(result, format));
-            });
+            }, options);
         });
 
     // ========================================================================
@@ -830,7 +918,7 @@ function setupCLI() {
                     });
                 } else {
                     await withConnection(connectionName, opts.config, async (sql) => {
-                        await sql.connect();
+                        await sql.unsafe('SELECT 1');
                     });
                 }
                 console.log(`\x1b[32m✓ Connection "${connectionName}" successful!\x1b[0m`);
@@ -839,6 +927,39 @@ function setupCLI() {
                 console.error(`  Error: ${getErrorMessage(error)}`);
                 process.exit(1);
             }
+        });
+
+    program
+        .command('doctor [connectionName]')
+        .description('Check a connection step by step and report the first thing that is wrong')
+        .addHelpText('after', `
+Checks, in order, stopping at the first failure:
+  config       the connection and its tunnel are valid
+  tunnel target  the tunnel forwards to the database the host names
+  provider     the tunnel provider can see its target (e.g. northflank login, project, addon)
+  credentials  every password or URL reference resolves (values are never shown)
+  tunnel       the tunnel comes up
+  tls          the session is encrypted, when ssl is configured
+  query        SELECT 1 succeeds in a read-only transaction (PING for Redis)
+
+Exits 1 when a check fails.`)
+        .action(async (connectionName: string | undefined) => {
+            const opts = program.opts();
+            if (opts.url) {
+                console.error('Error: doctor checks a configured connection. Give its name, not --url.');
+                process.exit(1);
+            }
+            const name = connectionName ?? opts.connection;
+            if (connectionName && opts.connection && connectionName !== opts.connection) {
+                console.error('Error: give the connection either as an argument or with -c, not both.');
+                process.exit(1);
+            }
+            const configPath: string | undefined = opts.config;
+            if (!name) requireConnection(opts);
+            const { diagnoseConnection } = await import('./doctor');
+            const report = await diagnoseConnection(name ?? opts.connection, configPath);
+            console.log(JSON.stringify(report, null, 2));
+            if (!report.ok) process.exitCode = 1;
         });
 
     // ========================================================================
@@ -869,7 +990,13 @@ function setupCLI() {
         .option('--password-stdin', 'read the password from stdin and store it in the OS keychain')
         .option('--password-env <var>', 'read the password from this environment variable at query time')
         .option('--tunnel-command <cmd>', 'port-forwarding command; use {{port}} where it takes a local port')
-        .option('--tunnel-northflank <project/addon>', 'shorthand for a northflank addon tunnel')
+        .option('--tunnel-northflank <project/addon>', 'shorthand for a northflank CLI command tunnel')
+        .option('--tunnel-provider <id>', 'open the tunnel with a provider instead of a command, e.g. northflank')
+        .option(
+            '--tunnel-option <key=value>',
+            'a setting for --tunnel-provider; repeat for each one',
+            (value: string, previous: string[] = []) => [...previous, value]
+        )
         .option('--tunnel-local-port <port>', 'fixed local port, when the command cannot be told one')
         .option('--tunnel-endpoint-pattern <regex>', 'read the endpoint from the command output')
         .option('--tunnel-idle-timeout <duration>', 'shut the tunnel down after this long unused')
@@ -878,6 +1005,7 @@ function setupCLI() {
         .action(async (name: string, cmdOpts: ConnectionAddOptions & { force?: boolean }) => {
             const { buildConnectionConfig } = await import('./config/connection-input');
             const { addConnection, connectionExists, shadowingWarning } = await import('./config/write');
+            const { describeTunnel } = await import('./tunnel/providers');
 
             // -u/--url is a global option meaning "connect to this URL now", so
             // it never reaches this command. Say so rather than reporting the
@@ -923,7 +1051,7 @@ function setupCLI() {
                     connection: name,
                     action: replaced ? 'replaced' : 'added',
                     config: configPath,
-                    tunnel: config.tunnel ? config.tunnel.command : null,
+                    tunnel: config.tunnel ? describeTunnel(name, config.tunnel) : null,
                     next: `sherlock -c ${name} tables`,
                 }, null, 2));
             } catch (error: unknown) {

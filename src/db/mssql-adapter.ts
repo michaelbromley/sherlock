@@ -13,7 +13,7 @@ export interface SqlAdapter {
 }
 
 /** Parse an mssql:// URL into a mssql ConnectionConfig */
-export function parseMssqlUrl(url: string): mssql.config {
+export function parseMssqlUrl(url: string, requestTimeoutMs?: number, connectTimeoutMs?: number): mssql.config {
     const parsed = new URL(url);
     // Backwards-compatible defaults: no encryption, trust whatever cert is presented.
     // SSL is opt-in via the ssl config (which sets encrypt/trustServerCertificate query params).
@@ -27,6 +27,8 @@ export function parseMssqlUrl(url: string): mssql.config {
         user: decodeURIComponent(parsed.username),
         password: decodeURIComponent(parsed.password),
         database: parsed.pathname.replace(/^\//, ''),
+        ...(requestTimeoutMs !== undefined ? { requestTimeout: requestTimeoutMs } : {}),
+        ...(connectTimeoutMs !== undefined ? { connectionTimeout: connectTimeoutMs } : {}),
         options: {
             encrypt,
             trustServerCertificate,
@@ -37,8 +39,11 @@ export function parseMssqlUrl(url: string): mssql.config {
 export class MssqlAdapter implements SqlAdapter {
     private constructor(private pool: mssql.ConnectionPool) {}
 
-    static async connect(url: string): Promise<MssqlAdapter> {
-        const config = parseMssqlUrl(url);
+    static async connect(
+        url: string,
+        options: { requestTimeoutMs?: number; connectTimeoutMs?: number } = {}
+    ): Promise<MssqlAdapter> {
+        const config = parseMssqlUrl(url, options.requestTimeoutMs, options.connectTimeoutMs);
         const pool = await new mssql.ConnectionPool(config).connect();
         return new MssqlAdapter(pool);
     }

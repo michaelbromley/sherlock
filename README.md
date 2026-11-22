@@ -11,11 +11,12 @@ Sherlock comes in two parts:
 
 - **Single binary** - Standalone executable, no runtime dependencies
 - **Secure credentials** - Passwords in the OS keychain or environment variables. Plaintext in config is possible but warned about on every query.
-- **Read-only enforced** - SQL: only SELECT/SHOW/DESCRIBE/EXPLAIN/WITH. Redis: read-only command whitelist
+- **Read-only enforced** - SQL: a single SELECT/SHOW/DESCRIBE/EXPLAIN/WITH statement, run in a read-only transaction that is always rolled back. Redis: read-only command whitelist
 - **Explicit connections** - Name the database to query, or let a project directory select it. There is no default connection, so no accidental production queries.
 - **Multiple databases** - PostgreSQL, MySQL/MariaDB, SQL Server, SQLite, Redis
 - **SSL/TLS support** - Works with managed databases (Northflank, Supabase, Neon, RDS, Azure SQL) that require encrypted connections
-- **Automatic tunnels** - Databases behind a port-forward (Northflank, kubectl, ssh) open on first use and shut down when idle
+- **Automatic tunnels** - Databases behind a port-forward open on first use and shut down when idle: Northflank addons through the Northflank API, anything else (kubectl, ssh) through a command
+- **`doctor`** - Checks a connection step by step, from tunnel target to `SELECT 1`, and reports the first thing that is wrong
 - **Paste a connection string** - Set up new connections by pasting a URL — sherlock parses out host, port, user, password, database, and SSL settings
 - **Move connections between machines** - Export connections, passwords included, to a passphrase-encrypted file and import them elsewhere
 - **Works with any skills-capable agent** - Claude Code, Codex, Cursor, Gemini CLI and more, through the agent skill
@@ -149,6 +150,8 @@ npm run build:windows   # builds dist/sherlock-windows.exe
 sherlock -c mydb tables                         # List tables
 sherlock -c mydb describe users                 # Show table schema
 sherlock -c mydb query "SELECT * FROM users LIMIT 10"
+sherlock -c mydb query --file report.sql        # Long queries: from a file...
+sherlock -c mydb query - < report.sql           # ...or from stdin
 sherlock -c mydb introspect                     # Full schema dump (cached)
 sherlock -c mydb introspect --refresh           # Refresh cached schema
 sherlock -c mydb sample users -n 10             # Random sample rows
@@ -233,7 +236,46 @@ If the server has no TLS, set `"allowPublicKeyRetrieval": true` on the connectio
 
 ### Tunnels
 
-Some databases are only reachable through a port-forwarding process: a Northflank addon, a Kubernetes service, a host behind a bastion. Give the connection a `tunnel` block and sherlock starts the forwarding command on the first query, reuses it for later commands, and shuts it down once it has gone unused.
+Some databases are only reachable through a port-forward: a Northflank addon, a Kubernetes service, a host behind a bastion. Give the connection a `tunnel` block and sherlock opens the tunnel on the first query, reuses it for later commands, and shuts it down once it has gone unused.
+
+A tunnel is opened either by a **provider**, which knows how to reach one platform through its API, or by a **command** you supply. Northflank has a provider. Everything else uses a command.
+
+#### Northflank
+
+```json
+"northflank-prod": {
+  "type": "postgres",
+  "host": "primary.postgresql--my-project--abc1.addon.code.run",
+  "username": "vendure",
+  "password": { "$keychain": "northflank-prod" },
+  "database": "vendure",
+  "ssl": true,
+  "tunnel": {
+    "provider": "northflank",
+    "context": "my-team",
+    "project": "my-project",
+    "addon": "postgresql"
+  }
+}
+```
+
+| Field | Required | Behaviour |
+|---|---|---|
+| `context` | yes | Name of a login in the Northflank CLI config (`northflank context ls`). Its token is used directly: the CLI's current context is never read or changed |
+| `project` | yes | Project id, as in the Northflank URL |
+| `addon` | yes | Addon id, as in the Northflank URL |
+| `endpoint` | no | `read` or `primary`. Default: the read replica when the addon has one, the primary otherwise. Asking for `read` on an addon with no replica is an error, not a silent fall back |
+| `configDir` | no | Directory holding the CLI's `config.json`, for a login kept apart from your usual one. Default: `$NF_CONFIG_DIR`, else `~/.northflank` |
+| `port` | no | Name or number of the addon port, when it exposes more than one |
+| `team` | no | Team id, for an organisation-scoped token whose context names no team |
+
+The provider forwards the addon to a loopback address without touching `/etc/hosts`, so it needs no root. The token is read from the CLI config on each start and is never logged, stored or passed on a command line. Log in with the Northflank CLI first (`northflank login --name my-team`).
+
+Set `host` to the addon's internal hostname, as shown in the Northflank dashboard. It is replaced by the tunnel's local address at connect time, but `sherlock doctor` compares it with the tunnel's project and addon to catch a tunnel that points at a different database.
+
+#### Command tunnels
+
+A `tunnel` block with no `provider` runs a shell command:
 
 ```json
 {
@@ -258,8 +300,8 @@ Some databases are only reachable through a port-forwarding process: a Northflan
 | `command` | yes | Shell command that forwards the remote database to a local port |
 | `localPort` | no | Fixed local port. When omitted, sherlock picks a free one and substitutes it for `{{port}}` |
 | `endpointPattern` | no | Regex that reads the endpoint out of the command's own output, for tools that choose their own port |
-| `idleTimeout` | no | Shut down after this long with no queries (default `10m`) |
-| `readyTimeout` | no | How long to wait for the port to start accepting (default `30s`) |
+| `idleTimeout` | no | Shut down after this long with no queries (default `10m`). Applies to provider tunnels too |
+| `readyTimeout` | no | How long to wait for the port to start accepting (default `30s`). Applies to provider tunnels too |
 
 Write `{{port}}` wherever the command takes the local port. Sherlock replaces it with the port it allocated, so parallel tunnels never collide. Tools that take a port this way include `ssh -L`, `cloud-sql-proxy`, and `kubectl port-forward`. If the forwarding command needs a fixed port, set `localPort` instead and hard-code the same port in the command. If it takes no port at all, see the next section.
 
@@ -267,7 +309,7 @@ Write `{{port}}` wherever the command takes the local port. Sherlock replaces it
 
 Some forwarding commands take no port argument and choose one themselves, printing it on startup. For those, set `endpointPattern` to a regex with a named `port` group and an optional named `host` group, and sherlock reads the endpoint out of the command's output instead of dictating it.
 
-Northflank works this way. Its `forward` command needs root by default, because it writes the addon's hostname into `/etc/hosts`. Passing `--skipHostnames` removes that requirement, and the CLI's own help says "no root permissions are required". With that flag the addon is exposed on an IP address and northflank chooses the port:
+The Northflank CLI works this way, for connections set up before the provider existed. Its `forward` command needs root by default, because it writes the addon's hostname into `/etc/hosts`. Passing `--skipHostnames` removes that requirement. With that flag the addon is exposed on an IP address and northflank chooses the port. This form uses whichever Northflank login is current in your terminal, so the provider above is the better choice:
 
 ```json
 "northflank-prod": {
@@ -279,7 +321,7 @@ Northflank works this way. Its `forward` command needs root by default, because 
   "ssl": true,
   "tunnel": {
     "command": "northflank forward addon --project my-proj --addon pg --skipHostnames",
-    "endpointPattern": "exposed on (?<host>[\\d.]+):(?<port>\\d+)"
+    "endpointPattern": "exposed (?:locally )?on (?<host>[\\d.]+):(?<port>\\d+)"
   }
 }
 ```
@@ -292,7 +334,7 @@ Northflank works this way. Its `forward` command needs root by default, because 
 
 The forwarding process runs in the background with no terminal, so that it outlives the sherlock command that started it. `sudo` therefore has nowhere to prompt for a password, and the tunnel fails immediately. Three ways round it, best first:
 
-1. **Use the tool's no-root option** if it has one, such as Northflank's `--skipHostnames` above. Nothing else to configure.
+1. **Use a provider, or the tool's no-root option** if it has one, such as Northflank's `--skipHostnames` above. Nothing else to configure.
 2. **Grant that one command passwordless sudo** with a `NOPASSWD` rule in `/etc/sudoers`.
 3. **Use `sudo -A`** with `SUDO_ASKPASS` pointing at a helper that supplies the password without a terminal.
 
@@ -305,10 +347,12 @@ The `sherlock manage` wizard asks whether a connection needs a tunnel when you a
 To set one up in a single command, `sherlock connection add` takes the same settings as flags:
 
 ```bash
-# northflank, which needs no port because it announces its own
+# a northflank addon, through the provider
 printf '%s' "$PASSWORD" | sherlock connection add vcloud-dev \
-  --type postgres --database app --username dbuser --password-stdin --ssl require \
-  --tunnel-northflank my-project/my-addon
+  --type postgres --host primary.pg--my-project--abc1.addon.code.run \
+  --database app --username dbuser --password-stdin --ssl require \
+  --tunnel-provider northflank \
+  --tunnel-option context=my-team --tunnel-option project=my-project --tunnel-option addon=pg
 
 # anything that takes a port
 printf '%s' "$PASSWORD" | sherlock connection add bastion \
@@ -316,7 +360,7 @@ printf '%s' "$PASSWORD" | sherlock connection add bastion \
   --tunnel-command 'ssh -N -L {{port}}:db.internal:5432 bastion.example.com'
 ```
 
-`--tunnel-northflank <project>/<addon>` expands to the full `northflank forward ... --skipHostnames` command along with the pattern that reads the port back out of that command's output, so neither has to be typed by hand. `--tunnel-local-port`, `--tunnel-endpoint-pattern`, `--tunnel-idle-timeout` and `--tunnel-ready-timeout` map to the config fields above. The tunnel settings are validated as the connection is written, so a bad command or duration fails there rather than on the first query.
+`--tunnel-provider <id>` takes the provider's settings as repeated `--tunnel-option key=value`. `--tunnel-northflank <project>/<addon>` writes a Northflank CLI command tunnel instead, with the command and the pattern that reads the port back out of its output. `--tunnel-local-port`, `--tunnel-endpoint-pattern`, `--tunnel-idle-timeout` and `--tunnel-ready-timeout` map to the config fields above. The tunnel settings are validated as the connection is written, so a bad command or duration fails there rather than on the first query.
 
 Manage running tunnels with:
 
@@ -326,9 +370,33 @@ sherlock tunnel stop northflank-prod   # Stop one tunnel
 sherlock tunnel stop                   # Stop all tunnels
 ```
 
-Sherlock waits for the local port to start accepting before it connects, so a tunnel that fails to come up reports the forwarding command's own error rather than a connection refusal. The forwarding command's output is kept in `~/.config/sherlock/tunnels/`.
+Sherlock waits for the local port to start accepting before it connects, so a tunnel that fails to come up reports the provider's or the forwarding command's own error rather than a connection refusal. Each tunnel's log is kept in `~/.config/sherlock/tunnels/`.
 
-- **Tunnels are ignored in a project-local `.sherlock.json`.** A tunnel runs a shell command. Reading one from the current directory would mean that cloning a repository and running any sherlock command executes the command that repository put in the file. Tunnels are read only from your user config directory, a config next to the binary, `--config`, or `SHERLOCK_CONFIG`.
+`sherlock connection list` shows each connection's tunnel provider and target, for example `northflank: my-project/postgresql (read)`.
+
+#### When a connection does not work
+
+```bash
+sherlock doctor northflank-prod
+```
+
+`doctor` runs these checks in order and stops at the first failure, with what it found and what to change:
+
+1. the connection and its tunnel block are valid;
+2. the tunnel forwards to the database the `host` names. A provider tunnel, or a `northflank forward` command, is compared with a Northflank addon hostname; any other command is reported as not checkable rather than passed;
+3. the provider can reach its target: for Northflank, the context exists, can see the project, and the addon is a running database of the connection's type;
+4. every credential resolves. It reports where each one comes from, never its value;
+5. the tunnel comes up;
+6. the session is encrypted, when `ssl` is set;
+7. `SELECT 1` succeeds in a read-only transaction (PING for Redis), and whether the server is a primary or a replica.
+
+It prints JSON and exits 1 when a check fails.
+
+#### Adding a tunnel provider
+
+Providers live in `src/tunnel/providers/`, one directory each, and implement the `TunnelProvider` interface in `types.ts`: validate the block, describe the target, open the forward, and optionally diagnose it and recognise the platform's CLI in a command tunnel. Register it in `providers/index.ts`. Nothing else in sherlock refers to a particular provider.
+
+- **Tunnels are ignored in a project-local `.sherlock.json`.** A command tunnel runs a shell command, and a provider tunnel uses your platform login. Reading one from the current directory would mean that cloning a repository and running any sherlock command executes the command that repository put in the file. Tunnels are read only from your user config directory, a config next to the binary, `--config`, or `SHERLOCK_CONFIG`.
 - **`{ "rejectUnauthorized": true }` cannot work through a tunnel.** Certificate verification checks the hostname, which after tunnelling is `127.0.0.1` and will never match the database's certificate. Use `"ssl": true` to keep the connection encrypted without hostname verification. Sherlock warns if you configure both.
 
 ### Credential Sources
@@ -388,6 +456,8 @@ sherlock -c <conn> describe <table>    # Show table schema
 sherlock -c <conn> introspect          # Full schema dump (cached)
 sherlock -c <conn> introspect --refresh # Refresh cached schema
 sherlock -c <conn> query "SELECT ..."  # Execute read-only query
+sherlock -c <conn> query --file q.sql  # Query from a file ("-" reads stdin)
+sherlock -c <conn> query --timeout 5m "SELECT ..."  # Override the statement timeout
 sherlock -c <conn> sample <table>      # Random sample rows (-n <limit>)
 sherlock -c <conn> stats <table>       # Data profiling (row count, nulls, distinct)
 sherlock -c <conn> indexes <table>     # Show table indexes
@@ -411,7 +481,8 @@ sherlock -c <conn> command GET mykey   # Any read-only Redis command
 
 ```bash
 sherlock manage               # Connection manager (add, edit, delete, test, keychain, tunnel)
-sherlock connection list      # List configured connections (JSON)
+sherlock connection list      # List connections and their targets (JSON)
+sherlock doctor <conn>        # Check a connection step by step
 sherlock connection add <n>   # Add a connection non-interactively (see --help)
 sherlock update               # Update the binary to the latest release
 sherlock tunnel status        # Show running tunnels
@@ -485,11 +556,14 @@ sherlock -u "postgres://dbuser:password@localhost:5432/chinook" query "SELECT na
 
 ## Security
 
-- **Read-only enforced** - SQL: INSERT, UPDATE, DELETE, DROP etc. are blocked. Redis: SET, DEL, FLUSHDB etc. are blocked
+- **Read-only enforced** - SQL: INSERT, UPDATE, DELETE, DROP etc. are blocked, and the database itself refuses writes (see below). Redis: SET, DEL, FLUSHDB etc. are blocked
 - **No default connection** - A query names its connection with `-c`, or runs inside a directory configured for one
 - **Secure credential storage** - Keychain or env vars. A plaintext password in config works but is warned about on every query
 - **Config permissions** - Files created with 0600 (owner read/write only)
-- **Query validation** - SQL: dangerous keywords blocked even in subqueries. Redis: whitelist of allowed commands with subcommand validation
+- **Query validation** - SQL: one statement only, and dangerous keywords blocked even in subqueries. String literals, quoted identifiers and comments are set aside first, following each database's quoting rules, so `WHERE action = 'delete'` is allowed. MySQL executable comments (`/*! ... */`) are refused. Redis: whitelist of allowed commands with subcommand validation
+- **Read-only at the database** - On PostgreSQL and MySQL/MariaDB every statement runs inside a read-only transaction that is always rolled back, so a write the keyword check missed, such as one made by a function, is refused by the database. SQLite connections are opened with `query_only`. SQL Server has no read-only transaction, so there the keyword check is the only guard
+- **Statement timeout** - Every statement is cancelled after 60 seconds by default. Set `"statementTimeout": "5m"` on a connection to change it, or pass `query --timeout`
+- **Connect timeout** - A connection that gets no answer within 10 seconds fails, rather than waiting on the driver's own longer default. A tunnel whose far end is gone still accepts connections locally, so this is what makes it fail fast, with an error that names the tunnel and how to restart it. Set `"connectTimeout": "30s"` on a connection that is slow to answer
 
 ### Allowed SQL Query Types
 

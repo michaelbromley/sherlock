@@ -18,7 +18,7 @@ import type { ConnectionConfig, CredentialRef } from './types';
 import { getCredentialResolver } from '../credentials';
 import { getEnvVarForConnection } from '../credentials/providers/env';
 import { DB_TYPES, isValidDbType } from '../db-types';
-import { resolveTunnelConfig } from '../tunnel/config';
+import { describeTunnel, resolveTunnel } from '../tunnel/providers';
 import { decryptPayload, encryptPayload, ExportFileError, type SealedFile } from './transfer-crypto';
 import { loadOrCreateConfig, saveConfig, writableConfigPath } from './write';
 
@@ -315,7 +315,7 @@ function validateImported(name: string, entry: unknown): ExportedConnection {
         if (config.type === DB_TYPES.SQLITE) {
             throw new Error('SQLite is a local file and cannot use a tunnel');
         }
-        resolveTunnelConfig(name, config.tunnel);
+        resolveTunnel(name, config.tunnel);
     }
 
     return { config, secrets };
@@ -476,7 +476,7 @@ export function applyImport(plan: ImportPlan, storage: SecretStorage): ImportRes
                 name,
                 action: replaces ? 'replaced' : 'added',
                 secrets: hasSecrets ? storage.kind : 'none',
-                ...(connection.tunnel ? { tunnel: connection.tunnel.command } : {}),
+                ...(connection.tunnel ? { tunnel: describeTunnel(name, connection.tunnel) } : {}),
             });
         }
 

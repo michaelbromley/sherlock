@@ -2,7 +2,7 @@
  * Parsing and validation of the `tunnel` block in a connection config.
  */
 
-import type { TunnelConfig } from './types';
+import type { CommandTunnelConfig, TunnelCommonConfig } from './types';
 
 /** Shut the tunnel down after this long with no queries */
 export const DEFAULT_IDLE_TIMEOUT = '10m';
@@ -12,15 +12,6 @@ export const DEFAULT_READY_TIMEOUT = '30s';
 
 /** Refuse absurd idle timeouts so a typo can't leave a tunnel up for a week */
 const MAX_IDLE_TIMEOUT_MS = 24 * 60 * 60 * 1000;
-
-/**
- * Matches the endpoint line printed by `northflank forward --skipHostnames`:
- *   > Addon 'pg' is exposed on 127.0.0.1:44109 (TCP)
- *
- * Offered as the default in the setup wizard, since northflank is the tool most
- * likely to need endpoint discovery.
- */
-export const NORTHFLANK_ENDPOINT_PATTERN = 'exposed on (?<host>[\\d.]+):(?<port>\\d+)';
 
 /** The placeholder replaced with the allocated local port */
 const PORT_PLACEHOLDER = '{{port}}';
@@ -52,14 +43,18 @@ export function parseDuration(value: string): number {
     return ms;
 }
 
-/** A tunnel config with defaults filled in and durations resolved to milliseconds */
-export interface ResolvedTunnelConfig {
+/** The timeouts every tunnel has, resolved to milliseconds */
+export interface ResolvedTunnelTimeouts {
+    idleTimeoutMs: number;
+    readyTimeoutMs: number;
+}
+
+/** A command tunnel config with defaults filled in and durations resolved */
+export interface ResolvedTunnelConfig extends ResolvedTunnelTimeouts {
     command: string;
     localPort?: number;
     /** Compiled `endpointPattern`, when the endpoint is discovered from output */
     endpointPattern?: RegExp;
-    idleTimeoutMs: number;
-    readyTimeoutMs: number;
 }
 
 /** A local endpoint read out of a forwarding command's output */
@@ -99,22 +94,51 @@ function compileEndpointPattern(pattern: string, where: string): RegExp {
     if (!pattern.includes('(?<port>')) {
         throw new Error(
             `Invalid ${where}: "endpointPattern" must contain a named "port" group, ` +
-            `e.g. "exposed on (?<host>[\\\\d.]+):(?<port>\\\\d+)".`
+            `e.g. "Forwarding from (?<host>[\\\\d.]+):(?<port>\\\\d+)".`
         );
     }
 
     return compiled;
 }
 
+/** Describes a tunnel block in an error, naming the connection it belongs to */
+export function tunnelConfigLabel(connectionName: string): string {
+    return `tunnel config for connection "${connectionName}"`;
+}
+
 /**
- * Validate a raw tunnel config and fill in defaults. Throws with a message
+ * Resolve the timeouts every tunnel accepts, whichever provider opens it.
+ * `where` names the config in the error, as `tunnelConfigLabel` builds it.
+ */
+export function resolveTunnelTimeouts(
+    tunnel: TunnelCommonConfig,
+    where: string
+): ResolvedTunnelTimeouts {
+    let idleTimeoutMs: number;
+    let readyTimeoutMs: number;
+    try {
+        idleTimeoutMs = parseDuration(tunnel.idleTimeout ?? DEFAULT_IDLE_TIMEOUT);
+        readyTimeoutMs = parseDuration(tunnel.readyTimeout ?? DEFAULT_READY_TIMEOUT);
+    } catch (error) {
+        throw new Error(`Invalid ${where}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+
+    if (idleTimeoutMs > MAX_IDLE_TIMEOUT_MS) {
+        throw new Error(`Invalid ${where}: "idleTimeout" cannot exceed 24h.`);
+    }
+
+    return { idleTimeoutMs, readyTimeoutMs };
+}
+
+/**
+ * Validate a command tunnel config and fill in defaults. Throws with a message
  * naming the connection so config mistakes are traceable.
  */
 export function resolveTunnelConfig(
     connectionName: string,
-    tunnel: TunnelConfig
+    tunnel: CommandTunnelConfig
 ): ResolvedTunnelConfig {
-    const where = `tunnel config for connection "${connectionName}"`;
+    const where = tunnelConfigLabel(connectionName);
 
     if (typeof tunnel.command !== 'string' || tunnel.command.trim() === '') {
         throw new Error(`Invalid ${where}: "command" is required and must be a non-empty string.`);
@@ -155,18 +179,7 @@ export function resolveTunnelConfig(
         );
     }
 
-    let idleTimeoutMs: number;
-    let readyTimeoutMs: number;
-    try {
-        idleTimeoutMs = parseDuration(tunnel.idleTimeout ?? DEFAULT_IDLE_TIMEOUT);
-        readyTimeoutMs = parseDuration(tunnel.readyTimeout ?? DEFAULT_READY_TIMEOUT);
-    } catch (error) {
-        throw new Error(`Invalid ${where}: ${error instanceof Error ? error.message : String(error)}`);
-    }
-
-    if (idleTimeoutMs > MAX_IDLE_TIMEOUT_MS) {
-        throw new Error(`Invalid ${where}: "idleTimeout" cannot exceed 24h.`);
-    }
+    const { idleTimeoutMs, readyTimeoutMs } = resolveTunnelTimeouts(tunnel, where);
 
     return {
         command: tunnel.command.trim(),

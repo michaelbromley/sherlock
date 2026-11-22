@@ -5,6 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Tunnel providers.** A `tunnel` block can name a `provider` instead of giving a `command`. The first is `northflank`, which forwards an addon through the Northflank API using a named context from the Northflank CLI config (`"context"`, `"project"`, `"addon"`). It never reads or changes the CLI's current context, needs no root, and defaults to the addon's read replica when it has one (`"endpoint": "read" | "primary"`). `"configDir"` points at a separate CLI config directory. A `tunnel` block with no `provider` behaves exactly as before
+- `connection add --tunnel-provider <id> --tunnel-option key=value` sets up a provider tunnel without the wizard
+- `sherlock doctor <connection>` checks a connection in order: config, tunnel target against the configured host, provider access, credentials, tunnel, TLS and `SELECT 1`. It stops at the first failure and says what to change
+- `query --file <path>`, and `query -` to read the query from stdin
+- `query --timeout <duration>` and a `statementTimeout` connection setting. Statements are cancelled after 60s by default
+- `connection list` reports each connection's type, target and tunnel alongside the names
+- A `connectTimeout` connection setting, default 10s. A connection through a tunnel whose far end is gone now fails within it, with an error that says the tunnel is the problem and how to restart it, instead of waiting 30s per connection
+
+### Changed
+
+- Every PostgreSQL and MySQL/MariaDB statement now runs in a read-only transaction that is rolled back, so the database refuses writes the keyword check cannot see, such as those made by functions. SQLite connections refuse writes with `query_only`
+- The read-only check ignores string literals, quoted identifiers and comments, following each database's quoting rules. `WHERE action = 'delete'` and `SELECT 'a;b'` are no longer rejected. `SELECT ... INTO` and MySQL executable comments (`/*! ... */`) are now rejected
+- The default Northflank `endpointPattern` also matches the CLI's newer `exposed locally on` wording
+
+### Fixed
+
+- The hidden `sherlock test <connection>` command no longer fails on SQL connections
+
 ## [1.9.1] - 2026-10-15
 
 ### Added

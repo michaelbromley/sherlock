@@ -12,7 +12,7 @@ import { spawn } from 'node:child_process';
 import * as fs from 'fs';
 import * as path from 'path';
 import { ensureTunnelsDir } from '../config/paths';
-import { resolveTunnelConfig } from './config';
+import { resolveTunnel } from './providers';
 import { isPortAccepting } from './net';
 import { killProcessTree } from './process';
 import {
@@ -169,7 +169,7 @@ export async function ensureTunnel(
     tunnelConfig: TunnelConfig,
     configPath?: string
 ): Promise<TunnelEndpoint> {
-    const tunnel = resolveTunnelConfig(connectionName, tunnelConfig);
+    const tunnel = resolveTunnel(connectionName, tunnelConfig);
     const startupBudgetMs = tunnel.readyTimeoutMs + SUPERVISOR_STARTUP_GRACE_MS;
 
     const existing = readState(connectionName);
@@ -305,7 +305,9 @@ export interface TunnelStatus {
     running: boolean;
     ready: boolean;
     startedAt: string;
+    /** The command that was run, or the provider's description of its target */
     command: string;
+    provider?: string;
     logFile: string;
     error?: string;
 }
@@ -324,6 +326,7 @@ export async function listTunnels(): Promise<TunnelStatus[]> {
             ready: running && state.ready && (await isPortAccepting(state.port, state.host)),
             startedAt: state.startedAt,
             command: state.command,
+            ...(state.provider ? { provider: state.provider } : {}),
             logFile: state.logFile,
             error: state.error,
         });

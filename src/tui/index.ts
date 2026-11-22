@@ -21,10 +21,11 @@ import type { ParsedConnectionUrl } from '../config';
 import { DB_TYPES, DEFAULT_PORTS, isRedisConfig, type DbType } from '../db-types';
 import {
     DEFAULT_IDLE_TIMEOUT,
-    NORTHFLANK_ENDPOINT_PATTERN,
     hasPortPlaceholder,
     parseDuration,
 } from '../tunnel/config';
+import { describeTunnel, tunnelShorthand } from '../tunnel/providers';
+import { isProviderTunnel, type CommandTunnelConfig } from '../tunnel/types';
 import {
     setKeychainPassword,
     hasKeychainPassword,
@@ -1178,10 +1179,12 @@ async function promptForSsl(existingSsl?: ConnectionConfig['ssl']): Promise<Conn
 /** Short label describing the current tunnel state, used as a menu hint */
 export function tunnelHintLabel(tunnel: ConnectionConfig['tunnel']): string {
     if (!tunnel) return 'not set';
+    const idle = `idle ${tunnel.idleTimeout ?? DEFAULT_IDLE_TIMEOUT}`;
+    if (isProviderTunnel(tunnel)) return `${tunnel.provider} provider, ${idle}`;
     let port = 'auto port';
     if (tunnel.localPort) port = `port ${tunnel.localPort}`;
     else if (tunnel.endpointPattern) port = 'port from output';
-    return `${port}, idle ${tunnel.idleTimeout ?? DEFAULT_IDLE_TIMEOUT}`;
+    return `${port}, ${idle}`;
 }
 
 /**
@@ -1229,9 +1232,29 @@ async function promptForOptionalTunnel(): Promise<
  * remove the tunnel, or null if the user cancelled.
  */
 async function promptForTunnel(
-    existing?: ConnectionConfig['tunnel']
+    current?: ConnectionConfig['tunnel']
 ): Promise<ConnectionConfig['tunnel'] | null | undefined> {
-    if (existing) {
+    // The prompts below build a command tunnel. A provider tunnel has settings
+    // of its own that they cannot edit, so it can only be kept, removed or
+    // replaced here.
+    let existing: CommandTunnelConfig | undefined;
+    if (current && isProviderTunnel(current)) {
+        p.log.info(
+            `This connection's tunnel is opened by a provider:\n  ${describeTunnel('', current)}\n\n` +
+            `Its settings are edited in config.json, under the connection's "tunnel".`
+        );
+        const choice = await p.select({
+            message: 'Tunnel',
+            options: [
+                { value: 'keep', label: 'Keep it' },
+                { value: 'replace', label: 'Replace it with a command tunnel' },
+                { value: 'remove', label: 'Remove tunnel', hint: 'connect directly instead' },
+            ],
+        });
+        if (p.isCancel(choice) || choice === 'keep') return null;
+        if (choice === 'remove') return undefined;
+    } else if (current) {
+        existing = current;
         const keep = await p.select({
             message: 'Tunnel',
             options: [
@@ -1305,7 +1328,7 @@ async function promptForTunnel(
                 'Give a regular expression matching the line the command prints.\n' +
                 'It needs a (?<port>...) group, and may have a (?<host>...) group.\n\n' +
                 'northflank prints:\n' +
-                "  > Addon 'pg' is exposed on 127.0.0.1:44109 (TCP)\n" +
+                "  > Addon 'pg' is exposed locally on 127.0.0.1:44109 (TCP)\n" +
                 'which the suggested pattern below matches. Run your command once\n' +
                 'and copy the wording if it differs.'
             );
@@ -1313,7 +1336,7 @@ async function promptForTunnel(
                 message: 'Endpoint pattern',
                 // Pre-filled rather than hinted: this is fiddly to type, and the
                 // default already matches northflank's output.
-                initialValue: existing?.endpointPattern ?? NORTHFLANK_ENDPOINT_PATTERN,
+                initialValue: existing?.endpointPattern ?? tunnelShorthand('northflank')?.endpointPattern,
                 validate: (value) => {
                     if (!value || !value.includes('(?<port>')) {
                         return 'Must contain a named "port" group, e.g. (?<port>\\d+)';
@@ -1347,7 +1370,7 @@ async function promptForTunnel(
     });
     if (p.isCancel(idleTimeout)) return null;
 
-    const tunnel: ConnectionConfig['tunnel'] = { command: command.trim() };
+    const tunnel: CommandTunnelConfig = { command: command.trim() };
     if (localPort !== undefined) tunnel.localPort = localPort;
     if (endpointPattern !== undefined) tunnel.endpointPattern = endpointPattern;
     if (idleTimeout && idleTimeout !== DEFAULT_IDLE_TIMEOUT) tunnel.idleTimeout = idleTimeout;
