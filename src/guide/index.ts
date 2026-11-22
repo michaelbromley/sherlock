@@ -24,17 +24,18 @@ export type GuideTopic = keyof typeof GUIDE_TOPICS;
 /** The guide for a topic, or the main guide. Throws for an unknown topic. */
 export function guideText(topic: string | undefined, version: string): string {
     const name = (topic ?? 'main') as GuideTopic;
-    const entry = GUIDE_TOPICS[name];
-    if (!entry) {
+    // hasOwn, so that "constructor" and other inherited keys are not topics.
+    if (!Object.hasOwn(GUIDE_TOPICS, name)) {
         throw new Error(
             `No guide topic "${topic}". Topics: ` +
             Object.entries(GUIDE_TOPICS).map(([key, value]) => `${key} (${value.summary})`).join(', ') + '.'
         );
     }
+    const entry = GUIDE_TOPICS[name];
 
     const others = Object.entries(GUIDE_TOPICS)
         .filter(([key]) => key !== name)
-        .map(([key, value]) => `- \`sherlock guide ${key === 'main' ? '' : key}\`${key === 'main' ? '' : ''}: ${value.summary}`.replace('`sherlock guide `', '`sherlock guide`'));
+        .map(([key, value]) => `- \`${key === 'main' ? 'sherlock guide' : `sherlock guide ${key}`}\`: ${value.summary}`);
 
     return `<!-- sherlock ${version} -->\n${entry.text.trimEnd()}\n\n## Other guide topics\n\n${others.join('\n')}\n`;
 }

@@ -35,4 +35,4 @@ If neither exists, sherlock is not installed. Ask the user to run that installer
 
 - Sherlock is read-only. Do not try to work around a refused query; tell the user what was refused and why.
 - Ask the user for a database password rather than guessing it, and never pass one as a command-line argument. The guide shows how to pass it on stdin.
-- Name the connection with `-c <connection>`, or connect with `-u <url>`, on every database command.
+- Always say which database you mean: with `-c <connection>` or `-u <url>`, or in the other ways the guide describes. Never assume a default connection.
