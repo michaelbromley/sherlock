@@ -21,7 +21,7 @@ sherlock -u "redis://localhost:6379" info
 
 ## SQL Commands
 
-All SQL commands require `-c <connection>` or `-u <url>`. Output is JSON by default, use `-f markdown` for tables.
+All SQL commands require `-c <connection>` or `-u <url>`. Output is JSON by default. `-f markdown` prints tables instead for `query`, `sample`, `stats`, `fk` and `indexes`; other commands always print JSON.
 
 ```bash
 sherlock connection list                # List connections and what each points at
@@ -44,7 +44,7 @@ For anything longer than a line, or with quotes in it, write the SQL to a file a
 
 ## Redis Commands
 
-All Redis commands require `-c <connection>` pointing to a Redis connection.
+All Redis commands require `-c <connection>` pointing to a Redis connection, or `-u redis://...`.
 
 ```bash
 sherlock -c <conn> info                 # Server info, memory, keyspace
@@ -130,7 +130,7 @@ The output is JSON. Each failed check has a `detail` and usually a `fix`. Tell t
 
 ## Constraints
 
-- **Read-only**: SQL allows a single SELECT, SHOW, DESCRIBE, EXPLAIN or WITH statement, with no write keywords in its code. Words inside string literals, quoted identifiers and comments do not count, so `WHERE action = 'delete'` is fine. On PostgreSQL and MySQL every statement also runs in a read-only transaction that is rolled back, so the database refuses even a function that writes. SQLite connections refuse writes too. Redis allows read commands only (GET, HGETALL, SCAN, etc.) — mutations (SET, DEL, HSET, etc.) are blocked.
+- **Read-only**: SQL allows a single SELECT, SHOW, DESCRIBE, EXPLAIN or WITH statement, with no write keywords in its code. Words inside string literals, quoted identifiers and comments do not count, so `WHERE action = 'delete'` is fine. On PostgreSQL and MySQL every statement also runs in a read-only transaction that is rolled back, as a prepared statement, so the database refuses even a function that writes, and anything chained after the statement. SQLite connections refuse writes too. SQL Server has no such protection: there the keyword check is the only guard. If a refused word is a column name, quote it as an identifier. Redis allows read commands only (GET, HGETALL, SCAN, etc.) — mutations (SET, DEL, HSET, etc.) are blocked.
 - **Timeout**: a statement is cancelled after 60s unless the connection sets `statementTimeout` or the query passes `--timeout`. The error says so. Rerun with a longer `--timeout` only if the query is expected to be slow.
 - **Connection required**: Always specify `-c <connection>` or `-u <url>`, unless the current directory is inside a connection's configured `directory`, which selects that connection.
 - **Type-aware**: SQL commands only work with SQL connections, Redis commands only work with Redis connections
@@ -158,7 +158,7 @@ The output is JSON. Each failed check has a `detail` and usually a `fix`. Tell t
 
 - Always use LIMIT to avoid large result sets
 - Use `stats` for SQL data profiling (row counts, null counts, distinct values)
-- Use `-f markdown` for human-readable table output
+- Use `-f markdown` for human-readable table output from `query`, `sample`, `stats`, `fk` and `indexes`
 - For Redis, use `keys` with specific patterns rather than `*` on large databases
 - Use `--no-types` with `keys` for faster scanning when type info isn't needed
 - Config: `~/.config/sherlock/config.json`, unless a `.sherlock.json` in the current directory or `SHERLOCK_CONFIG` points elsewhere

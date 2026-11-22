@@ -29,7 +29,7 @@ ssh <host> '<remote-sherlock> connection list'
 - **Sherlock is missing on the remote**, or has no `config import` command: install or update it yourself with `ssh <host> 'curl -fsSL https://raw.githubusercontent.com/michaelbromley/sherlock/main/install.sh | bash'`. Run without a terminal, the installer asks nothing and puts the binary in `~/.local/bin/sherlock`. Do the same locally if the local binary is too old.
 - **Which connections:** export all of them unless the user named some. The command below exports one connection by adding its name after `export`. For several, but not all, run the whole command once per connection.
 - **Names that exist on both machines:** this is the one decision to ask about. Ask once, listing the names: replace them (add `--force` to the import) or keep the remote ones (leave it off, and import skips them). If nothing overlaps, do not ask.
-- **Tunnelled connections** need their forwarding tool on the remote, for example `ssh <host> 'command -v northflank'`. Check this and report anything missing. It does not block the import.
+- **Tunnelled connections** need what opens the tunnel on the remote. A command tunnel needs its forwarding tool, for example `ssh <host> 'command -v kubectl'`. A provider tunnel needs that platform's login: for a Northflank provider tunnel, a context of the same name in the remote's Northflank CLI config (`ssh <host> 'northflank context ls'`, or the `configDir` the tunnel names). Check this and report anything missing. It does not block the import.
 
 ## 2. Give the user one command to paste into their own terminal
 
