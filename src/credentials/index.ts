@@ -1,3 +1,4 @@
+import { SherlockError } from '../errors';
 import type { CredentialProvider } from './types';
 import type { CredentialRef } from '../config/types';
 import { EnvProvider } from './providers/env';
@@ -37,7 +38,9 @@ export class CredentialResolver {
             }
         }
 
-        throw new Error(`No credential provider found for: ${JSON.stringify(ref)}`);
+        throw new SherlockError('CONFIG_INVALID', `Not a credential reference: ${JSON.stringify(ref)}`, {
+            fix: 'Give a string, { "$env": "VARIABLE" } or { "$keychain": "account" }.',
+        });
     }
 
     /**

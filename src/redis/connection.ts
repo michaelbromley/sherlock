@@ -7,7 +7,9 @@ import { RedisClient } from 'bun';
 import { resolveConnection } from '../config';
 import { startTunnelKeepalive } from '../tunnel/manager';
 import type { ResolvedConnectionConfig } from '../config/types';
-import { connectTimeoutFor, explainConnectFailure } from '../db/connect-timeout';
+import { connectTimeoutFor } from '../db/connect-timeout';
+import { classifyDbError } from '../db/errors';
+import type { WarningSink } from '../output/warnings';
 
 /**
  * Create a Redis connection from resolved config
@@ -30,7 +32,7 @@ export async function withRedisConnectionFromConfig<T>(
         client = createRedisConnection(config);
         return await handler(client);
     } catch (error) {
-        throw explainConnectFailure(error, config);
+        throw classifyDbError(error, config);
     } finally {
         if (client) {
             client.close();
@@ -45,7 +47,8 @@ export async function withRedisConnectionFromConfig<T>(
 export async function withRedisConnection<T>(
     connectionName: string,
     configPath: string | undefined,
-    handler: (client: RedisClient) => Promise<T>
+    handler: (client: RedisClient) => Promise<T>,
+    warnings?: WarningSink
 ): Promise<T> {
     let client: RedisClient | null = null;
     let stopKeepalive: (() => void) | null = null;
@@ -53,12 +56,12 @@ export async function withRedisConnection<T>(
     let config: ResolvedConnectionConfig | null = null;
 
     try {
-        config = await resolveConnection(connectionName, configPath);
+        config = await resolveConnection(connectionName, configPath, warnings);
         stopKeepalive = startTunnelKeepalive(connectionName);
         client = createRedisConnection(config);
         return await handler(client);
     } catch (error) {
-        throw config ? explainConnectFailure(error, config) : error;
+        throw config ? classifyDbError(error, config) : error;
     } finally {
         stopKeepalive?.();
         if (client) {

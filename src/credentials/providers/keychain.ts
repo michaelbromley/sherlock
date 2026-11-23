@@ -1,4 +1,5 @@
 import { execSync, spawnSync, type SpawnSyncOptions } from 'child_process';
+import { SherlockError, usageError } from '../../errors';
 import type { CredentialProvider } from '../types';
 import type { CredentialRef } from '../../config/types';
 
@@ -17,7 +18,7 @@ function getCacheKey(service: string, account: string): string {
  */
 function validateShellSafeString(value: string, fieldName: string): void {
     if (!/^[a-zA-Z0-9_.-]+$/.test(value)) {
-        throw new Error(
+        throw usageError(
             `Invalid ${fieldName}: "${value}". ` +
             `Only letters, numbers, hyphens, underscores, and dots are allowed.`
         );
@@ -43,9 +44,13 @@ function getPasswordViaSecurity(service: string, account: string): string | null
 
     if (process.platform !== 'darwin') {
         // Fall back to @napi-rs/keyring for non-macOS
-        const { Entry } = require('@napi-rs/keyring');
-        const entry = new Entry(service, account);
-        return entry.getPassword();
+        try {
+            const { Entry } = require('@napi-rs/keyring');
+            const entry = new Entry(service, account);
+            return entry.getPassword() ?? null;
+        } catch (error) {
+            throw keychainUnavailable(error);
+        }
     }
 
     try {
@@ -55,9 +60,33 @@ function getPasswordViaSecurity(service: string, account: string): string | null
             { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] }
         );
         return result.trim();
-    } catch {
-        return null;
+    } catch (error) {
+        // 44 is errSecItemNotFound. Anything else, such as a locked keychain,
+        // means the keychain could not be read, not that the entry is missing.
+        if ((error as { status?: unknown }).status === SECURITY_ITEM_NOT_FOUND) return null;
+        throw keychainUnavailable(error);
     }
+}
+
+/** `security`'s exit status when the keychain has no such entry */
+const SECURITY_ITEM_NOT_FOUND = 44;
+
+function missingKeychainPassword(service: string, account: string): SherlockError {
+    return new SherlockError(
+        'CREDENTIAL_MISSING',
+        `No password found in keychain for service="${service}" account="${account}".`,
+        { fix: `Store one with: sherlock keychain set ${account}`, details: { source: 'keychain' } }
+    );
+}
+
+function keychainUnavailable(error: unknown): SherlockError {
+    const reason = error instanceof Error ? error.message.split('\n')[0] : String(error);
+    return new SherlockError('KEYCHAIN_UNAVAILABLE', `The OS keychain could not be read: ${reason}`, {
+        fix: process.platform === 'darwin'
+            ? 'Over SSH the login keychain is usually locked: run `security unlock-keychain` and try again.'
+            : 'Check that a secret service (such as gnome-keyring) is running, or use { "$env": ... } for the password.',
+        cause: error,
+    });
 }
 
 /**
@@ -108,9 +137,11 @@ function setPasswordViaSecurity(service: string, account: string, password: stri
     );
     if (result.error) throw result.error;
     if (result.status !== 0) {
-        throw new Error(
+        throw new SherlockError(
+            'KEYCHAIN_UNAVAILABLE',
             `Could not store the password in the macOS keychain: ` +
-            `${String(result.stderr).trim() || `security exited with status ${result.status}`}`
+            `${String(result.stderr).trim() || `security exited with status ${result.status}`}`,
+            { fix: 'Over SSH the login keychain is usually locked: run `security unlock-keychain` and try again.' }
         );
     }
 }
@@ -179,12 +210,7 @@ export class KeychainProvider implements CredentialProvider {
         const cacheKey = getCacheKey(service, account);
         if (passwordCache.has(cacheKey)) {
             const cached = passwordCache.get(cacheKey);
-            if (cached === null) {
-                throw new Error(
-                    `No password found in keychain for service="${service}" account="${account}".\n` +
-                    `Use 'sherlock keychain set ${account}' to store a password.`
-                );
-            }
+            if (cached === null) throw missingKeychainPassword(service, account);
             return cached;
         }
 
@@ -194,12 +220,7 @@ export class KeychainProvider implements CredentialProvider {
         // Cache the result (even if null)
         passwordCache.set(cacheKey, password);
 
-        if (password === null) {
-            throw new Error(
-                `No password found in keychain for service="${service}" account="${account}".\n` +
-                `Use 'sherlock keychain set ${account}' to store a password.`
-            );
-        }
+        if (password === null) throw missingKeychainPassword(service, account);
 
         return password;
     }

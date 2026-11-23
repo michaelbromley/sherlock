@@ -29,7 +29,9 @@ import { getEnvFilePath } from '../config/paths';
 import { DB_TYPES, isRedisConfig, type DbType } from '../db-types';
 import { createConnection } from '../db/connection';
 import { credentialSource } from '../credentials/status';
-import { explainConnectFailure } from '../db/connect-timeout';
+import { classifyDbError } from '../db/errors';
+import { isSherlockError, type ErrorCode } from '../errors';
+import type { WarningSink } from '../output/warnings';
 import { createRedisConnection } from '../redis/connection';
 import { resolveTunnel, type DiagnosticCheck, type ResolvedTunnel } from '../tunnel/providers';
 import { startTunnelKeepalive } from '../tunnel/manager';
@@ -55,7 +57,7 @@ export async function runSteps(steps: DoctorStep[]): Promise<{ ok: boolean; chec
             result = await step();
         } catch (error) {
             // A step that throws has failed without saying how; report it as its own check.
-            result = [{ name: 'unexpected error', status: 'fail', detail: errorMessage(error) }];
+            result = [failedCheck('unexpected error', error, 'INTERNAL')];
         }
         for (const check of result) {
             checks.push(check);
@@ -69,13 +71,29 @@ function errorMessage(error: unknown): string {
     return error instanceof Error ? error.message : String(error);
 }
 
+/**
+ * A failed check for an error: its message, its fix unless the check has a
+ * better one, and its code, which is what doctor reports as its own error.
+ */
+function failedCheck(name: string, error: unknown, fallbackCode: ErrorCode, fix?: string): DiagnosticCheck {
+    const classified = isSherlockError(error) ? error : null;
+    const chosenFix = fix ?? classified?.fix;
+    return {
+        name,
+        status: 'fail',
+        detail: errorMessage(error),
+        ...(chosenFix !== undefined && { fix: chosenFix }),
+        code: classified?.code ?? fallbackCode,
+    };
+}
+
 function configStep(connectionName: string, configPath: string | undefined, state: DoctorState): DoctorStep {
     return async () => {
         let config: ConnectionConfig;
         try {
             config = getConnectionConfig(connectionName, configPath);
         } catch (error) {
-            return [{ name: 'config', status: 'fail', detail: errorMessage(error) }];
+            return [failedCheck('config', error, 'CONFIG_INVALID')];
         }
         state.config = config;
         state.dbType = summarizeConnection(connectionName, config).type;
@@ -87,7 +105,7 @@ function configStep(connectionName: string, configPath: string | undefined, stat
         try {
             state.tunnel = resolveTunnel(connectionName, config.tunnel);
         } catch (error) {
-            return [{ name: 'config', status: 'fail', detail: errorMessage(error) }];
+            return [failedCheck('config', error, 'CONFIG_INVALID')];
         }
 
         if (isConfigFromWorkingDirectory(configPath)) {
@@ -96,6 +114,7 @@ function configStep(connectionName: string, configPath: string | undefined, stat
                 status: 'fail',
                 detail: 'the connection has a tunnel, but the config was loaded from the current directory, where tunnels are not honoured',
                 fix: 'Run with --config pointing at the file if you trust it, or move the connection to your user config.',
+                code: 'CONFIG_UNTRUSTED',
             }];
         }
 
@@ -128,6 +147,7 @@ function targetStep(state: DoctorState): DoctorStep {
                 status: 'fail',
                 detail: verdict.reason,
                 fix: 'Point the tunnel at the database the host names, or correct the host. A tunnel copied from another connection is the usual cause.',
+                code: 'CONFIG_INVALID',
             }];
         }
         return [{
@@ -153,10 +173,9 @@ function credentialsStep(connectionName: string, configPath: string | undefined,
         }
 
         try {
-            await resolveConnectionCredentials(connectionName, configPath);
+            await resolveConnectionCredentials(connectionName, configPath, state.warnings);
         } catch (error) {
-            const detail = errorMessage(error);
-            return [{ name: 'credentials', status: 'fail', detail, fix: credentialsFix(detail) }];
+            return [failedCheck('credentials', error, 'CREDENTIAL_MISSING', credentialsFix(errorMessage(error)))];
         }
 
         const fields = (['url', 'host', 'username', 'password'] as const)
@@ -192,6 +211,8 @@ function credentialsFix(detail: string): string {
 
 /** What the steps learn and pass on to the next */
 interface DoctorState {
+    /** Where warnings met while resolving the connection go */
+    warnings?: WarningSink;
     config?: ConnectionConfig;
     dbType?: DbType;
     tunnel?: ResolvedTunnel;
@@ -216,8 +237,15 @@ function readTlsResult(dbType: DbType, rows: unknown[]): { encrypted: boolean; p
     return { encrypted, protocol: typeof row.protocol === 'string' ? row.protocol : undefined };
 }
 
-/** Which check a connection failure belongs to, by what went wrong */
-function failedCheckName(message: string, fallback: 'query' | 'connect'): string {
+const CONNECT_CODES = new Set<ErrorCode>(['CONNECT_REFUSED', 'CONNECT_TIMEOUT', 'TUNNEL_DOWN', 'AUTH_FAILED']);
+
+/** Which check a connection failure belongs to, by its code, or else by its message */
+function failedCheckName(error: unknown, fallback: 'query' | 'connect'): string {
+    if (isSherlockError(error)) {
+        if (CONNECT_CODES.has(error.code)) return 'connect';
+        if (error.code === 'TLS_FAILED') return 'tls';
+    }
+    const message = errorMessage(error);
     if (/did not answer within|tunnel accepted the connection|Could not connect to/.test(message)) return 'connect';
     if (looksLikeTlsError(message)) return 'tls';
     return fallback;
@@ -246,17 +274,15 @@ function connectSteps(connectionName: string, configPath: string | undefined, st
 
     const tunnelStep: DoctorStep = async () => {
         try {
-            resolved = await resolveConnection(connectionName, configPath);
+            resolved = await resolveConnection(connectionName, configPath, state.warnings);
         } catch (error) {
             if (!state.tunnel) {
-                return [{ name: 'connect', status: 'fail', detail: errorMessage(error) }];
+                return [failedCheck('connect', error, 'INTERNAL')];
             }
-            return [{
-                name: 'tunnel',
-                status: 'fail',
-                detail: errorMessage(error),
-                fix: `The error includes the end of the tunnel's log. The whole log is in ${logPath(connectionName)}.`,
-            }];
+            const fix = isSherlockError(error) && error.code !== 'TUNNEL_FAILED' && error.fix
+                ? error.fix
+                : `The error includes the end of the tunnel's log. The whole log is in ${logPath(connectionName)}.`;
+            return [failedCheck('tunnel', error, 'TUNNEL_FAILED', fix)];
         }
         stopKeepalive = startTunnelKeepalive(connectionName);
         if (!state.tunnel) return [];
@@ -276,12 +302,8 @@ function connectSteps(connectionName: string, configPath: string | undefined, st
                 try {
                     await client.send('PING', []);
                 } catch (error) {
-                    const message = errorMessage(explainConnectFailure(error, resolved!));
-                    return [{
-                        name: failedCheckName(message, 'query'),
-                        status: 'fail',
-                        detail: message,
-                    }];
+                    const classified = classifyDbError(error, resolved!);
+                    return [failedCheck(failedCheckName(classified, 'query'), classified, 'QUERY_FAILED')];
                 } finally {
                     client.close();
                 }
@@ -301,17 +323,18 @@ function connectSteps(connectionName: string, configPath: string | undefined, st
                     try {
                         tls = readTlsResult(dbType, await sql.unsafe(tlsQuery));
                     } catch (error) {
-                        const message = errorMessage(error);
-                        return [{
-                            name: failedCheckName(message, 'connect'),
-                            status: 'fail',
-                            detail: message,
-                            ...(looksLikeTlsError(message) ? { fix: tlsFix(message, ssl.enabled) } : {}),
-                        }];
+                        const name = failedCheckName(error, 'connect');
+                        const fix = name === 'tls' ? tlsFix(errorMessage(error), ssl.enabled) : undefined;
+                        return [failedCheck(name, error, 'QUERY_FAILED', fix)];
                     }
                     checks.push(tls.encrypted
                         ? { name: 'tls', status: 'pass', detail: `session is encrypted${tls.protocol ? ` (${tls.protocol})` : ''}` }
-                        : { name: 'tls', status: 'fail', detail: 'ssl is enabled on the connection, but the session is not encrypted' });
+                        : {
+                            name: 'tls',
+                            status: 'fail',
+                            detail: 'ssl is enabled on the connection, but the session is not encrypted',
+                            code: 'TLS_FAILED',
+                        });
                     if (!tls.encrypted) return checks;
                 } else {
                     checks.push({ name: 'tls', status: 'skip', detail: `cannot check TLS on ${dbType}` });
@@ -329,15 +352,9 @@ function connectSteps(connectionName: string, configPath: string | undefined, st
                 await sql.close();
             }
         } catch (error) {
-            const message = errorMessage(error);
-            const name = failedCheckName(message, 'query');
-            const tls = name === 'tls';
-            checks.push({
-                name,
-                status: 'fail',
-                detail: message,
-                ...(tls ? { fix: tlsFix(message, ssl.enabled) } : {}),
-            });
+            const name = failedCheckName(error, 'query');
+            const fix = name === 'tls' ? tlsFix(errorMessage(error), ssl.enabled) : undefined;
+            checks.push(failedCheck(name, error, 'QUERY_FAILED', fix));
             return checks;
         }
     };
@@ -355,8 +372,12 @@ function connectSteps(connectionName: string, configPath: string | undefined, st
 }
 
 /** Diagnose a connection. Resolves rather than throws: failures are checks. */
-export async function diagnoseConnection(connectionName: string, configPath?: string): Promise<DoctorReport> {
-    const state: DoctorState = {};
+export async function diagnoseConnection(
+    connectionName: string,
+    configPath?: string,
+    warnings?: WarningSink
+): Promise<DoctorReport> {
+    const state: DoctorState = { warnings };
     const { ok, checks } = await runSteps([
         configStep(connectionName, configPath, state),
         targetStep(state),

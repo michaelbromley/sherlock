@@ -11,6 +11,7 @@
  * `open` or `diagnose`.
  */
 
+import { SherlockError, isSherlockError, errorMessage } from '../../errors';
 import { resolveTunnelTimeouts, tunnelConfigLabel, type ResolvedTunnelTimeouts } from '../config';
 import { isProviderTunnel, type TunnelConfig } from '../types';
 import { commandProvider, COMMAND_PROVIDER_ID } from './command';
@@ -67,6 +68,20 @@ export interface ResolvedTunnel extends ResolvedTunnelTimeouts {
  * message naming the connection so config mistakes are traceable.
  */
 export function resolveTunnel(connectionName: string, tunnel: TunnelConfig): ResolvedTunnel {
+    try {
+        return resolveTunnelBlock(connectionName, tunnel);
+    } catch (error) {
+        // Every provider reports a bad block as a plain error naming the setting.
+        if (isSherlockError(error)) throw error;
+        throw new SherlockError('CONFIG_INVALID', errorMessage(error), {
+            fix: `Fix the "tunnel" of connection "${connectionName}". See: sherlock guide`,
+            details: { connection: connectionName, setting: 'tunnel' },
+            cause: error,
+        });
+    }
+}
+
+function resolveTunnelBlock(connectionName: string, tunnel: TunnelConfig): ResolvedTunnel {
     if (typeof tunnel !== 'object' || tunnel === null) {
         throw new Error(`Invalid ${tunnelConfigLabel(connectionName)}: it must be an object.`);
     }

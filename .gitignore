@@ -22,3 +22,7 @@ dist/
 
 # Bun
 bun.lockb
+# Spike scratch: its own dependencies and the SQLite file it creates
+/spikes/*/node_modules
+/spikes/*/events.db
+/spikes/*/bun.lock

@@ -11,6 +11,7 @@
  *   }
  */
 
+import { SherlockError, isSherlockError, type ErrorCode } from '../../../errors';
 import { DB_TYPES, type DbType } from '../../../db-types';
 import type {
     DiagnosticCheck,
@@ -75,13 +76,14 @@ function explainApiError(
     what: string,
     config: NorthflankTunnelConfig,
     context: NorthflankContext
-): { detail: string; fix: string } {
+): { detail: string; fix: string; code: ErrorCode } {
     const message = redactToken(error instanceof Error ? error.message : String(error), context.token);
 
     if (error instanceof NorthflankApiError && error.status === 401) {
         return {
             detail: `Northflank rejected the token of context "${config.context}".`,
             fix: `Log in again: northflank login --name ${config.context}`,
+            code: 'PROVIDER_AUTH',
         };
     }
     if (error instanceof NorthflankApiError && (error.status === 403 || error.status === 404)) {
@@ -90,9 +92,10 @@ function explainApiError(
             fix:
                 `Check the id is right, and that "${config.context}" is the login for the team that ` +
                 `owns it. A different team needs a different "context".`,
+            code: 'PROVIDER_NOT_FOUND',
         };
     }
-    return { detail: `Could not reach ${what}: ${message}`, fix: 'Check the network and try again.' };
+    return { detail: `Could not reach ${what}: ${message}`, fix: 'Check the network and try again.', code: 'TUNNEL_FAILED' };
 }
 
 /** Why a listing call failed, in a line fit for the wizard */
@@ -276,9 +279,13 @@ export function createNorthflankProvider(
             } catch (error) {
                 await client.stop().catch(() => undefined);
                 if (error instanceof NorthflankApiError) {
-                    const { detail, fix } = explainApiError(error, `addon ${target}`, config, context);
-                    throw new Error(`${detail} ${fix}`);
+                    const { detail, fix, code } = explainApiError(error, `addon ${target}`, config, context);
+                    const details = code === 'PROVIDER_AUTH'
+                        ? { provider: 'northflank', context: config.context }
+                        : { provider: 'northflank', target };
+                    throw new SherlockError(code, detail, { fix, details });
                 }
+                if (isSherlockError(error)) throw error;
                 const message = error instanceof Error ? error.message : String(error);
                 throw new Error(redactToken(message, context.token));
             }
@@ -302,6 +309,7 @@ export function createNorthflankProvider(
                     status: 'fail',
                     detail: error instanceof Error ? error.message : String(error),
                     fix: 'Set "context" to a context that exists, or "configDir" to the right CLI config directory.',
+                    code: 'PROVIDER_AUTH',
                 });
                 return checks;
             }
@@ -340,6 +348,7 @@ export function createNorthflankProvider(
                                 `addon ${target} is ${addon.type}, but connection ` +
                                 `"${connection.connectionName}" is configured as ${connection.dbType}`,
                             fix: `Point the tunnel at the ${connection.dbType} addon, or change the connection's "type".`,
+                            code: 'CONFIG_INVALID',
                         });
                     } else if (addon.status !== 'running') {
                         checks.push({
@@ -347,6 +356,7 @@ export function createNorthflankProvider(
                             status: 'fail',
                             detail: `addon ${target} is ${addon.status}, not running`,
                             fix: 'Wait for the addon to be running, or resume it in Northflank.',
+                            code: 'TUNNEL_FAILED',
                         });
                     } else {
                         const replicas = addon.replicas !== undefined ? `, ${addon.replicas} replica(s)` : '';

@@ -10,12 +10,17 @@
 
 /// <reference path="./text-modules.d.ts" />
 
+import { usageError } from '../errors';
+import { CONTRACT_PLACEHOLDER, contractReference } from './contract';
 import main from './agent.md' with { type: 'text' };
 import transfer from './transfer.md' with { type: 'text' };
 
 /** Guide topics, by the name `sherlock guide <topic>` takes */
 export const GUIDE_TOPICS = {
-    main: { text: main, summary: 'querying, connection setup, tunnels, doctor and the read-only rules' },
+    main: {
+        text: main.replace(CONTRACT_PLACEHOLDER, contractReference()),
+        summary: 'the output and error codes, querying, connection setup, tunnels, doctor and the read-only rules',
+    },
     transfer: { text: transfer, summary: 'moving connections, passwords included, to another machine' },
 } as const;
 
@@ -26,7 +31,7 @@ export function guideText(topic: string | undefined, version: string): string {
     const name = (topic ?? 'main') as GuideTopic;
     // hasOwn, so that "constructor" and other inherited keys are not topics.
     if (!Object.hasOwn(GUIDE_TOPICS, name)) {
-        throw new Error(
+        throw usageError(
             `No guide topic "${topic}". Topics: ` +
             Object.entries(GUIDE_TOPICS).map(([key, value]) => `${key} (${value.summary})`).join(', ') + '.'
         );

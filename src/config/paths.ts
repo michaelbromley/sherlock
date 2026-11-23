@@ -1,3 +1,4 @@
+import { SherlockError } from '../errors';
 import * as path from 'path';
 import * as os from 'os';
 import * as fs from 'fs';
@@ -114,7 +115,10 @@ export function findConfig(cliConfigPath?: string): FoundConfig | null {
         if (fs.existsSync(resolved)) {
             return { path: resolved, source: 'cli' };
         }
-        throw new Error(`Config file not found: ${resolved}`);
+        throw new SherlockError('CONFIG_NOT_FOUND', `Config file not found: ${resolved}`, {
+            fix: 'Check the path given to --config.',
+            details: { searched: [resolved] },
+        });
     }
 
     // 2. Environment variable
@@ -123,34 +127,28 @@ export function findConfig(cliConfigPath?: string): FoundConfig | null {
         if (fs.existsSync(envPath)) {
             return { path: envPath, source: 'env' };
         }
-        throw new Error(`Config file not found: ${envPath} (from SHERLOCK_CONFIG env var)`);
+        throw new SherlockError('CONFIG_NOT_FOUND', `Config file not found: ${envPath} (from SHERLOCK_CONFIG env var)`, {
+            fix: 'Point SHERLOCK_CONFIG at an existing file, or unset it.',
+            details: { searched: [envPath] },
+        });
     }
 
-    // 3. Portable mode: config.json next to binary
-    const portableConfigPath = path.join(getBinaryDir(), 'config.json');
-    if (fs.existsSync(portableConfigPath)) {
-        return { path: portableConfigPath, source: 'portable' };
-    }
+    // 3 to 6, the first that exists
+    return discoveredConfigs().find((candidate) => fs.existsSync(candidate.path)) ?? null;
+}
 
-    // 4. Project-local config
-    const localConfigPath = path.resolve('.sherlock.json');
-    if (fs.existsSync(localConfigPath)) {
-        return { path: localConfigPath, source: 'project' };
-    }
-
-    // 5. XDG config directory
-    const xdgConfigPath = path.join(getXdgConfigDir(), 'config.json');
-    if (fs.existsSync(xdgConfigPath)) {
-        return { path: xdgConfigPath, source: 'user' };
-    }
-
-    // 6. Legacy config.ts in current directory (for migration)
-    const legacyConfigPath = path.resolve('config.ts');
-    if (fs.existsSync(legacyConfigPath)) {
-        return { path: legacyConfigPath, source: 'legacy' };
-    }
-
-    return null;
+/**
+ * The files looked for when neither --config nor SHERLOCK_CONFIG is given, in
+ * order: next to the binary (portable mode), ./.sherlock.json, the user config,
+ * and a legacy ./config.ts.
+ */
+export function discoveredConfigs(): FoundConfig[] {
+    return [
+        { path: path.join(getBinaryDir(), 'config.json'), source: 'portable' },
+        { path: path.resolve('.sherlock.json'), source: 'project' },
+        { path: path.join(getXdgConfigDir(), 'config.json'), source: 'user' },
+        { path: path.resolve('config.ts'), source: 'legacy' },
+    ];
 }
 
 /** Config file discovery, when the caller only needs the path */

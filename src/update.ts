@@ -7,6 +7,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as p from '@clack/prompts';
 import pkg from '../package.json';
+import { SherlockError, usageError } from './errors';
 
 const REPO = 'michaelbromley/sherlock';
 const RELEASES_API = `https://api.github.com/repos/${REPO}/releases/latest`;
@@ -53,7 +54,8 @@ function warnOldLayout(): void {
     p.log.warn(
         `This sherlock is installed in ${path.dirname(process.execPath)}, the layout used up to 1.7.0. ` +
         `Run the installer to move to the current layout. It keeps your connections, puts sherlock ` +
-        `on PATH, and removes the old copy:\n  ${INSTALL_COMMAND}`
+        `on PATH, and removes the old copy:\n  ${INSTALL_COMMAND}`,
+        { output: process.stderr }
     );
 }
 
@@ -189,110 +191,127 @@ async function downloadAndReplace(url: string, targetPath: string): Promise<void
 // ============================================================================
 // Main
 // ============================================================================
+// Main
+// ============================================================================
 
-export async function runUpdate(): Promise<void> {
-    // 1. Dev mode check
+export interface UpdateOptions {
+    /** Install without asking */
+    yes?: boolean;
+    /** Show progress on stderr, for a person watching */
+    progress?: boolean;
+}
+
+export interface UpdateResult {
+    from: string;
+    /** The latest version, or null when it could not be known */
+    to: string | null;
+    updated: boolean;
+}
+
+function updateFailed(message: string, reason: string, fix?: string): SherlockError {
+    return new SherlockError('UPDATE_FAILED', message, { fix, details: { reason } });
+}
+
+/**
+ * Check for a newer release and install it. In a terminal it asks first;
+ * elsewhere it needs --yes, and fails at once without it rather than waiting
+ * at a prompt nobody can answer. Prompts and progress go to stderr.
+ */
+export async function runUpdate(options: UpdateOptions = {}): Promise<UpdateResult> {
+    const out = { output: process.stderr };
+    const log = options.progress ? p.log : { info: () => undefined, success: () => undefined, warn: () => undefined };
+    const currentVersion = pkg.version;
+
     if (!isCompiledBinary()) {
-        p.log.info('Self-update is only available for compiled binaries. Use git pull to update from source.');
-        return;
+        throw updateFailed(
+            'Self-update is only available for compiled binaries.',
+            'NOT_A_BINARY',
+            'Running from source: update with git pull.'
+        );
     }
 
-    // 2. Platform check
     const assetName = getAssetName();
     if (!assetName) {
-        process.exitCode = 1;
-        p.log.error(
-            `No prebuilt binary for ${process.platform}/${process.arch}, so sherlock cannot update itself here. ` +
-                `Pull and rebuild from source: https://github.com/${REPO}#from-source`,
+        throw updateFailed(
+            `No prebuilt binary for ${process.platform}/${process.arch}, so sherlock cannot update itself here.`,
+            'NO_BINARY_FOR_PLATFORM',
+            `Pull and rebuild from source: https://github.com/${REPO}#from-source`
         );
-        return;
     }
 
-    // 3. Check for updates
-    const spin = p.spinner();
-    spin.start('Checking for updates...');
-
+    const spin = options.progress ? p.spinner(out) : null;
+    spin?.start('Checking for updates...');
     let release: ReleaseInfo;
     try {
         release = await fetchReleaseInfo();
     } catch (err) {
-        spin.stop('');
-        process.exitCode = 1;
-        if (err instanceof TypeError && err.message.includes('fetch')) {
-            p.log.error('Could not check for updates. Check your internet connection.');
-        } else {
-            p.log.error(err instanceof Error ? err.message : String(err));
-        }
-        return;
+        spin?.stop('');
+        const offline = err instanceof TypeError && err.message.includes('fetch');
+        throw updateFailed(
+            offline ? 'Could not check for updates.' : `Could not check for updates: ${err instanceof Error ? err.message : String(err)}`,
+            'CHECK_FAILED',
+            offline ? 'Check your internet connection.' : undefined
+        );
     }
+    spin?.stop('');
 
     const latestVersion = release.tag_name.replace(/^v/, '');
-    const currentVersion = pkg.version;
-
-    spin.stop('');
-
-    // 4. Already up to date?
     if (compareSemver(currentVersion, latestVersion) >= 0) {
-        p.log.success(`You're on the latest version (${currentVersion}).`);
-        if (isOldLayout()) warnOldLayout();
-        return;
+        log.success(`You're on the latest version (${currentVersion}).`, out);
+        if (isOldLayout() && options.progress) warnOldLayout();
+        return { from: currentVersion, to: latestVersion, updated: false };
     }
 
-    // 5. Show version info
-    p.log.info(`Current version:  ${currentVersion}`);
-    p.log.info(`Latest version:   ${latestVersion}`);
+    log.info(`Current version:  ${currentVersion}`, out);
+    log.info(`Latest version:   ${latestVersion}`, out);
 
-    // 6. Show changelog
-    const changelogMd = await fetchChangelog();
-    if (changelogMd) {
-        const notes = extractChangelog(changelogMd, currentVersion, latestVersion);
-        if (notes) {
-            p.note(notes, `What's new in v${latestVersion}`);
+    if (!options.yes) {
+        if (!process.stdin.isTTY || !process.stderr.isTTY) {
+            throw usageError(
+                `sherlock ${latestVersion} is available, and installing it needs confirmation, but there is no terminal to ask in.`,
+                '--yes',
+                'Run sherlock update --yes to install it.'
+            );
+        }
+        const changelogMd = await fetchChangelog();
+        const notes = changelogMd ? extractChangelog(changelogMd, currentVersion, latestVersion) : null;
+        if (notes) p.note(notes, `What's new in v${latestVersion}`, out);
+        const confirmed = await p.confirm({ message: `Update to v${latestVersion}?`, ...out });
+        if (p.isCancel(confirmed) || !confirmed) {
+            log.info('Update cancelled.', out);
+            return { from: currentVersion, to: latestVersion, updated: false };
         }
     }
 
-    // 7. Confirm
-    const confirmed = await p.confirm({ message: `Update to v${latestVersion}?` });
-    if (p.isCancel(confirmed) || !confirmed) {
-        p.log.info('Update cancelled.');
-        return;
-    }
-
-    // 8. Find asset URL
     const asset = release.assets.find((a) => a.name === assetName);
     if (!asset) {
-        process.exitCode = 1;
-        p.log.error(
-            `No binary found for your platform (${assetName}). Download manually from https://github.com/${REPO}/releases`,
+        throw updateFailed(
+            `The v${latestVersion} release has no binary for this platform (${assetName}).`,
+            'NO_BINARY_FOR_PLATFORM',
+            `Download it from https://github.com/${REPO}/releases`
         );
-        return;
     }
 
-    // 9. Download and replace
-    spin.start('Downloading...');
+    spin?.start('Downloading...');
     try {
         await downloadAndReplace(asset.browser_download_url, process.execPath);
     } catch (err) {
-        spin.stop('');
+        spin?.stop('');
         const msg = err instanceof Error ? err.message : String(err);
-        process.exitCode = 1;
-        if (msg.includes('EACCES') || msg.includes('permission denied')) {
-            p.log.error('Permission denied. Try: sudo sherlock update');
-        } else {
-            p.log.error(msg);
-        }
-        return;
+        const denied = msg.includes('EACCES') || msg.includes('permission denied');
+        throw updateFailed(
+            denied ? `Permission denied replacing ${process.execPath}.` : `Could not install the new version: ${msg}`,
+            denied ? 'PERMISSION_DENIED' : 'INSTALL_FAILED',
+            denied ? 'Try: sudo sherlock update --yes' : undefined
+        );
     }
-    spin.stop('');
-    p.log.success('Binary updated');
-
-    // 10. Done. The skill is installed and updated by the skills CLI (or
-    // whichever skill manager the user chose), not by the binary.
-    console.log('');
-    p.log.info(`Restart sherlock to use v${latestVersion}.`);
+    spin?.stop('');
+    log.success('Binary updated', out);
+    log.info(`Restart sherlock to use v${latestVersion}.`, out);
     if (isOldLayout()) {
-        warnOldLayout();
+        if (options.progress) warnOldLayout();
     } else {
-        p.log.info('To update the agent skill as well, run: npx skills update sherlock -g');
+        log.info('To update the agent skill as well, run: npx skills update sherlock -g', out);
     }
+    return { from: currentVersion, to: latestVersion, updated: true };
 }

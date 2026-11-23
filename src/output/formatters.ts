@@ -1,13 +1,6 @@
 /**
- * Output formatting utilities
- * Handles JSON and Markdown output for query results
+ * Markdown tables, for --format human
  */
-
-/** Supported output formats */
-export type OutputFormat = 'json' | 'markdown';
-
-/** Default output format */
-export const DEFAULT_OUTPUT_FORMAT: OutputFormat = 'json';
 
 /**
  * Escape a value for safe inclusion in a markdown table cell
@@ -55,22 +48,14 @@ export function formatAsMarkdown(rows: unknown[]): string {
 }
 
 /**
- * Format output based on format option
+ * Format rows that come as arrays, with their column names given once, as a
+ * markdown table. Duplicate column names stay separate columns.
  */
-export function formatOutput(data: unknown, format: OutputFormat): string {
-    if (format === 'markdown') {
-        // If data has a 'rows' property, format those as a table
-        if (typeof data === 'object' && data !== null && 'rows' in data) {
-            const d = data as { rows: unknown[]; rowCount?: number };
-            const table = formatAsMarkdown(d.rows);
-            return d.rowCount !== undefined ? `${d.rowCount} rows\n\n${table}` : table;
-        }
-        // If it's an array, format as table directly
-        if (Array.isArray(data)) {
-            return formatAsMarkdown(data);
-        }
-        // Otherwise fall back to JSON
-        return JSON.stringify(data, null, 2);
-    }
-    return JSON.stringify(data, null, 2);
+export function formatRowsAsMarkdown(columns: Array<{ name: string }>, rows: unknown[][]): string {
+    if (columns.length === 0) return '_No columns_';
+    const header = '| ' + columns.map((column) => column.name.replace(/\|/g, '\\|')).join(' | ') + ' |';
+    const separator = '| ' + columns.map(() => '---').join(' | ') + ' |';
+    if (rows.length === 0) return [header, separator, '', '_No rows returned_'].join('\n');
+    const dataRows = rows.map((row) => '| ' + columns.map((_, i) => escapeMarkdownCell(row[i])).join(' | ') + ' |');
+    return [header, separator, ...dataRows].join('\n');
 }

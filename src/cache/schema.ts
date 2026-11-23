@@ -3,6 +3,7 @@
  * Caches introspection results per-connection to avoid repeated DB queries
  */
 
+import type { FetchedRows } from '../db/adapter';
 import * as fs from 'fs';
 import * as path from 'path';
 import { getCacheDir, ensureCacheDir } from '../config/paths';
@@ -14,14 +15,15 @@ const SECURE_FILE_MODE = 0o600;
 const SAFE_IDENTIFIER = /^[a-zA-Z_][a-zA-Z0-9_]*$/;
 
 /** Schema info structure (matches introspect output) */
-export interface SchemaInfo {
-    [tableName: string]: {
-        columns: unknown[];
-    };
-}
+/** Every table's columns, as `describe` gives them, before any cap */
+export type SchemaInfo = Record<string, FetchedRows>;
+
+/** The layout of the cache file. A cache in any other layout, such as 1.x's, is ignored. */
+const CACHE_FORMAT = 2;
 
 /** Cached schema data with metadata */
 export interface CachedSchema {
+    format: typeof CACHE_FORMAT;
     cachedAt: string;
     connectionName: string;
     schema: SchemaInfo;
@@ -52,6 +54,7 @@ function isValidCachedSchema(data: unknown): data is CachedSchema {
     return (
         typeof data === 'object' &&
         data !== null &&
+        (data as CachedSchema).format === CACHE_FORMAT &&
         typeof (data as CachedSchema).cachedAt === 'string' &&
         typeof (data as CachedSchema).connectionName === 'string' &&
         typeof (data as CachedSchema).schema === 'object'
@@ -110,10 +113,11 @@ export function writeSchemaCache(connectionName: string, schema: SchemaInfo): vo
     ensureCacheDir();
     const cachePath = getSchemaCachePath(connectionName);
     const cacheData: CachedSchema = {
+        format: CACHE_FORMAT,
         cachedAt: new Date().toISOString(),
         connectionName,
         schema,
     };
-    fs.writeFileSync(cachePath, JSON.stringify(cacheData, null, 2), 'utf-8');
+    fs.writeFileSync(cachePath, JSON.stringify(cacheData), 'utf-8');
     setSecurePermissions(cachePath);
 }

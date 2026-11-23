@@ -2,12 +2,15 @@ import * as fs from 'fs';
 import * as path from 'path';
 import {
     describeConfigSource,
+    discoveredConfigs,
     findConfig,
     getConfigDir,
     getEnvFilePath,
     type ConfigSource,
 } from './paths';
 import { getCredentialResolver } from '../credentials';
+import { SherlockError, isSherlockError, errorMessage } from '../errors';
+import { stderrWarnings, type SherlockWarning, type WarningSink } from '../output/warnings';
 import type { SherlockConfig, ConnectionConfig, ResolvedConnectionConfig, CredentialRef, SslConfig } from './types';
 import type { TunnelConfig } from '../tunnel/types';
 import { connectionEnvVarName, getEnvVarForConnection } from '../credentials/providers/env';
@@ -65,40 +68,59 @@ function loadEnvFile(): void {
 }
 
 /**
- * Load the Sherlock configuration from file
+ * Load the Sherlock configuration from file. A warning about the file itself,
+ * such as a legacy config.ts, goes to `warnings` the first time it is read.
  */
-export function loadConfigFile(configPath?: string): SherlockConfig {
+export function loadConfigFile(configPath?: string, warnings: WarningSink = stderrWarnings): SherlockConfig {
     // Load .env file from config directory
     loadEnvFile();
 
     const found = findConfig(configPath);
 
     if (!found) {
-        throw new Error(
-            `No configuration file found.\n\n` +
-            `Run 'sherlock manage' to set up a connection, or add one with ` +
-            `'sherlock connection add <name> ...' (see --help). Sherlock reads a config file at:\n` +
-            `  - ./.sherlock.json (project-local)\n` +
-            `  - ${path.join(getConfigDir(), 'config.json')} (user config)\n\n` +
-            `Or set SHERLOCK_CONFIG environment variable to your config file path.`
+        throw new SherlockError(
+            'CONFIG_NOT_FOUND',
+            `No configuration file found. Sherlock reads ./.sherlock.json (project-local) or ` +
+            `${path.join(getConfigDir(), 'config.json')} (user config), or the file named by --config ` +
+            `or the SHERLOCK_CONFIG environment variable.`,
+            {
+                fix: "Add a connection with 'sherlock connection add <name> ...' (see --help), or run 'sherlock manage'.",
+                details: { searched: discoveredConfigs().map((candidate) => candidate.path) },
+            }
         );
     }
 
     const resolvedPath = found.path;
     cachedConfigSource = found.source;
 
-    // Check if it's a legacy TypeScript config
-    if (resolvedPath.endsWith('.ts')) {
-        return loadLegacyConfig(resolvedPath);
-    }
-
     // Use cached config if available
     if (cachedConfig && cachedConfigPath === resolvedPath) {
         return cachedConfig;
     }
 
+    // Check if it's a legacy TypeScript config
+    if (resolvedPath.endsWith('.ts')) {
+        cachedConfig = loadLegacyConfig(resolvedPath, warnings);
+        cachedConfigPath = resolvedPath;
+        return cachedConfig;
+    }
+
     const content = fs.readFileSync(resolvedPath, 'utf-8');
-    const config = JSON.parse(content) as SherlockConfig;
+    let config: SherlockConfig;
+    try {
+        config = JSON.parse(content) as SherlockConfig;
+    } catch (error) {
+        throw new SherlockError('CONFIG_INVALID', `${resolvedPath} is not valid JSON: ${errorMessage(error)}`, {
+            fix: `Fix the JSON in ${resolvedPath}.`,
+            cause: error,
+        });
+    }
+    if (typeof config?.connections !== 'object' || config.connections === null || Array.isArray(config.connections)) {
+        throw new SherlockError('CONFIG_INVALID', `${resolvedPath} has no "connections" object.`, {
+            fix: `Give ${resolvedPath} a "connections" object, or add one with 'sherlock connection add'.`,
+            details: { setting: 'connections' },
+        });
+    }
 
     cachedConfig = config;
     cachedConfigPath = resolvedPath;
@@ -109,11 +131,13 @@ export function loadConfigFile(configPath?: string): SherlockConfig {
 /**
  * Load legacy TypeScript config file (for backwards compatibility)
  */
-function loadLegacyConfig(configPath: string): SherlockConfig {
-    console.warn(
-        '\x1b[33m[sherlock] Warning: Using legacy config.ts format.\n' +
-        "Run 'sherlock migrate' to convert to the new JSON format.\x1b[0m\n"
-    );
+function loadLegacyConfig(configPath: string, warnings: WarningSink): SherlockConfig {
+    warnings.add({
+        code: 'CONFIG_LEGACY',
+        message: `Using the legacy config.ts format, from ${configPath}.`,
+        fix: "Run 'sherlock migrate' to convert it to the JSON format.",
+        details: { path: configPath },
+    });
 
     // eslint-disable-next-line @typescript-eslint/no-var-requires
     const legacyConfig = require(configPath);
@@ -141,16 +165,19 @@ function loadLegacyConfig(configPath: string): SherlockConfig {
  */
 export function getConnectionConfig(
     connectionName: string,
-    configPath?: string
+    configPath?: string,
+    warnings?: WarningSink
 ): ConnectionConfig {
-    const config = loadConfigFile(configPath);
+    const config = loadConfigFile(configPath, warnings);
 
-    if (!config.connections[connectionName]) {
-        const available = Object.keys(config.connections).join(', ');
-        throw new Error(
-            `Connection "${connectionName}" not found in config.\n\n` +
-            `Available connections: ${available}`
-        );
+    if (!Object.prototype.hasOwnProperty.call(config.connections, connectionName)) {
+        const available = Object.keys(config.connections);
+        throw new SherlockError('CONNECTION_NOT_FOUND', `Connection "${connectionName}" not found in config.`, {
+            fix: available.length > 0
+                ? `Use one of: ${available.join(', ')}.`
+                : "The config has no connections. Add one with 'sherlock connection add <name> ...'.",
+            details: { connection: connectionName, available },
+        });
     }
 
     return config.connections[connectionName];
@@ -351,13 +378,16 @@ export function buildConnectionUrl(
         return `mssql://${encodedUsername}:${encodedPassword}@${formattedHost}:${port || defaultPort}/${database}${suffix}`;
     }
 
-    throw new Error(`Unsupported database type: ${type}`);
+    throw new SherlockError('CONFIG_INVALID', `Unsupported database type: ${type}`, {
+        fix: 'Set "type" to one of: postgres, mysql, mssql, sqlite, redis.',
+        details: { setting: 'type' },
+    });
 }
 
 /**
  * Query param that carries the MySQL `allowPublicKeyRetrieval` option in a
- * connection URL, named as in JDBC. Bun.SQL only accepts the option in its
- * constructor, so `createConnection` strips the param and passes it there.
+ * connection URL, named as in JDBC. The MySQL driver reads it from the URL
+ * and refuses to ask the server for its key without it.
  */
 export const PUBLIC_KEY_RETRIEVAL_PARAM = 'allowPublicKeyRetrieval';
 
@@ -437,7 +467,10 @@ export function rewriteUrlEndpoint(url: string, host: string, port: number): str
         parsed = new URL(url);
     } catch {
         // The URL holds the password, so it is not quoted here.
-        throw new Error('Cannot apply the tunnel: the connection URL cannot be parsed.');
+        throw new SherlockError('CONFIG_INVALID', 'Cannot apply the tunnel: the connection URL cannot be parsed.', {
+            fix: 'Check the connection\'s "url".',
+            details: { setting: 'url' },
+        });
     }
 
     parsed.hostname = host;
@@ -474,14 +507,17 @@ export function isUntrustedSource(source: ConfigSource | null): boolean {
  */
 function assertTunnelAllowed(connectionName: string): void {
     if (isUntrustedSource(cachedConfigSource)) {
-        throw new Error(
+        throw new SherlockError(
+            'CONFIG_UNTRUSTED',
             `Connection "${connectionName}" defines a tunnel, but the config was loaded from ` +
-            `${describeConfigSource(cachedConfigSource)}.\n\n` +
+            `${describeConfigSource(cachedConfigSource!)}. ` +
             `A tunnel runs a command on this machine or uses your platform login, so it is only ` +
-            `honoured from a config you opted into ` +
-            `explicitly: your user config directory, a config next to the binary, --config, or ` +
-            `SHERLOCK_CONFIG.\n\n` +
-            `If you trust this file, re-run with --config ${cachedConfigPath ?? '<path>'}`
+            `honoured from a config you opted into explicitly: your user config directory, a ` +
+            `config next to the binary, --config, or SHERLOCK_CONFIG.`,
+            {
+                fix: `If you trust this file, re-run with --config ${cachedConfigPath ?? '<path>'}`,
+                details: { path: cachedConfigPath },
+            }
         );
     }
 }
@@ -493,12 +529,16 @@ async function applyTunnel(
     connectionName: string,
     config: ConnectionConfig,
     resolved: ResolvedConnectionConfig,
-    configPath?: string
+    configPath: string | undefined,
+    warnings: WarningSink
 ): Promise<ResolvedConnectionConfig> {
     if (!config.tunnel) return resolved;
 
     if (resolved.type === DB_TYPES.SQLITE) {
-        throw new Error(`Connection "${connectionName}": SQLite is a local file and cannot use a tunnel.`);
+        throw new SherlockError('CONFIG_INVALID', `Connection "${connectionName}": SQLite is a local file and cannot use a tunnel.`, {
+            fix: 'Remove "tunnel" from the connection.',
+            details: { connection: connectionName, setting: 'tunnel' },
+        });
     }
 
     assertTunnelAllowed(connectionName);
@@ -506,15 +546,16 @@ async function applyTunnel(
     // Certificate verification checks the hostname, which after tunnelling is a
     // loopback address rather than the database's real name, so it never matches.
     if (normalizeSsl(config.ssl).verify) {
-        console.warn(
-            `\x1b[33m[sherlock] Warning: connection "${connectionName}" tunnels to a local address but ` +
-            `requests full certificate verification. The server certificate will not match it.\n` +
-            `  Use "ssl": true to encrypt without hostname verification.\x1b[0m`
-        );
+        warnings.add(tlsVerifyThroughTunnelWarning(connectionName));
     }
 
     const { host, port } = await ensureTunnel(connectionName, config.tunnel, configPath);
-    return { ...resolved, url: rewriteUrlEndpoint(resolved.url, host, port), tunnelled: true };
+    return {
+        ...resolved,
+        url: rewriteUrlEndpoint(resolved.url, host, port),
+        tunnelled: true,
+        tunnelProvider: resolveTunnel(connectionName, config.tunnel).providerId,
+    };
 }
 
 /**
@@ -523,10 +564,11 @@ async function applyTunnel(
  */
 export async function resolveConnection(
     connectionName: string,
-    configPath?: string
+    configPath?: string,
+    warnings: WarningSink = stderrWarnings
 ): Promise<ResolvedConnectionConfig> {
-    const config = getConnectionConfig(connectionName, configPath);
-    const resolved = await buildResolvedConnection(connectionName, config);
+    const config = getConnectionConfig(connectionName, configPath, warnings);
+    const resolved = await buildResolvedConnection(connectionName, config, warnings);
     resolved.connectionName = connectionName;
     if (config.statementTimeout !== undefined) {
         resolved.statementTimeoutMs = resolveDurationSetting(connectionName, 'statementTimeout', config.statementTimeout);
@@ -534,7 +576,7 @@ export async function resolveConnection(
     if (config.connectTimeout !== undefined) {
         resolved.connectTimeoutMs = resolveDurationSetting(connectionName, 'connectTimeout', config.connectTimeout);
     }
-    return applyTunnel(connectionName, config, resolved, configPath);
+    return applyTunnel(connectionName, config, resolved, configPath, warnings);
 }
 
 /**
@@ -544,9 +586,10 @@ export async function resolveConnection(
  */
 export async function resolveConnectionCredentials(
     connectionName: string,
-    configPath?: string
+    configPath?: string,
+    warnings: WarningSink = stderrWarnings
 ): Promise<ResolvedConnectionConfig> {
-    return buildResolvedConnection(connectionName, getConnectionConfig(connectionName, configPath));
+    return buildResolvedConnection(connectionName, getConnectionConfig(connectionName, configPath, warnings), warnings);
 }
 
 /**
@@ -557,11 +600,38 @@ export function resolveDurationSetting(connectionName: string, setting: string, 
     try {
         return Math.round(parseDuration(value));
     } catch (error) {
-        throw new Error(
-            `Invalid "${setting}" for connection "${connectionName}": ` +
-            (error instanceof Error ? error.message : String(error))
+        throw new SherlockError(
+            'CONFIG_INVALID',
+            `Invalid "${setting}" for connection "${connectionName}": ${errorMessage(error)}`,
+            { fix: `Give "${setting}" as a duration such as 30s or 5m.`, details: { connection: connectionName, setting } }
         );
     }
+}
+
+/**
+ * A credential resolver for one connection, whose failures say which setting
+ * could not be resolved.
+ */
+function credentialsFor(connectionName: string) {
+    const resolver = getCredentialResolver();
+    return {
+        async resolveValue(setting: string, value: string | CredentialRef | undefined): Promise<string | undefined> {
+            try {
+                return await resolver.resolveValue(value);
+            } catch (error) {
+                if (isSherlockError(error) && error.code !== 'CREDENTIAL_MISSING') throw error;
+                throw new SherlockError(
+                    'CREDENTIAL_MISSING',
+                    `The ${setting} of connection "${connectionName}" could not be resolved: ${errorMessage(error)}`,
+                    {
+                        fix: isSherlockError(error) ? error.fix : undefined,
+                        details: { ...(isSherlockError(error) ? error.details : {}), setting },
+                        cause: error,
+                    }
+                );
+            }
+        },
+    };
 }
 
 /**
@@ -569,15 +639,19 @@ export function resolveDurationSetting(connectionName: string, setting: string, 
  */
 async function buildResolvedConnection(
     connectionName: string,
-    config: ConnectionConfig
+    config: ConnectionConfig,
+    warnings: WarningSink
 ): Promise<ResolvedConnectionConfig> {
-    const resolver = getCredentialResolver();
+    const resolver = credentialsFor(connectionName);
 
     // Check for connection URL first
     if (config.url) {
-        const rawUrl = await resolver.resolveValue(config.url);
+        const rawUrl = await resolver.resolveValue('url', config.url);
         if (!rawUrl) {
-            throw new Error('Connection URL resolved to empty value');
+            throw new SherlockError('CREDENTIAL_MISSING', `The URL of connection "${connectionName}" resolved to an empty value.`, {
+                fix: 'Set the variable or keychain entry it names to the connection URL.',
+                details: { setting: 'url' },
+            });
         }
 
         // Auto-detect type from URL
@@ -591,9 +665,9 @@ async function buildResolvedConnection(
 
     // Handle Redis
     if (config.type === DB_TYPES.REDIS) {
-        const host = (await resolver.resolveValue(config.host)) ??
+        const host = (await resolver.resolveValue('host', config.host)) ??
             getEnvVarForConnection(connectionName, 'HOST') ?? 'localhost';
-        const password = (await resolver.resolveValue(config.password)) ??
+        const password = (await resolver.resolveValue('password', config.password)) ??
             getEnvVarForConnection(connectionName, 'PASSWORD');
         const port = config.port || DEFAULT_PORTS[DB_TYPES.REDIS];
         const database = config.database || '0';
@@ -614,7 +688,7 @@ async function buildResolvedConnection(
     // Handle SQLite
     if (config.type === DB_TYPES.SQLITE) {
         const filename = config.filename || config.path || config.database || ':memory:';
-        // Bun.SQL requires file:// protocol for SQLite paths
+        // A file:// URL, which the SQLite driver reads the path from
         let url = filename;
         if (filename !== ':memory:' && !filename.startsWith('file:')) {
             url = `file://${filename}`;
@@ -630,24 +704,27 @@ async function buildResolvedConnection(
 
     // Warn if password is stored as plaintext in config (but not for empty passwords)
     if (config.password && typeof config.password === 'string' && config.password.length > 0) {
-        console.warn(
-            '\x1b[33m[sherlock] Warning: Password for connection "' + connectionName + '" is stored as plaintext.\n' +
-            '  Consider using { "$env": "' + connectionEnvVarName(connectionName, 'PASSWORD') + '" } for better security.\x1b[0m'
-        );
+        warnings.add({
+            code: 'PLAINTEXT_PASSWORD',
+            message: `The password of connection "${connectionName}" is stored as plaintext in the config.`,
+            fix: `Use { "$env": "${connectionEnvVarName(connectionName, 'PASSWORD')}" }, or store it in the ` +
+                `keychain with: sherlock manage`,
+            details: { connection: connectionName },
+        });
     }
 
     // Try environment variable auto-detection first
     // Use ?? instead of || to allow empty string values (e.g., empty passwords)
     const host =
-        (await resolver.resolveValue(config.host)) ??
+        (await resolver.resolveValue('host', config.host)) ??
         getEnvVarForConnection(connectionName, 'HOST');
     const username =
-        (await resolver.resolveValue(config.username)) ??
+        (await resolver.resolveValue('username', config.username)) ??
         getEnvVarForConnection(connectionName, 'USERNAME') ??
         getEnvVarForConnection(connectionName, 'USER');
     // Password defaults to empty string - many local DBs use trust/peer auth
     const password =
-        (await resolver.resolveValue(config.password)) ??
+        (await resolver.resolveValue('password', config.password)) ??
         getEnvVarForConnection(connectionName, 'PASSWORD') ??
         '';
     const database = config.database ?? getEnvVarForConnection(connectionName, 'DATABASE');
@@ -660,10 +737,14 @@ async function buildResolvedConnection(
         if (username == null) missing.push('username');
         if (database == null) missing.push('database');
 
-        throw new Error(
-            `Missing required connection parameters for "${connectionName}": ${missing.join(', ')}\n\n` +
-            `Either provide them in the config file, or set environment variables:\n` +
-            missing.map(f => `  ${connectionEnvVarName(connectionName, f)}`).join('\n')
+        throw new SherlockError(
+            'CONFIG_INVALID',
+            `Missing required connection parameters for "${connectionName}": ${missing.join(', ')}.`,
+            {
+                fix: `Provide them in the config file, or set the environment variables ` +
+                    `${missing.map(f => connectionEnvVarName(connectionName, f)).join(', ')}.`,
+                details: { connection: connectionName, setting: missing[0] },
+            }
         );
     }
 
@@ -834,4 +915,20 @@ export function clearConfigCache(): void {
     cachedConfig = null;
     cachedConfigPath = null;
     cachedConfigSource = null;
+}
+
+/**
+ * Full certificate verification cannot work through a tunnel: the certificate
+ * names the database's real host, and the connection goes to a loopback address.
+ */
+export function tlsVerifyThroughTunnelWarning(connectionName: string): SherlockWarning {
+    return {
+        code: 'TLS_VERIFY_THROUGH_TUNNEL',
+        message:
+            `Connection "${connectionName}" goes through a tunnel but asks for full certificate ` +
+            `verification. The server's certificate names its real host, not the tunnel's local address, ` +
+            `so it will not match.`,
+        fix: 'Use "ssl": true (--ssl require) to encrypt without verifying the host name.',
+        details: { connection: connectionName },
+    };
 }

@@ -63,7 +63,16 @@ After the details, you'll choose secure password storage (OS keychain or env fil
 
 #### Without the wizard
 
-`sherlock connection add` sets up a connection in one command, for scripting or for asking your agent to do it. The password is read from stdin and stored in the OS keychain, so it never appears in the process list or the shell history.
+`sherlock connection add` sets up a connection in one command. The password is stored in the OS keychain, so it never appears in the process list or the shell history.
+
+The easiest way is to ask your agent: "set up a connection to the staging database". It works out the details from your conversation and project, and gives you one command to run, ending in `--password-prompt`. Run it, type the password at the hidden prompt, and tell the agent it's done. The agent never sees the password.
+
+```bash
+sherlock connection add prod --type postgres --host db.example.com --database app --username dbuser \
+  --ssl require --password-prompt
+```
+
+For scripts, pipe the password in with `--password-stdin` instead:
 
 ```bash
 printf '%s' "$PASSWORD" | sherlock connection add prod \
@@ -93,6 +102,10 @@ npx skills update sherlock -g     # the agent skill
 ```
 
 Running the install command again also upgrades the binary.
+
+### Upgrading from 1.x to 2.0
+
+2.0 changes the output of every command, so scripts that parse sherlock's output need converting; see [Output](#output). Agents with the sherlock skill read the new output from `sherlock guide` and need nothing. To keep 1.x output while you convert scripts, stay on the last 1.x release.
 
 ### Upgrading from 1.7.0 or earlier
 
@@ -158,7 +171,34 @@ sherlock -c mydb sample users -n 10             # Random sample rows
 sherlock -c mydb stats users                    # Data profiling (nulls, distinct)
 sherlock -c mydb indexes users                  # Show table indexes
 sherlock -c mydb fk users                       # Foreign key relationships
+sherlock -c mydb query "SELECT * FROM events" --out events.jsonl   # Every row, to a file
 ```
+
+### Output
+
+Every command prints one JSON object on stdout, on one line:
+
+```json
+{"ok":true,"data":{"columns":[{"name":"id","type":"int4"},{"name":"email","type":"text"}],"rows":[[1,"a@example.com"]],"rowCount":1,"truncated":false},"warnings":[],"meta":{"contract":2,"command":"query","connection":"mydb","dbType":"postgres","durationMs":12,"version":"2.0.0"}}
+```
+
+- `ok` says whether the command did what was asked, and the exit code agrees: 0, 1, or 2 for a usage error.
+- On failure, `error` has a stable `code` (such as `AUTH_FAILED`, `TUNNEL_DOWN` or `QUERY_FAILED`), a `message`, a `fix` saying what to do next, and `details`. `sherlock guide` lists every code.
+- `warnings` holds things that did not stop the command, such as a result that was cut or a password stored in plaintext.
+- Rows come back as arrays, with the column names and types once in `columns`.
+- Results are capped at 200 rows, 500 characters per cell and 32 KB in all, so one query cannot fill an agent's context. Anything cut is reported in `truncated` and a `RESULT_TRUNCATED` warning. Raise the caps with `--max-rows`, `--max-cell` and `--max-bytes`, remove them with `--no-limit`, or set `maxRows`, `maxCellChars` and `maxBytes` on a connection. `--out <file.jsonl|file.csv>` writes every row to a file instead and returns a preview.
+- `-f human` prints tables and text for reading instead of the envelope.
+
+Converting a script from 1.x:
+
+| 1.x | 2.0 |
+| --- | --- |
+| `.rows[]` (objects) | `.data as $d \| $d.rows[] \| [[$d.columns[].name], .] \| transpose \| map({(.[0]): .[1]}) \| add` |
+| `.rows \| length` | `.data.rowCount` |
+| `.error` | `.error.message`, and branch on `.error.code` |
+| `.tables[]` | `.data.tables[]` |
+| `.connections[]` | `.data.connections[].name` |
+| exit code only | exit code only, now also non-zero for a failed query |
 
 ## Configuration
 
@@ -205,6 +245,16 @@ Two settings on a connection limit how long sherlock waits. Both take a duration
 |---|---|---|
 | `statementTimeout` | `60s` | How long one statement may run before the database cancels it. `query --timeout 5m` overrides it for one query. |
 | `connectTimeout` | `10s` | How long to wait for the database to answer when connecting. Through a tunnel whose far end is gone this is what makes the connection fail quickly, with an error that says the tunnel is the problem. |
+
+### Result caps
+
+Three numeric settings change a connection's [result caps](#output). The command-line flags override them for one command.
+
+| Setting | Default | Flag |
+| --- | --- | --- |
+| `maxRows` | `200` | `--max-rows` |
+| `maxCellChars` | `500` | `--max-cell` |
+| `maxBytes` | `32768` | `--max-bytes` |
 
 ### SSL/TLS
 
@@ -414,7 +464,7 @@ sherlock doctor northflank-prod
 6. the session is encrypted, when `ssl` is set;
 7. `SELECT 1` succeeds in a read-only transaction (PING for Redis), and whether the server is a primary or a replica.
 
-It prints JSON and exits 1 when a check fails.
+When a check fails, `ok` is false, `error.code` is that check's cause (such as `AUTH_FAILED` or `TUNNEL_DOWN`), `error.details.check` names the check, and `data.checks` holds every check that ran.
 
 #### Adding a tunnel provider
 
@@ -506,11 +556,11 @@ sherlock -c <conn> command GET mykey   # Any read-only Redis command
 
 ```bash
 sherlock manage               # Connection manager (add, edit, delete, test, keychain, tunnel)
-sherlock connection list      # List connections and their targets (JSON)
+sherlock connection list      # List connections and their targets
 sherlock doctor <conn>        # Check a connection step by step
 sherlock guide [topic]        # Instructions for AI agents (topics: transfer)
 sherlock connection add <n>   # Add a connection non-interactively (see --help)
-sherlock update               # Update the binary to the latest release
+sherlock update               # Update the binary to the latest release (--yes outside a terminal)
 sherlock tunnel status        # Show running tunnels
 sherlock tunnel stop [conn]   # Stop one tunnel, or all when no name is given
 sherlock config export [conn] # Write connections and passwords to an encrypted file
@@ -524,7 +574,11 @@ sherlock config import <file> # Add the connections from an export file
 -u, --url <url>            # Connect to a database URL without saving it
 --config <path>            # Override config file location
 --no-log                   # Disable query logging (overrides config)
--f, --format <format>      # Output format: json (default) or markdown
+-f, --format <format>      # json (the envelope, default) or human (markdown is another name for it)
+--max-rows <n>             # Most rows a result returns (default 200)
+--max-cell <n>             # Most characters of a text cell (default 500)
+--max-bytes <n>            # Most bytes of a whole result as JSON (default 32768)
+--no-limit                 # Remove all three caps
 ```
 
 ## Query Logging
@@ -584,10 +638,10 @@ sherlock -u "postgres://dbuser:password@localhost:5432/chinook" query "SELECT na
 
 - **Read-only enforced** - SQL: INSERT, UPDATE, DELETE, DROP etc. are blocked, and the database itself refuses writes (see below). Redis: SET, DEL, FLUSHDB etc. are blocked
 - **No default connection** - A query names its connection with `-c`, or runs inside a directory configured for one
-- **Secure credential storage** - Keychain or env vars. A plaintext password in config works but is warned about on every query
+- **Secure credential storage** - Keychain or env vars. A plaintext password in config works, with a `PLAINTEXT_PASSWORD` warning on every command that uses it
 - **Config permissions** - Files created with 0600 (owner read/write only)
 - **Query validation** - SQL: one statement only, and dangerous keywords blocked even in subqueries. String literals, quoted identifiers and comments are set aside first, following each database's quoting rules, so `WHERE action = 'delete'` is allowed. MySQL executable comments (`/*! ... */`) are refused. Redis: whitelist of allowed commands with subcommand validation
-- **Read-only at the database** - On PostgreSQL and MySQL/MariaDB every statement runs inside a read-only transaction that is always rolled back, so a write the keyword check cannot see, such as one made by a function, is refused by the database. The statement is sent as a prepared statement, which the server refuses to run with a second statement chained after it, so a statement cannot end the transaction and write after it even if the keyword check misreads it. SQLite connections are opened with `query_only`, and SQLite runs only the first statement. SQL Server has neither a read-only transaction nor a single-statement protocol, so there the keyword check is the only guard
+- **Read-only at the database** - On PostgreSQL and MySQL/MariaDB every statement runs inside a read-only transaction that is always rolled back, so a write the keyword check cannot see, such as one made by a function, is refused by the database. On MySQL the session is read-only too, because a DDL statement commits the transaction implicitly and would otherwise run outside it. The statement is sent through a protocol on which the server refuses a second statement chained after it (a cursor on PostgreSQL, a connection without multiple statements on MySQL), so a statement cannot end the transaction and write after it even if the keyword check misreads it. SQLite databases are opened read-only, and SQLite runs only the first statement. SQL Server has neither a read-only transaction nor a single-statement protocol, so there the keyword check is the only guard
 - **Statement timeout** - Every statement is cancelled after 60 seconds by default. Set `"statementTimeout": "5m"` on a connection to change it, or pass `query --timeout`
 - **Connect timeout** - A connection that gets no answer within 10 seconds fails, rather than waiting on the driver's own longer default. A tunnel whose far end is gone still accepts connections locally, so this is what makes it fail fast, with an error that names the tunnel and how to restart it. Set `"connectTimeout": "30s"` on a connection that is slow to answer
 

@@ -4,6 +4,7 @@
  */
 
 import type { DbType } from '../db-types';
+import { SherlockError, type QueryRefusedReason } from '../errors';
 import { scanSql, SQL_DIALECTS } from './scan';
 
 /** Keywords that indicate read-only query types */
@@ -61,6 +62,10 @@ const DANGEROUS_KEYWORDS = [
 export interface ValidationResult {
     valid: boolean;
     error?: string;
+    /** Why the query was refused, when it was */
+    reason?: QueryRefusedReason;
+    /** The keyword that was refused, for reason KEYWORD */
+    keyword?: string;
 }
 
 /**
@@ -83,7 +88,7 @@ export function validateReadOnlyQuery(query: string, dbType?: DbType): Validatio
     for (const dialect of dialects) {
         const scanned = scanSql(query, dialect);
         if (!scanned.ok) {
-            return { valid: false, error: `${scanned.error}. Only read-only queries are allowed.` };
+            return { valid: false, reason: 'UNPARSEABLE', error: `${scanned.error}. Only read-only queries are allowed.` };
         }
         const result = validateCode(scanned.code);
         if (!result.valid) return result;
@@ -104,6 +109,7 @@ function validateCode(code: string): ValidationResult {
     if (!startsWithAllowed) {
         return {
             valid: false,
+            reason: 'NOT_READ_ONLY',
             error: 'Only SELECT, SHOW, DESCRIBE, EXPLAIN, and WITH queries are allowed (read-only mode)',
         };
     }
@@ -113,6 +119,7 @@ function validateCode(code: string): ValidationResult {
     if (semicolonCount > 1 || (semicolonCount === 1 && !code.trim().endsWith(';'))) {
         return {
             valid: false,
+            reason: 'MULTIPLE_STATEMENTS',
             error: 'Multiple statements are not allowed (read-only mode)',
         };
     }
@@ -122,6 +129,8 @@ function validateCode(code: string): ValidationResult {
     if (dangerousKeyword) {
         return {
             valid: false,
+            reason: 'KEYWORD',
+            keyword: dangerousKeyword,
             error:
                 `Dangerous keyword detected: ${dangerousKeyword}. Only read-only queries are allowed. ` +
                 `If ${dangerousKeyword} is a column or table name here, quote it as an identifier ` +
@@ -163,4 +172,17 @@ function findDangerousKeyword(query: string): string | null {
         }
     }
     return null;
+}
+
+/** The error for a query the read-only check refused */
+export function queryRefusedError(result: ValidationResult, fix?: string): SherlockError {
+    return new SherlockError('QUERY_REFUSED', result.error ?? 'The query is not read-only.', {
+        fix: fix ?? (result.reason === 'KEYWORD'
+            ? 'Remove the statement that writes, or quote the word if it is a name.'
+            : 'Send one read-only statement: SELECT, WITH, SHOW, DESCRIBE or EXPLAIN.'),
+        details: {
+            reason: result.reason ?? 'NOT_READ_ONLY',
+            ...(result.keyword !== undefined && { keyword: result.keyword }),
+        },
+    });
 }
