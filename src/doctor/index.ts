@@ -276,7 +276,7 @@ function connectSteps(connectionName: string, configPath: string | undefined, st
 
     const tunnelStep: DoctorStep = async () => {
         try {
-            resolved = await resolveConnection(connectionName, configPath, state.warnings);
+            resolved = { ...await resolveConnection(connectionName, configPath, state.warnings), diagnosing: true };
         } catch (error) {
             if (!state.tunnel) {
                 return [failedCheck('connect', error, 'INTERNAL')];

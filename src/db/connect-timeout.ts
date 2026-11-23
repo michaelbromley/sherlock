@@ -11,6 +11,7 @@
 import { parseDuration } from '../tunnel/config';
 import type { ResolvedConnectionConfig } from '../config/types';
 import { SherlockError } from '../errors';
+import { isIP } from 'net';
 
 /** How long a connection may take to open when the connection does not say */
 export const DEFAULT_CONNECT_TIMEOUT = '10s';
@@ -79,6 +80,46 @@ function isRefused(error: unknown): boolean {
         ));
 }
 
+/** Whether a host is this machine */
+function isLoopback(host: string): boolean {
+    const bare = host.replace(/^\[|\]$/g, '');
+    return bare === 'localhost' || bare === '::1' || /^127\./.test(bare);
+}
+
+/**
+ * Nothing answered at the host and port. Say only what can be true: an IP
+ * address cannot fail to resolve, and a database on this machine is most
+ * likely not running, not waiting for a tunnel.
+ */
+function refusedError(
+    error: unknown,
+    where: string | null,
+    endpoint: { host: string; port?: number } | null,
+    doctor: string
+): SherlockError {
+    const host = endpoint?.host ?? '';
+    const notResolved = (error as { code?: unknown } | null)?.code === 'ENOTFOUND' ||
+        (error as { code?: unknown } | null)?.code === 'EAI_AGAIN';
+    const target = where ?? 'the database';
+
+    let message: string;
+    let fix: string;
+    if (notResolved) {
+        message = `Could not connect to ${target}: the host name ${host} does not resolve.`;
+        fix = `Check the host name${doctor}. A database that is only reachable through a port-forward needs a "tunnel" on the connection.`;
+    } else if (isLoopback(host)) {
+        message = `Could not connect to ${target}: nothing is listening there.`;
+        fix = `Check that the database is running on this machine and listening on ${target}, ` +
+            `for example with 'docker compose ps' for a Docker container${doctor}.`;
+    } else {
+        message = isIP(host) || !host
+            ? `Could not connect to ${target}: nothing answered there.`
+            : `Could not connect to ${target}: nothing answered there, or the host name does not resolve.`;
+        fix = `Check the host and port${doctor}. A database that is only reachable through a port-forward needs a "tunnel" on the connection.`;
+    }
+    return new SherlockError('CONNECT_REFUSED', message, { fix, details: { ...endpoint }, cause: error });
+}
+
 /** The host and port of a connection URL, never its credentials */
 function endpointOf(url: string): { host: string; port?: number } | null {
     try {
@@ -99,8 +140,10 @@ export function explainConnectFailure(error: unknown, config: ResolvedConnection
     const name = config.connectionName;
     const endpoint = endpointOf(config.url);
     const where = endpoint ? (endpoint.port ? `${endpoint.host}:${endpoint.port}` : endpoint.host) : null;
+    // Suggest doctor, except from doctor itself: it is already running it.
+    const doctor = name && !config.diagnosing ? `, or run 'sherlock doctor ${name}'` : '';
     const tunnelFix = name
-        ? `Restart the tunnel with 'sherlock tunnel stop ${name}' and try again, or run 'sherlock doctor ${name}'.`
+        ? `Restart the tunnel with 'sherlock tunnel stop ${name}' and try again${doctor}.`
         : undefined;
     const tunnelDetails = { provider: config.tunnelProvider, ...endpoint };
 
@@ -122,16 +165,7 @@ export function explainConnectFailure(error: unknown, config: ResolvedConnection
                 { fix: tunnelFix, details: tunnelDetails, cause: error }
             );
         }
-        return new SherlockError(
-            'CONNECT_REFUSED',
-            `Could not connect to ${where ?? 'the database'}: nothing answered there, or the host name does not resolve.`,
-            {
-                fix: `Check the host and port${name ? `, or run 'sherlock doctor ${name}'` : ''}. ` +
-                    `A database that is only reachable through a port-forward needs a "tunnel" on the connection.`,
-                details: { ...endpoint },
-                cause: error,
-            }
-        );
+        return refusedError(error, where, endpoint, doctor);
     }
 
     if (!isConnectTimeoutError(error)) return error;
@@ -155,8 +189,7 @@ export function explainConnectFailure(error: unknown, config: ResolvedConnection
         'CONNECT_TIMEOUT',
         `The database did not answer within ${waited}.`,
         {
-            fix: `Check that the host and port are right and reachable from this machine` +
-                (name ? `, or run 'sherlock doctor ${name}'` : '') + `. ${setting}`,
+            fix: `Check that the host and port are right and reachable from this machine${doctor}. ${setting}`,
             details,
             cause: error,
         }

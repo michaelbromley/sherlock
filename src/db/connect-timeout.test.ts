@@ -122,6 +122,31 @@ describe('a database that never answers', () => {
 describe('explainConnectFailure for unreachable servers', () => {
     const refused = (code: string, message = 'Failed to connect') => Object.assign(new Error(message), { code });
 
+    it('says a database on this machine is not running, without suggesting a tunnel or DNS', () => {
+        const explained = explainConnectFailure(refused('ECONNREFUSED', 'connect ECONNREFUSED'), {
+            type: 'postgres', url: 'postgres://u:p@127.0.0.1:55433/d', connectionName: 'shop',
+        }) as SherlockError;
+        expect(explained.code).toBe('CONNECT_REFUSED');
+        expect(explained.message).toBe('Could not connect to 127.0.0.1:55433: nothing is listening there.');
+        expect(explained.fix).toMatch(/database is running.*docker compose ps.*sherlock doctor shop/);
+        expect(`${explained.message} ${explained.fix}`).not.toMatch(/tunnel|resolve/);
+    });
+
+    it('says a host name does not resolve only when it does not', () => {
+        const unresolved = explainConnectFailure(refused('ENOTFOUND', 'getaddrinfo ENOTFOUND db.internal'), {
+            type: 'postgres', url: 'postgres://u:p@db.internal:5432/d',
+        }) as SherlockError;
+        expect(unresolved.message).toBe('Could not connect to db.internal:5432: the host name db.internal does not resolve.');
+        const ip = explainConnectFailure(refused('ECONNREFUSED'), { type: 'postgres', url: 'postgres://u:p@10.0.0.5:5432/d' }) as SherlockError;
+        expect(ip.message).toBe('Could not connect to 10.0.0.5:5432: nothing answered there.');
+    });
+
+    it('does not suggest doctor from doctor itself', () => {
+        const config = { type: 'postgres' as const, url: 'postgres://u:p@127.0.0.1:55433/d', connectionName: 'shop', diagnosing: true };
+        const explained = explainConnectFailure(refused('ECONNREFUSED'), config) as SherlockError;
+        expect(explained.fix).not.toContain('sherlock doctor');
+    });
+
     it('names the host and port, never the credentials', () => {
         const explained = explainConnectFailure(refused('ECONNREFUSED', 'connect ECONNREFUSED'), {
             type: 'postgres', url: 'postgres://app:hunter2@db.internal:5433/app', connectionName: 'prod',

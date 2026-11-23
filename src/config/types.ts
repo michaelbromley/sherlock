@@ -137,4 +137,6 @@ export interface ResolvedConnectionConfig {
     tunnelled?: boolean;
     /** The tunnel's provider, e.g. "northflank" or "command", when tunnelled */
     tunnelProvider?: string;
+    /** Set by doctor, so errors do not suggest running doctor */
+    diagnosing?: boolean;
 }
