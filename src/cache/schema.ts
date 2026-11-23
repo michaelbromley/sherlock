@@ -6,13 +6,15 @@
 import type { FetchedRows } from '../db/adapter';
 import * as fs from 'fs';
 import * as path from 'path';
+import { createHash } from 'crypto';
 import { getCacheDir, ensureCacheDir } from '../config/paths';
 
 /** File permissions for sensitive files (owner read/write only) */
 const SECURE_FILE_MODE = 0o600;
 
 /** Valid SQL identifier pattern (for path safety) */
-const SAFE_IDENTIFIER = /^[a-zA-Z_][a-zA-Z0-9_]*$/;
+/** Connection names that can be file names as they are: no slash, no leading dot */
+const SAFE_FILE_NAME = /^[A-Za-z0-9_][A-Za-z0-9_.-]*$/;
 
 /** Schema info structure (matches introspect output) */
 /** Every table's columns, as `describe` gives them, before any cap */
@@ -40,11 +42,14 @@ function setSecurePermissions(filePath: string): void {
  * Get the cache file path for a connection's schema
  */
 export function getSchemaCachePath(connectionName: string): string {
-    // SECURITY: Validate connection name to prevent path traversal
-    if (!SAFE_IDENTIFIER.test(connectionName)) {
-        throw new Error(`Invalid connection name for caching: "${connectionName}"`);
-    }
-    return path.join(getCacheDir(), `${connectionName}.schema.json`);
+    // SECURITY: the name becomes a file name, so it must not leave the cache
+    // directory. A name that could (a slash, a leading dot) or that is not a
+    // plain file name is cached under a hash of itself instead. Every
+    // connection name gets a cache; the file records the name it belongs to.
+    const stem = SAFE_FILE_NAME.test(connectionName)
+        ? connectionName
+        : `connection-${createHash('sha256').update(connectionName).digest('hex').slice(0, 16)}`;
+    return path.join(getCacheDir(), `${stem}.schema.json`);
 }
 
 /**
