@@ -9,7 +9,8 @@
 import * as path from 'path';
 import type { ConnectionConfig, CredentialRef } from './types';
 import { parseConnectionUrl } from './index';
-import { DB_TYPES, isValidDbType, type DbType } from '../db-types';
+import { DB_TYPES, detectDbTypeFromUrl, isValidDbType, type DbType } from '../db-types';
+import { lookupEnv, projectEnv } from './env-file';
 import { resolveTunnel, tunnelProviderIds, tunnelShorthand } from '../tunnel/providers';
 import type { TunnelConfig } from '../tunnel/types';
 import { usageError, type SherlockError } from '../errors';
@@ -35,6 +36,8 @@ export interface ConnectionAddOptions {
     passwordStdin?: boolean;
     /** True when the password is asked for at a hidden prompt and stored in the keychain */
     passwordPrompt?: boolean;
+    /** The variable that holds the whole connection URL, read from the project's .env or the environment */
+    urlEnv?: string;
 
     tunnelCommand?: string;
     tunnelLocalPort?: string;
@@ -195,6 +198,7 @@ const TUNNEL_LOCAL_HOST = '127.0.0.1';
  * `--password-env` produces an environment reference.
  */
 export function buildConnectionConfig(name: string, opts: ConnectionAddOptions): ConnectionConfig {
+    if (opts.urlEnv !== undefined) return buildUrlEnvConfig(name, opts);
     if (opts.fromUrl && (opts.host || opts.port || opts.username || opts.database)) {
         throw inputError(
             '--from-url cannot be combined with --host, --port, --username or --database.'
@@ -295,6 +299,66 @@ export function buildConnectionConfig(name: string, opts: ConnectionAddOptions):
     if (opts.directory) config.directory = path.resolve(opts.directory);
     if (tunnel) config.tunnel = tunnel;
 
+    return config;
+}
+
+/** Environment variable names sherlock accepts for --url-env */
+const ENV_VAR_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
+
+/**
+ * A connection whose whole URL comes from a variable, such as a project's
+ * DATABASE_URL. Only the variable's name is stored. The URL holds every
+ * setting the other flags would give, so they cannot be combined with it.
+ */
+function buildUrlEnvConfig(name: string, opts: ConnectionAddOptions): ConnectionConfig {
+    const variable = opts.urlEnv!;
+    if (!ENV_VAR_NAME.test(variable)) {
+        throw inputError(`Invalid --url-env "${variable}". Give the name of a variable, such as DATABASE_URL.`);
+    }
+    const conflicting = [
+        opts.fromUrl !== undefined && '--from-url',
+        opts.host !== undefined && '--host',
+        opts.port !== undefined && '--port',
+        opts.username !== undefined && '--username',
+        opts.database !== undefined && '--database',
+        opts.passwordStdin && '--password-stdin',
+        opts.passwordPrompt && '--password-prompt',
+        opts.passwordEnv !== undefined && '--password-env',
+    ].filter(Boolean);
+    if (conflicting.length > 0) {
+        throw inputError(
+            `--url-env cannot be combined with ${conflicting.join(', ')}: the URL already gives the ` +
+            `host, port, user, database and password.`
+        );
+    }
+
+    const tunnel = buildTunnel(opts);
+    if (tunnel) resolveTunnel(name, tunnel);
+
+    const config: ConnectionConfig = { url: { $env: variable } };
+    const directory = opts.directory ? path.resolve(opts.directory) : undefined;
+
+    // Read the URL once to learn the database type. It is not stored or shown.
+    const found = lookupEnv(variable, projectEnv(directory));
+    const urlType = found ? detectDbTypeFromUrl(found.value) ?? undefined : undefined;
+    if (opts.type !== undefined) {
+        if (!isValidDbType(opts.type)) {
+            throw inputError(`Invalid --type "${opts.type}". Use one of: postgres, mysql, mssql, sqlite, redis.`);
+        }
+        if (urlType && urlType !== opts.type) {
+            throw inputError(`--type ${opts.type} contradicts the ${urlType} URL in ${variable}.`);
+        }
+        config.type = opts.type;
+    } else if (urlType) {
+        config.type = urlType;
+    }
+    if (opts.ssl !== undefined) {
+        const ssl = parseSsl(opts.ssl);
+        if (ssl !== undefined) config.ssl = ssl;
+    }
+    if (opts.logging) config.logging = true;
+    if (directory) config.directory = directory;
+    if (tunnel) config.tunnel = tunnel;
     return config;
 }
 

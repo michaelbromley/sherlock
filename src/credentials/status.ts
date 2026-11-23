@@ -9,6 +9,7 @@ import { DB_TYPES } from '../db-types';
 import { connectionEnvVarName } from './providers/env';
 import { hasKeychainPassword } from './providers/keychain';
 import { errorMessage } from '../errors';
+import { lookupEnv, projectEnv, type ProjectEnv } from '../config/env-file';
 
 export interface CredentialStatus {
     /** False when the credential is configured but cannot be found */
@@ -30,7 +31,8 @@ export function credentialSource(
     connectionName: string,
     field: CredentialField,
     value: string | CredentialRef | undefined,
-    env: Env = process.env
+    env: Env = process.env,
+    project?: ProjectEnv
 ): CredentialStatus | null {
     if (value === undefined) {
         if (field === 'url') return null;
@@ -46,9 +48,15 @@ export function credentialSource(
         return { ok: true, source: field === 'password' || field === 'url' ? 'plaintext in config.json' : 'config.json' };
     }
     if ('$env' in value) {
-        return env[value.$env] !== undefined
-            ? { ok: true, source: `environment variable ${value.$env}` }
-            : { ok: false, source: `environment variable ${value.$env}, which is not set` };
+        const found = lookupEnv(value.$env, project, env);
+        if (found?.from === 'environment') return { ok: true, source: `environment variable ${value.$env}` };
+        if (found) return { ok: true, source: `${value.$env} in ${found.from}` };
+        return {
+            ok: false,
+            source: project
+                ? `${value.$env}, which is not set in ${project.file} or the environment`
+                : `environment variable ${value.$env}, which is not set`,
+        };
     }
     const ref = value.$keychain;
     const account = typeof ref === 'string' ? ref : ref.account;
@@ -67,6 +75,12 @@ export function credentialSource(
 /** Where a connection's password comes from, including when it needs none */
 export function passwordStatus(name: string, config: ConnectionConfig, env: Env = process.env): CredentialStatus {
     if (config.type === DB_TYPES.SQLITE) return { ok: true, source: 'not needed (SQLite)' };
-    if (config.url !== undefined) return { ok: true, source: 'part of the connection URL' };
-    return credentialSource(name, 'password', config.password, env) ?? { ok: true, source: 'none configured' };
+    const project = projectEnv(config.directory);
+    if (config.url !== undefined) {
+        if (typeof config.url === 'string') return { ok: true, source: 'part of the connection URL' };
+        // The URL, and so the password in it, is read from somewhere: say where, and whether it is there.
+        const url = credentialSource(name, 'url', config.url, env, project)!;
+        return { ok: url.ok, source: `part of the connection URL, from ${url.source}` };
+    }
+    return credentialSource(name, 'password', config.password, env, project) ?? { ok: true, source: 'none configured' };
 }

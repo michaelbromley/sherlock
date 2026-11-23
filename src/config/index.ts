@@ -9,6 +9,7 @@ import {
     type ConfigSource,
 } from './paths';
 import { getCredentialResolver } from '../credentials';
+import { parseEnvFile, projectEnv } from './env-file';
 import { SherlockError, isSherlockError, errorMessage } from '../errors';
 import { stderrWarnings, type SherlockWarning, type WarningSink } from '../output/warnings';
 import type { SherlockConfig, ConnectionConfig, ResolvedConnectionConfig, CredentialRef, SslConfig } from './types';
@@ -40,26 +41,7 @@ function loadEnvFile(): void {
     const envPath = getEnvFilePath();
     if (!fs.existsSync(envPath)) return;
 
-    const content = fs.readFileSync(envPath, 'utf-8');
-    const lines = content.split('\n');
-
-    for (const line of lines) {
-        const trimmed = line.trim();
-        // Skip empty lines and comments
-        if (!trimmed || trimmed.startsWith('#')) continue;
-
-        const eqIndex = trimmed.indexOf('=');
-        if (eqIndex === -1) continue;
-
-        const key = trimmed.slice(0, eqIndex).trim();
-        let value = trimmed.slice(eqIndex + 1).trim();
-
-        // Remove quotes if present
-        if ((value.startsWith('"') && value.endsWith('"')) ||
-            (value.startsWith("'") && value.endsWith("'"))) {
-            value = value.slice(1, -1);
-        }
-
+    for (const [key, value] of Object.entries(parseEnvFile(fs.readFileSync(envPath, 'utf-8')))) {
         // Only set if not already set in environment
         if (process.env[key] === undefined) {
             process.env[key] = value;
@@ -612,12 +594,15 @@ export function resolveDurationSetting(connectionName: string, setting: string, 
  * A credential resolver for one connection, whose failures say which setting
  * could not be resolved.
  */
-function credentialsFor(connectionName: string) {
+function credentialsFor(connectionName: string, directory: string | undefined) {
     const resolver = getCredentialResolver();
+    // A connection that names its project reads $env references from the
+    // project's .env first: see ./env-file.
+    const context = { projectEnv: projectEnv(directory) };
     return {
         async resolveValue(setting: string, value: string | CredentialRef | undefined): Promise<string | undefined> {
             try {
-                return await resolver.resolveValue(value);
+                return await resolver.resolveValue(value, context);
             } catch (error) {
                 if (isSherlockError(error) && error.code !== 'CREDENTIAL_MISSING') throw error;
                 throw new SherlockError(
@@ -642,7 +627,7 @@ async function buildResolvedConnection(
     config: ConnectionConfig,
     warnings: WarningSink
 ): Promise<ResolvedConnectionConfig> {
-    const resolver = credentialsFor(connectionName);
+    const resolver = credentialsFor(connectionName, config.directory);
 
     // Check for connection URL first
     if (config.url) {

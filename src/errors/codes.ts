@@ -141,6 +141,10 @@ export const WARNING_CODES = {
         meaning: 'connection add stored a connection with no password.',
         details: ['connection'],
     },
+    URL_NOT_FOUND: {
+        meaning: 'connection add --url-env named a variable that is not set yet, in the project\'s .env or the environment.',
+        details: ['connection', 'variable'],
+    },
     TLS_VERIFY_THROUGH_TUNNEL: {
         meaning: 'Full certificate verification is set on a tunnelled connection.',
         details: ['connection'],

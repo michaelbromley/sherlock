@@ -76,7 +76,7 @@ function isCompiledBinary(): boolean {
  */
 export function compareSemver(a: string, b: string): number {
     const parse = (version: string) => {
-        const [core, pre] = version.replace(/^v/, '').split('+')[0].split(/-(.*)/s);
+        const [core, pre] = version.replace(/^v/, '').split('+')[0].split(/-(.*)/);
         return { core: core.split('.').map((n) => Number(n) || 0), pre: pre ? pre.split('.') : [] };
     };
     const pa = parse(a);

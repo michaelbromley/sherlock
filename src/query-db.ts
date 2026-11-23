@@ -49,6 +49,7 @@ import { ResultFile, resultFileFormat } from './output/result-file';
 import { SherlockError, usageError, errorMessage, exitCodeFor } from './errors';
 import { Invocation, printEnvelope } from './output/envelope';
 import { printWarning, type SherlockWarning } from './output/warnings';
+import { lookupEnv, projectEnv } from './config/env-file';
 
 // Database
 import { withConnection, withConnectionFromConfig, type ConnectionOptions, type SqlAdapter } from './db/connection';
@@ -159,6 +160,20 @@ function connectionAddWarnings(name: string, config: import('./config/types').Co
     }
     if (config.tunnel && typeof config.ssl === 'object' && config.ssl.rejectUnauthorized) {
         warnings.push(tlsVerifyThroughTunnelWarning(name));
+    }
+    if (config.url !== undefined && typeof config.url === 'object' && '$env' in config.url) {
+        const variable = config.url.$env;
+        const project = projectEnv(config.directory);
+        if (!lookupEnv(variable, project)) {
+            warnings.push({
+                code: 'URL_NOT_FOUND',
+                message: `${variable} is not set ${project ? `in ${project.file} or ` : ''}in the environment yet.`,
+                fix: project || !config.directory
+                    ? `Set ${variable} before using the connection${config.directory ? '' : ', or add --directory <project> to read it from that project\'s .env'}.`
+                    : `Add ${variable} to ${config.directory}/.env, or set it in the environment.`,
+                details: { connection: name, variable },
+            });
+        }
     }
     return warnings;
 }
@@ -1238,6 +1253,7 @@ TUNNEL_DOWN), details.check names the check, and data still holds every check.`)
         .option('--password-stdin', 'read the password from stdin and store it in the OS keychain')
         .option('--password-prompt', 'ask for the password at a hidden prompt and store it in the OS keychain: for a command an agent gives a person to run')
         .option('--password-env <var>', 'read the password from this environment variable at query time')
+        .option('--url-env <var>', "read the whole connection URL from this variable, e.g. DATABASE_URL; with --directory, from that project's .env first")
         .option('--tunnel-command <cmd>', 'port-forwarding command; use {{port}} where it takes a local port')
         .option('--tunnel-northflank <project/addon>', 'a northflank CLI command tunnel (prefer --tunnel-provider northflank)')
         .option('--tunnel-provider <id>', 'open the tunnel with a provider instead of a command, e.g. northflank')

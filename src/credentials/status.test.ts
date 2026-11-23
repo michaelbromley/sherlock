@@ -4,7 +4,14 @@ import { credentialSource, passwordStatus } from './status';
 describe('passwordStatus', () => {
     it('knows a SQLite connection or a URL needs no separate password', () => {
         expect(passwordStatus('db', { type: 'sqlite', filename: 'x.db' })).toEqual({ ok: true, source: 'not needed (SQLite)' });
-        expect(passwordStatus('db', { url: { $env: 'DB_URL' } })).toEqual({ ok: true, source: 'part of the connection URL' });
+        expect(passwordStatus('db', { url: 'postgres://u@h/d' })).toEqual({ ok: true, source: 'part of the connection URL' });
+        // A URL held in a variable: where it comes from, and whether it is there
+        expect(passwordStatus('db', { url: { $env: 'DB_URL' } }, { DB_URL: 'postgres://u:p@h/d' })).toEqual({
+            ok: true, source: 'part of the connection URL, from environment variable DB_URL',
+        });
+        expect(passwordStatus('db', { url: { $env: 'DB_URL' } }, {})).toEqual({
+            ok: false, source: 'part of the connection URL, from environment variable DB_URL, which is not set',
+        });
     });
 
     it('reports an environment variable reference, set or not, without its value', () => {

@@ -72,6 +72,12 @@ sherlock connection add prod --type postgres --host db.example.com --database ap
   --ssl require --password-prompt
 ```
 
+When the project already has a database URL in its `.env`, point the connection at it. Sherlock stores only the variable's name, and reads the URL from that project's `.env` on each query, before the environment:
+
+```bash
+sherlock connection add shop --url-env DATABASE_URL --directory .
+```
+
 For scripts, pipe the password in with `--password-stdin` instead:
 
 ```bash

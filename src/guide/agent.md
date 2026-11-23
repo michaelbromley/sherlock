@@ -70,7 +70,16 @@ sherlock -c <conn> command GET mykey    # Execute any read-only Redis command
 
 Add a connection without the interactive wizard. The password is stored in the OS keychain, and never appears in the process list, the shell history, or your context.
 
-**When the user asks you to set up a connection, do everything except the password.** Work out the details from the conversation and the project: the type, host, port, database, username, SSL, a tunnel, and a short connection name. Ask only for what you cannot find. Then give the user one command to run in their own terminal, ending in `--password-prompt`:
+**When the project already has a database URL**, such as `DATABASE_URL` in its `.env`, set the connection up yourself. Sherlock stores only the variable's name, and reads the URL from the project's `.env` on each query:
+
+```bash
+sherlock connection add shop --url-env DATABASE_URL --directory /path/to/project
+sherlock doctor shop
+```
+
+Run both yourself, and tell the user the result in a line or two. The project's `.env` is read before the environment, so a `DATABASE_URL` exported for another project cannot win. `--directory` also makes sherlock pick this connection inside the project. Never copy the URL or its password into a command.
+
+**Otherwise, do everything except the password.** Work out the details from the conversation and the project: the type, host, port, database, username, SSL, a tunnel, and a short connection name. Ask only for what you cannot find. Then give the user one command to run in their own terminal, ending in `--password-prompt`:
 
 ```bash
 sherlock connection add prod --type postgres --host db.example.com --database app --username dbuser --ssl require --password-prompt

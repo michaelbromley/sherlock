@@ -29,6 +29,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - PostgreSQL now runs on the `postgres` package, MySQL on `mysql2` and SQLite on `bun:sqlite`, instead of Bun's built-in client, which reports no column names or types
 - A SQLite file that does not exist is `NOT_FOUND`, instead of being created empty
 - **Removed:** the hidden `connections`, `test` and `init` commands. Use `connection list`, `doctor` and `manage`
+- `connection add --url-env VAR` takes the whole connection URL from a variable, such as a project's `DATABASE_URL`, storing only its name. With `--directory`, the variable is read from that project's `.env` first, then the environment, so an agent can set up a local project's database with no password to type
+- `introspect` no longer fails with `INTERNAL` on a connection whose name has a hyphen, such as `corner-shop`
 - `connection add --password-prompt` asks for the password at a hidden prompt and stores it in the keychain. An agent can set up a connection from the conversation and give you one command to run: you type only the password, which it never sees
 
 ### Added

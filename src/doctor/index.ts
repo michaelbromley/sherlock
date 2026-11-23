@@ -29,6 +29,7 @@ import { getEnvFilePath } from '../config/paths';
 import { DB_TYPES, isRedisConfig, type DbType } from '../db-types';
 import { createConnection } from '../db/connection';
 import { credentialSource } from '../credentials/status';
+import { projectEnv } from '../config/env-file';
 import { classifyDbError } from '../db/errors';
 import { isSherlockError, type ErrorCode } from '../errors';
 import type { WarningSink } from '../output/warnings';
@@ -178,11 +179,12 @@ function credentialsStep(connectionName: string, configPath: string | undefined,
             return [failedCheck('credentials', error, 'CREDENTIAL_MISSING', credentialsFix(errorMessage(error)))];
         }
 
+        const project = projectEnv(config.directory);
         const fields = (['url', 'host', 'username', 'password'] as const)
-            .map((field) => [field, credentialSource(connectionName, field, config[field])] as const)
+            .map((field) => [field, credentialSource(connectionName, field, config[field], process.env, project)] as const)
             .filter(([, status]) => status !== null)
             .map(([field, status]) => `${field} from ${status!.source}`);
-        const noPassword = config.url === undefined && credentialSource(connectionName, 'password', config.password) === null;
+        const noPassword = config.url === undefined && credentialSource(connectionName, 'password', config.password, process.env, project) === null;
 
         return [{
             name: 'credentials',

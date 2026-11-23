@@ -1,4 +1,5 @@
-import type { CredentialProvider } from '../types';
+import type { CredentialProvider, ResolveContext } from '../types';
+import { lookupEnv } from '../../config/env-file';
 import type { CredentialRef } from '../../config/types';
 import { SherlockError } from '../../errors';
 
@@ -14,22 +15,31 @@ export class EnvProvider implements CredentialProvider {
         return typeof ref === 'object' && '$env' in ref;
     }
 
-    async resolve(ref: CredentialRef): Promise<string> {
+    async resolve(ref: CredentialRef, context?: ResolveContext): Promise<string> {
         if (typeof ref !== 'object' || !('$env' in ref)) {
             throw new Error('EnvProvider can only resolve $env references');
         }
 
         const envVar = ref.$env;
-        const value = process.env[envVar];
+        const found = lookupEnv(envVar, context?.projectEnv);
 
-        if (value === undefined) {
-            throw new SherlockError('CREDENTIAL_MISSING', `Environment variable not set: ${envVar}`, {
-                fix: `Set ${envVar} in the environment, or in the .env file next to the config.`,
-                details: { source: 'env' },
-            });
+        if (found === undefined) {
+            const project = context?.projectEnv?.file;
+            throw new SherlockError(
+                'CREDENTIAL_MISSING',
+                project
+                    ? `${envVar} is not set in ${project} or in the environment.`
+                    : `Environment variable not set: ${envVar}`,
+                {
+                    fix: project
+                        ? `Add ${envVar} to ${project}, or set it in the environment.`
+                        : `Set ${envVar} in the environment, or in the .env file next to the config.`,
+                    details: { source: 'env' },
+                }
+            );
         }
 
-        return value;
+        return found.value;
     }
 }
 
