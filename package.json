@@ -1,6 +1,6 @@
 {
   "name": "sherlock",
-  "version": "1.9.1",
+  "version": "2.0.0-beta.1",
   "description": "Database query tool with read-only access - a database detective",
   "type": "module",
   "main": "src/query-db.ts",
