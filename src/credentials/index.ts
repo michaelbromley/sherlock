@@ -1,5 +1,5 @@
 import { SherlockError } from '../errors';
-import type { CredentialProvider } from './types';
+import type { CredentialProvider, ResolveContext } from './types';
 import type { CredentialRef } from '../config/types';
 import { EnvProvider } from './providers/env';
 import { LiteralProvider } from './providers/literal';
@@ -31,10 +31,10 @@ export class CredentialResolver {
     /**
      * Resolve a credential reference to its actual value
      */
-    async resolve(ref: CredentialRef): Promise<string> {
+    async resolve(ref: CredentialRef, context?: ResolveContext): Promise<string> {
         for (const provider of this.providers) {
             if (provider.canResolve(ref)) {
-                return provider.resolve(ref);
+                return provider.resolve(ref, context);
             }
         }
 
@@ -46,12 +46,12 @@ export class CredentialResolver {
     /**
      * Resolve a value that might be a credential reference or a literal string
      */
-    async resolveValue(value: string | CredentialRef | undefined): Promise<string | undefined> {
+    async resolveValue(value: string | CredentialRef | undefined, context?: ResolveContext): Promise<string | undefined> {
         if (value === undefined) {
             return undefined;
         }
 
-        return this.resolve(value);
+        return this.resolve(value, context);
     }
 }
 

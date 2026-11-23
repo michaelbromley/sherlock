@@ -70,7 +70,16 @@ sherlock -c <conn> command GET mykey    # Execute any read-only Redis command
 
 Add a connection without the interactive wizard. The password is stored in the OS keychain, and never appears in the process list, the shell history, or your context.
 
-**When the user asks you to set up a connection, do everything except the password.** Work out the details from the conversation and the project: the type, host, port, database, username, SSL, a tunnel, and a short connection name. Ask only for what you cannot find. Then give the user one command to run in their own terminal, ending in `--password-prompt`:
+**When the project already has a database URL**, such as `DATABASE_URL` in its `.env`, set the connection up yourself. Sherlock stores only the variable's name, and reads the URL from the project's `.env` on each query:
+
+```bash
+sherlock connection add shop --url-env DATABASE_URL --directory /path/to/project
+sherlock doctor shop
+```
+
+Run both yourself, and tell the user the result in a line or two. The project's `.env` is read before the environment, so a `DATABASE_URL` exported for another project cannot win. `--directory` also makes sherlock pick this connection inside the project. Never copy the URL or its password into a command.
+
+**Otherwise, do everything except the password.** Work out the details from the conversation and the project: the type, host, port, database, username, SSL, a tunnel, and a short connection name. Ask only for what you cannot find. Then give the user one command to run in their own terminal, ending in `--password-prompt`:
 
 ```bash
 sherlock connection add prod --type postgres --host db.example.com --database app --username dbuser --ssl require --password-prompt
@@ -149,6 +158,7 @@ When a check fails, `ok` is false and `error.code` is that check's cause, such a
 ## Constraints
 
 - **Read-only**: SQL allows a single SELECT, SHOW, DESCRIBE, EXPLAIN or WITH statement, with no write keywords in its code. Words inside string literals, quoted identifiers and comments do not count, so `WHERE action = 'delete'` is fine. On PostgreSQL and MySQL every statement also runs in a read-only transaction that is rolled back, through a protocol on which the server refuses a second statement, so the database refuses even a function that writes (`READ_ONLY_VIOLATION`), and anything chained after the statement. SQLite databases are opened read-only. SQL Server has no such protection: there the keyword check is the only guard. If a refused word is a column name, quote it as an identifier. Redis allows read commands only (GET, HGETALL, SCAN, etc.) — mutations (SET, DEL, HSET, etc.) are blocked.
+- **No writes by other means**: sherlock is read-only on purpose. When the user asks you to change data, such as fixing a row or reinstating an account, say that sherlock can't, and give them the SQL to run themselves. Don't make the change another way, with `psql`, the app's code, or credentials you found in the project, unless the user explicitly asks you to make the change that way.
 - **Refused queries**: `QUERY_REFUSED` means sherlock's own check refused the query before sending it, and `details.reason` says why. Do not try to work around it.
 - **Timeout**: a statement is cancelled after 60s unless the connection sets `statementTimeout` or the query passes `--timeout`, with `QUERY_TIMEOUT`. Rerun with a longer `--timeout` only if the query is expected to be slow.
 - **Connection required**: Always specify `-c <connection>` or `-u <url>`, unless the current directory is inside a connection's configured `directory`, which selects that connection.

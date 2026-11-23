@@ -12,6 +12,34 @@
 
 import { usageError } from '../errors';
 import { CONTRACT_PLACEHOLDER, contractReference } from './contract';
+import { isPrerelease } from '../feedback';
+
+/**
+ * In a pre-release only: ask agents to record anything that got in their way,
+ * so it can be fixed before the release.
+ */
+function prereleaseSection(version: string): string {
+    return `## Pre-release: record problems
+
+This is a pre-release of sherlock (${version}). Whenever sherlock gets in your way, record it with \`sherlock feedback\`:
+
+- an error you didn't expect, or an \`INTERNAL\` error;
+- output that was wrong, confusing, or missing something you needed;
+- a command or flag you looked for and didn't find;
+- a workaround you had to use.
+
+Give a one-line summary, then what you ran, what happened and what you expected:
+
+\`\`\`bash
+sherlock feedback "introspect fails on a connection name with a hyphen" --details - <<'EOF'
+Ran: sherlock -c corner-shop introspect
+Got: {"ok":false,"error":{"code":"INTERNAL",...}}
+Expected: the schema. tables and query work on the same connection.
+EOF
+\`\`\`
+
+Record it when it happens, and carry on with the user's task. Leave out passwords and data from the database. Mention once per session that you recorded feedback, and where: the command returns the file.`;
+}
 import main from './agent.md' with { type: 'text' };
 import transfer from './transfer.md' with { type: 'text' };
 
@@ -42,5 +70,6 @@ export function guideText(topic: string | undefined, version: string): string {
         .filter(([key]) => key !== name)
         .map(([key, value]) => `- \`${key === 'main' ? 'sherlock guide' : `sherlock guide ${key}`}\`: ${value.summary}`);
 
-    return `<!-- sherlock ${version} -->\n${entry.text.trimEnd()}\n\n## Other guide topics\n\n${others.join('\n')}\n`;
+    const prerelease = name === 'main' && isPrerelease(version) ? `\n\n${prereleaseSection(version)}` : '';
+    return `<!-- sherlock ${version} -->\n${entry.text.trimEnd()}${prerelease}\n\n## Other guide topics\n\n${others.join('\n')}\n`;
 }
