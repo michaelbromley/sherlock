@@ -90,7 +90,8 @@ describe('query --out', () => {
             env: { ...process.env, SHERLOCK_CONFIG: '', HOME: dir },
         });
         expect(result.status).toBe(0);
-        const data = JSON.parse(result.stdout);
+        const { ok, data } = JSON.parse(result.stdout);
+        expect(ok).toBe(true);
         expect(data).toMatchObject({ file: out, format: 'jsonl', rowCount: 500, columns: [{ name: 'id' }, { name: 'note' }] });
         expect(data.preview).toHaveLength(20);
         expect(data.preview[0]).toEqual([1, 'note 1']);

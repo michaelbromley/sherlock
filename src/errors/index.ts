@@ -20,18 +20,25 @@ export interface SherlockErrorOptions {
     details?: ErrorDetails;
     /** The error this one explains, kept for debugging; never printed in the envelope */
     cause?: unknown;
+    /**
+     * The command's report, for a command whose result is one (doctor, tunnel
+     * stop, keychain list): it is still the envelope's data when ok is false.
+     */
+    report?: unknown;
 }
 
 export class SherlockError extends Error {
     readonly code: ErrorCode;
     readonly fix?: string;
     readonly details?: ErrorDetails;
+    readonly report?: unknown;
 
     constructor(code: ErrorCode, message: string, options: SherlockErrorOptions = {}) {
         super(message, options.cause === undefined ? undefined : { cause: options.cause });
         this.name = 'SherlockError';
         this.code = code;
         if (options.fix !== undefined) this.fix = options.fix;
+        if (options.report !== undefined) this.report = options.report;
         if (options.details !== undefined && Object.keys(options.details).length > 0) {
             this.details = options.details;
         }

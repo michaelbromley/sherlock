@@ -35,17 +35,18 @@ import {
 import { connectionManagerMenu } from './tui';
 
 // Config init/migration
-import { initConfig, migrateConfig } from './config/init';
+import { migrateConfig } from './config/init';
 
 // Query validation
 import { validateReadOnlyQuery, queryRefusedError } from './query-validation';
 
 // Results
-import { buildResult, DEFAULT_CAPS, fetchLimit, NO_CAPS, type Caps } from './db/result';
+import { buildResult, DEFAULT_CAPS, fetchLimit, NO_CAPS, type Caps, type Result } from './db/result';
+import { capRedisResult, type CapOptions } from './redis/caps';
 import { ResultFile, resultFileFormat } from './output/result-file';
 
 // Errors and the response envelope
-import { SherlockError, usageError, errorMessage } from './errors';
+import { SherlockError, usageError, errorMessage, exitCodeFor } from './errors';
 import { Invocation, printEnvelope } from './output/envelope';
 import { printWarning, type SherlockWarning } from './output/warnings';
 
@@ -60,6 +61,7 @@ import {
     getForeignKeys,
     getTableStats,
     introspectSchema,
+    DESCRIBE_COLUMNS,
 } from './db/operations';
 
 // Redis
@@ -74,20 +76,11 @@ import {
 } from './redis/operations';
 
 // Output formatting
-import {
-    formatOutput,
-    formatAsMarkdown,
-    type OutputFormat,
-    DEFAULT_OUTPUT_FORMAT,
-} from './output/formatters';
+import { renderHuman } from './output/human';
 
 // Caching
-import {
-    readSchemaCache,
-    writeSchemaCache,
-    getCacheAge,
-    type SchemaInfo,
-} from './cache/schema';
+import { readSchemaCache, writeSchemaCache, getCacheAge, type SchemaInfo } from './cache/schema';
+import type { FetchedRows } from './db/adapter';
 
 // Logging
 import { logQuery } from './logging/query-log';
@@ -109,15 +102,45 @@ const MAX_SAMPLE_LIMIT = 1000;
 // Helpers
 // ============================================================================
 
+/** The output formats; markdown is another name for human */
+const FORMATS = ['json', 'human', 'markdown'] as const;
+
 /**
- * Print every configured connection as JSON: the names, as before, and what
- * each one points at.
+ * What the command produced: its data for the envelope, or nothing to print
+ * when the command printed for people itself (manage, config export).
  */
-function listConnectionsAction(configPath?: string): void {
-    console.log(JSON.stringify({
-        connections: listConnections(configPath),
-        details: listConnectionSummaries(configPath),
-    }, null, 2));
+let commandData: unknown = null;
+let printsItself = false;
+
+/**
+ * An action that returns its data instead of printing it. One place prints
+ * it, as the envelope or as text for people.
+ */
+function respond<A extends unknown[]>(action: (...args: A) => Promise<unknown> | unknown) {
+    return async (...args: A): Promise<void> => {
+        commandData = (await action(...args)) ?? null;
+    };
+}
+
+/**
+ * Commands that prompt (manage, config export and import, keychain set) need
+ * a terminal, print for people, and have no envelope on success. Without a
+ * terminal they fail at once rather than wait at a prompt.
+ */
+function interactive(command: string): void {
+    if (!process.stdin.isTTY) {
+        throw usageError(
+            `'sherlock ${command}' prompts for input and needs an interactive terminal.`,
+            undefined,
+            `Run 'sherlock ${command}' yourself in a terminal.`
+        );
+    }
+    printsItself = true;
+}
+
+/** Whether output is for people rather than the envelope */
+function humanOutput(opts: CliOptions): boolean {
+    return opts.format === 'human' || opts.format === 'markdown';
 }
 
 /** Things worth knowing about a connection just added, as warnings */
@@ -156,6 +179,9 @@ interface CliOptions {
 
 /** What is known about this run: its command, connection and warnings */
 const invocation = new Invocation();
+
+/** The global options, set once they are parsed */
+let globalOptions: CliOptions = {};
 
 /**
  * Read a password from stdin, for non-interactive setup.
@@ -381,6 +407,103 @@ async function fetchResult(sql: SqlAdapter, query: string, caps: Caps, out?: str
     }
 }
 
+/** Rows of sherlock's own statements, held to the caps; a cut is warned about */
+function capped(fetched: FetchedRows, caps: Caps): Result {
+    const { result, warnings } = buildResult(fetched, caps);
+    for (const warning of warnings) invocation.warnings.add(warning);
+    return result;
+}
+
+/** A Redis result, held to the caps; a cut is warned about */
+function cappedRedis<T extends object>(data: T, opts: ConnectedOptions, options?: CapOptions) {
+    const { data: result, warnings } = capRedisResult(data, capsFor(opts, Infinity), options);
+    for (const warning of warnings) invocation.warnings.add(warning);
+    return result;
+}
+
+/**
+ * Every table's columns as results, the cells held to the cap. The size cap
+ * drops whole tables from the end, never part of one, and says which.
+ */
+function capSchema(schema: SchemaInfo, caps: Caps) {
+    let cellsCut = 0;
+    const tables: Record<string, { columns: Result }> = {};
+    for (const [name, columns] of Object.entries(schema)) {
+        const { result } = buildResult(columns, { ...caps, maxRows: Infinity, maxBytes: Infinity });
+        if (result.truncated) cellsCut += result.truncated.cellsCut;
+        tables[name] = { columns: result };
+    }
+
+    const tablesOmitted: string[] = [];
+    if (Number.isFinite(caps.maxBytes)) {
+        const names = Object.keys(tables);
+        // Room for the cache block and the truncation note
+        let size = 400 + Buffer.byteLength(JSON.stringify({ tables: {} }));
+        let fits = true;
+        for (const name of names) {
+            const next = size + Buffer.byteLength(JSON.stringify({ [name]: tables[name] }));
+            if (!fits || next > caps.maxBytes) {
+                fits = false;
+                tablesOmitted.push(name);
+                delete tables[name];
+            } else {
+                size = next;
+            }
+        }
+    }
+
+    const truncated = tablesOmitted.length > 0 || cellsCut > 0
+        ? { cellsCut, ...(tablesOmitted.length > 0 && { tablesOmitted, bytesLimit: caps.maxBytes }) }
+        : false;
+    if (truncated) {
+        const parts: string[] = [];
+        if (tablesOmitted.length > 0) parts.push(`${tablesOmitted.length} tables were left out to fit in ${caps.maxBytes} bytes`);
+        if (cellsCut > 0) parts.push(`${cellsCut} values were shortened`);
+        invocation.warnings.add({
+            code: 'RESULT_TRUNCATED',
+            message: `The schema was cut: ${parts.join(', and ')}.`,
+            fix: 'Describe the tables you need with: sherlock describe <table>, raise --max-bytes, or write it all with --out schema.jsonl',
+            details: {
+                rowsReturned: Object.keys(tables).length,
+                moreRows: tablesOmitted.length > 0,
+                cellsCut,
+                ...(tablesOmitted.length > 0 && { bytesLimit: caps.maxBytes }),
+            },
+        });
+    }
+    return { tables, truncated };
+}
+
+/** introspect --out: one line per column of every table, the table first */
+function writeSchemaFile(schema: SchemaInfo, out: string, caps: Caps, cache: object) {
+    const columns = [{ name: 'table' }, ...DESCRIBE_COLUMNS.map((name) => ({ name }))];
+    const file = new ResultFile(out);
+    const preview: unknown[][] = [];
+    let rowCount = 0;
+    try {
+        for (const [table, described] of Object.entries(schema)) {
+            const rows = described.rows.map((row) => [table, ...row]);
+            file.write(rows, columns);
+            rowCount += rows.length;
+            for (const row of rows) if (preview.length < OUT_PREVIEW_ROWS) preview.push(row);
+        }
+        file.finish(columns);
+    } catch (error) {
+        file.abort();
+        throw error;
+    }
+    const { result } = buildResult({ columns, rows: preview, more: false, rowsFetched: preview.length }, { ...caps, maxRows: OUT_PREVIEW_ROWS });
+    return {
+        file: file.path,
+        format: file.format,
+        rowCount,
+        tables: Object.keys(schema).length,
+        columns,
+        preview: result.rows,
+        cache,
+    };
+}
+
 /** Largest SQL file `query --file` will read */
 const MAX_QUERY_FILE_BYTES = 1024 * 1024;
 
@@ -459,14 +582,7 @@ const IMPORT_PASSPHRASE_ATTEMPTS = 3;
 
 /** The passphrase is only ever typed at a prompt, so both commands need a terminal */
 function requireTerminal(command: string): void {
-    if (!process.stdin.isTTY) {
-        throw usageError(
-            `'sherlock config ${command}' prompts for a passphrase and needs an interactive terminal. ` +
-            `The passphrase cannot be passed as an argument or piped in.`,
-            undefined,
-            `Run 'sherlock config ${command}' yourself in a terminal.`
-        );
-    }
+    interactive(`config ${command}`);
 }
 
 async function exportConfigAction(
@@ -675,7 +791,7 @@ function setupCLI() {
         .option('-u, --url <url>', 'connect directly via URL (e.g. postgres://user:pass@host:5432/db)')
         .option('--config <path>', 'path to config file')
         .option('--no-log', 'disable query logging')
-        .option('-f, --format <format>', 'output format: json or markdown', DEFAULT_OUTPUT_FORMAT)
+        .option('-f, --format <format>', 'output: json (the envelope, the default) or human (markdown is another name for it)', 'json')
         .option('--max-rows <n>', `most rows a result returns (default ${DEFAULT_CAPS.maxRows})`)
         .option('--max-cell <n>', `most characters of a text cell (default ${DEFAULT_CAPS.maxCellChars})`)
         .option('--max-bytes <n>', `most bytes of a whole result as JSON (default ${DEFAULT_CAPS.maxBytes})`)
@@ -683,11 +799,12 @@ function setupCLI() {
         .hook('preAction', (thisCommand, actionCommand) => {
             invocation.command = commandPath(actionCommand);
             const opts = thisCommand.opts<CliOptions>();
+            globalOptions = opts;
             if (opts.connection && opts.url) {
                 throw usageError('--connection (-c) and --url (-u) are mutually exclusive. Use one or the other.', '--url');
             }
-            if (opts.format && !['json', 'markdown'].includes(opts.format)) {
-                throw usageError(`Invalid format "${opts.format}". Must be 'json' or 'markdown'.`, '--format');
+            if (opts.format && !(FORMATS as readonly string[]).includes(opts.format)) {
+                throw usageError(`Invalid format "${opts.format}". Use json or human.`, '--format');
             }
             // Read the config once here, with the collector, so a warning about
             // the file itself (a legacy config.ts) is collected: later reads
@@ -711,83 +828,71 @@ function setupCLI() {
     program
         .command('tables')
         .description('List all tables in the database')
-        .action(async () => {
+        .action(respond(async () => {
             const opts = program.opts<CliOptions>();
             requireConnection(opts);
             requireSqlConnection(opts);
-            await runWithSqlConnection(opts, async (sql, dbType) => {
-                const tables = await getTables(sql, dbType as DbType);
-                console.log(JSON.stringify({ tables }, null, 2));
-            });
-        });
+            return runWithSqlConnection(opts, async (sql, dbType) => ({ tables: await getTables(sql, dbType as DbType) }));
+        }));
 
     // Introspect command (with caching)
     program
         .command('introspect')
         .description('Get schema information for all tables (cached)')
         .option('--refresh', 'force refresh the cached schema')
-        .action(async (cmdOpts: { refresh?: boolean }) => {
+        .option('--out <file>', 'write every column of every table to a .jsonl or .csv file, one line each')
+        .action(respond(async (cmdOpts: { refresh?: boolean; out?: string }) => {
             const opts = program.opts<CliOptions>();
             requireConnection(opts);
-
             requireSqlConnection(opts);
+            if (cmdOpts.out !== undefined) resultFileFormat(cmdOpts.out);
+            const caps = capsFor(opts, Infinity);
 
-            // Check cache first (unless --refresh)
-            if (!cmdOpts.refresh) {
-                const cached = readSchemaCache(opts.connection);
-                if (cached) {
-                    const age = getCacheAge(cached.cachedAt);
-                    const cachedDate = new Date(cached.cachedAt);
-                    const hoursSinceCached = (Date.now() - cachedDate.getTime()) / (1000 * 60 * 60);
-                    const isStale = hoursSinceCached > 24;
-
-                    const output = {
-                        ...cached.schema,
-                        _cache: {
-                            cachedAt: cached.cachedAt,
-                            age,
-                            stale: isStale,
-                            hint: isStale
-                                ? 'WARNING: Cache is >24h old. Use --refresh to update.'
-                                : 'Use --refresh to update cached schema',
-                        },
-                    };
-                    console.log(JSON.stringify(output, null, 2));
-                    return;
-                }
+            // An ad hoc --url connection has no name to cache under
+            const cacheable = !opts._resolvedConfig;
+            const cached = cacheable && !cmdOpts.refresh ? readSchemaCache(opts.connection) : null;
+            // Answered from the cache, no connection is opened to say which database it is
+            invocation.dbType ??= certainDbType(opts);
+            let schema = cached?.schema;
+            let cachedAt = cached?.cachedAt;
+            if (!schema) {
+                schema = await runWithSqlConnection(opts, (sql, dbType) => introspectSchema(sql, dbType as DbType));
+                cachedAt = new Date().toISOString();
+                if (cacheable) writeSchemaCache(opts.connection, schema);
             }
 
-            // Fetch fresh schema
-            await runWithSqlConnection(opts, async (sql, dbType) => {
-                const result = await introspectSchema(sql, dbType as DbType);
+            const ageHours = (Date.now() - new Date(cachedAt!).getTime()) / (1000 * 60 * 60);
+            const cache = {
+                fromCache: cached !== null,
+                cachedAt: cachedAt!,
+                age: getCacheAge(cachedAt!),
+                stale: ageHours > 24,
+            };
+            if (cache.fromCache && cache.stale) {
+                invocation.warnings.add({
+                    code: 'SCHEMA_CACHE_STALE',
+                    message: `The schema comes from a cache made ${cache.age}.`,
+                    fix: 'Read it again with: sherlock introspect --refresh',
+                    details: { cachedAt: cache.cachedAt },
+                });
+            }
 
-                // Cache the result
-                writeSchemaCache(opts.connection, result as SchemaInfo);
-
-                const output = {
-                    ...result,
-                    _cache: {
-                        cachedAt: new Date().toISOString(),
-                        hint: 'Schema cached. Use --refresh to update.',
-                    },
-                };
-                console.log(JSON.stringify(output, null, 2));
-            });
-        });
+            if (cmdOpts.out !== undefined) return writeSchemaFile(schema, cmdOpts.out, caps, cache);
+            return { ...capSchema(schema, caps), cache };
+        }));
 
     // Describe command
     program
         .command('describe <table>')
         .description('Describe a specific table schema')
-        .action(async (tableName: string) => {
+        .action(respond(async (tableName: string) => {
             const opts = program.opts<CliOptions>();
             requireConnection(opts);
             requireSqlConnection(opts);
-            await runWithSqlConnection(opts, async (sql, dbType) => {
-                const result = await describeTable(sql, dbType as DbType, tableName);
-                console.log(JSON.stringify(result, null, 2));
-            });
-        });
+            const caps = capsFor(opts);
+            return runWithSqlConnection(opts, async (sql, dbType) =>
+                capped(await describeTable(sql, dbType as DbType, tableName), caps));
+        }));
 
     // Sample command
     program
@@ -795,7 +900,7 @@ function setupCLI() {
         .description('Get random sample rows from a table')
         .option('-n, --limit <number>', 'number of rows to sample', String(DEFAULT_SAMPLE_LIMIT))
         .option('--out <file>', 'write every sampled row to a .jsonl or .csv file, with no caps')
-        .action(async (tableName: string, cmdOpts: { limit: string; out?: string }) => {
+        .action(respond(async (tableName: string, cmdOpts: { limit: string; out?: string }) => {
             const opts = program.opts<CliOptions>();
             requireConnection(opts);
             requireSqlConnection(opts);
@@ -805,7 +910,7 @@ function setupCLI() {
             // -n is how many rows the caller asked for, so it is the row cap too.
             const caps = capsFor(opts, limit);
 
-            await runWithSqlConnection(opts, async (sql, dbType) => {
+            return runWithSqlConnection(opts, async (sql, dbType) => {
                 const query = await sampleQuery(sql, dbType as DbType, tableName, limit);
                 const result = await fetchResult(sql, query, caps, cmdOpts.out) as { rowCount: number; rows?: unknown[][] };
 
@@ -817,77 +922,52 @@ function setupCLI() {
                         logQuery(opts.connection, `-- sherlock sample ${tableName} --limit ${limit}`, result);
                     }
                 }
-
-                const format = opts.format as OutputFormat;
-                console.log(formatOutput(result, format));
+                return result;
             });
-        });
+        }));
 
     // Stats command
     program
         .command('stats <table>')
         .description('Get data profiling stats for a table (row count, nulls, distinct values)')
-        .action(async (tableName: string) => {
+        .action(respond(async (tableName: string) => {
             const opts = program.opts<CliOptions>();
             requireConnection(opts);
             requireSqlConnection(opts);
-            await runWithSqlConnection(opts, async (sql, dbType) => {
-                const result = await getTableStats(sql, dbType as DbType, tableName);
-                const format = opts.format as OutputFormat;
-                if (format === 'markdown') {
-                    console.log(`## Stats for \`${tableName}\`\n\n**Row count:** ${result.rowCount.toLocaleString()}\n\n### Column Stats\n\n${formatAsMarkdown(result.columns)}`);
-                } else {
-                    console.log(JSON.stringify(result, null, 2));
-                }
+            const caps = capsFor(opts);
+            return runWithSqlConnection(opts, async (sql, dbType) => {
+                const stats = await getTableStats(sql, dbType as DbType, tableName);
+                return { rowCount: stats.rowCount, columns: capped(stats.columns, caps) };
             });
-        });
+        }));
 
     // FK command
     program
         .command('fk <table>')
         .description('Show foreign key relationships for a table')
-        .action(async (tableName: string) => {
+        .action(respond(async (tableName: string) => {
             const opts = program.opts<CliOptions>();
             requireConnection(opts);
             requireSqlConnection(opts);
-            await runWithSqlConnection(opts, async (sql, dbType) => {
-                const result = await getForeignKeys(sql, dbType as DbType, tableName);
-                const format = opts.format as OutputFormat;
-                if (format === 'markdown') {
-                    let output = `## Foreign Keys for \`${tableName}\`\n\n`;
-                    output += `### References (outgoing)\n\n`;
-                    output += result.references.length > 0
-                        ? formatAsMarkdown(result.references)
-                        : '_No outgoing foreign keys_';
-                    output += `\n\n### Referenced By (incoming)\n\n`;
-                    output += result.referencedBy.length > 0
-                        ? formatAsMarkdown(result.referencedBy)
-                        : '_No incoming foreign keys_';
-                    console.log(output);
-                } else {
-                    console.log(JSON.stringify(result, null, 2));
-                }
+            const caps = capsFor(opts);
+            return runWithSqlConnection(opts, async (sql, dbType) => {
+                const keys = await getForeignKeys(sql, dbType as DbType, tableName);
+                return { references: capped(keys.references, caps), referencedBy: capped(keys.referencedBy, caps) };
             });
-        });
+        }));
 
     // Indexes command
     program
         .command('indexes <table>')
         .description('Show indexes for a table')
-        .action(async (tableName: string) => {
+        .action(respond(async (tableName: string) => {
             const opts = program.opts<CliOptions>();
             requireConnection(opts);
             requireSqlConnection(opts);
-            await runWithSqlConnection(opts, async (sql, dbType) => {
-                const result = await getIndexes(sql, dbType as DbType, tableName);
-                const format = opts.format as OutputFormat;
-                if (format === 'markdown') {
-                    console.log(`## Indexes for \`${tableName}\`\n\n${result.indexCount} indexes\n\n${formatAsMarkdown(result.indexes)}`);
-                } else {
-                    console.log(JSON.stringify(result, null, 2));
-                }
-            });
-        });
+            const caps = capsFor(opts);
+            return runWithSqlConnection(opts, async (sql, dbType) =>
+                ({ indexes: capped(await getIndexes(sql, dbType as DbType, tableName), caps) }));
+        }));
 
     // Query command
     program
@@ -907,7 +987,7 @@ Every query runs in a read-only transaction that is rolled back afterwards.
 A result is capped at 200 rows, 500 characters per cell and 32 KB in all,
 unless --max-rows, --max-cell, --max-bytes or --no-limit say otherwise.
 Anything cut is reported. --out writes every row to a file instead.`)
-        .action(async (sqlArg: string | undefined, cmdOpts: { file?: string; timeout?: string; out?: string }) => {
+        .action(respond(async (sqlArg: string | undefined, cmdOpts: { file?: string; timeout?: string; out?: string }) => {
             const opts = program.opts<CliOptions>();
             requireConnection(opts);
             requireSqlConnection(opts);
@@ -934,7 +1014,7 @@ Anything cut is reported. --out writes every row to a file instead.`)
                 if (!early.valid) throw queryRefusedError(early);
             }
 
-            await runWithSqlConnection(opts, async (sql, dbType) => {
+            return runWithSqlConnection(opts, async (sql, dbType) => {
                 // Enforce read-only, with the dialect the connection resolved
                 // to: the one the database will read the query with. The type
                 // is only certain once a URL held in the keychain is read.
@@ -953,11 +1033,9 @@ Anything cut is reported. --out writes every row to a file instead.`)
                     throw error;
                 }
                 if (loggingEnabled) logQuery(opts.connection, sqlQuery, result);
-
-                const format = opts.format as OutputFormat;
-                console.log(formatOutput(result, format));
+                return result;
             }, options);
-        });
+        }));
 
     // ========================================================================
     // Redis Commands
@@ -968,15 +1046,13 @@ Anything cut is reported. --out writes every row to a file instead.`)
         .command('info')
         .description('Redis server info, memory stats, and keyspace overview')
         .option('--section <name>', 'get a specific INFO section (e.g., memory, server, clients)')
-        .action(async (cmdOpts: { section?: string }) => {
+        .action(respond(async (cmdOpts: { section?: string }) => {
             const opts = program.opts<CliOptions>();
             requireConnection(opts);
             requireRedisConnection(opts);
-            await runWithRedisConnection(opts, async (client) => {
-                const result = await getServerInfo(client, cmdOpts.section);
-                console.log(JSON.stringify(result, null, 2));
-            });
-        });
+            return runWithRedisConnection(opts, async (client) =>
+                cappedRedis(await getServerInfo(client, cmdOpts.section), opts, { units: '.' }));
+        }));
 
     // Keys command
     program
@@ -984,123 +1060,106 @@ Anything cut is reported. --out writes every row to a file instead.`)
         .description('Scan for keys matching a glob pattern (default: *)')
         .option('--limit <n>', 'maximum number of keys to return', '100')
         .option('--no-types', 'skip TYPE/TTL lookups for faster scanning')
-        .action(async (pattern: string | undefined, cmdOpts: { limit: string; types: boolean }) => {
+        .action(respond(async (pattern: string | undefined, cmdOpts: { limit: string; types: boolean }) => {
             const opts = program.opts<CliOptions>();
             requireConnection(opts);
             requireRedisConnection(opts);
 
             const limit = parsePositiveInt(cmdOpts.limit, 'limit');
 
-            await runWithRedisConnection(opts, async (client) => {
-                const result = await scanKeys(client, pattern || '*', limit, cmdOpts.types);
-                console.log(JSON.stringify(result, null, 2));
+            return runWithRedisConnection(opts, async (client) => {
+                const { more, ...result } = await scanKeys(client, pattern || '*', limit, cmdOpts.types);
+                const shaped = cappedRedis(result, opts, { units: 'keys' });
+                // More keys than --limit: the scan says so, as the caps do for size
+                if (more && !shaped.truncated) {
+                    invocation.warnings.add({
+                        code: 'RESULT_TRUNCATED',
+                        message: `More keys match "${result.pattern}" than the ${limit} returned.`,
+                        fix: 'Narrow the pattern, or raise --limit.',
+                        details: { rowsReturned: shaped.keys.length, moreRows: true, cellsCut: 0 },
+                    });
+                    return { ...shaped, count: shaped.keys.length, truncated: { moreItems: true, cellsCut: 0 } };
+                }
+                return { ...shaped, count: shaped.keys.length };
             });
-        });
+        }));
 
     // Get command (Redis)
     program
         .command('get <key>')
         .description('Get value of a Redis key (auto-detects type)')
-        .option('--limit <n>', 'max items for lists/sets/zsets', '100')
-        .action(async (key: string, cmdOpts: { limit: string }) => {
+        .option('--limit <n>', 'max items of a list, set, sorted set or hash', '100')
+        .action(respond(async (key: string, cmdOpts: { limit: string }) => {
             const opts = program.opts<CliOptions>();
             requireConnection(opts);
             requireRedisConnection(opts);
 
             const limit = parsePositiveInt(cmdOpts.limit, 'limit');
 
-            await runWithRedisConnection(opts, async (client) => {
+            return runWithRedisConnection(opts, async (client) => {
                 const result = await getKeyValue(client, key, limit);
-                console.log(JSON.stringify(result, null, 2));
+                return cappedRedis(result, opts, { units: 'value', total: result.length ?? result.size });
             });
-        });
+        }));
 
     // Inspect command
     program
         .command('inspect <key>')
         .description('Inspect Redis key metadata (type, TTL, memory usage, encoding)')
-        .action(async (key: string) => {
+        .action(respond(async (key: string) => {
             const opts = program.opts<CliOptions>();
             requireConnection(opts);
             requireRedisConnection(opts);
-            await runWithRedisConnection(opts, async (client) => {
-                const result = await inspectKey(client, key);
-                console.log(JSON.stringify(result, null, 2));
-            });
-        });
+            return runWithRedisConnection(opts, async (client) => cappedRedis(await inspectKey(client, key), opts));
+        }));
 
     // Slowlog command
     program
         .command('slowlog')
         .description('Show recent slow queries from the Redis slow log')
         .option('-n, --count <n>', 'number of entries to show', '10')
-        .action(async (cmdOpts: { count: string }) => {
+        .action(respond(async (cmdOpts: { count: string }) => {
             const opts = program.opts<CliOptions>();
             requireConnection(opts);
             requireRedisConnection(opts);
 
             const count = parsePositiveInt(cmdOpts.count, 'count');
 
-            await runWithRedisConnection(opts, async (client) => {
-                const result = await getSlowlog(client, count);
-                console.log(JSON.stringify(result, null, 2));
-            });
-        });
+            return runWithRedisConnection(opts, async (client) =>
+                cappedRedis(await getSlowlog(client, count), opts, { units: 'entries' }));
+        }));
 
     // Command command (generic read-only Redis command)
     program
         .command('command <cmd> [args...]')
         .description('Execute a read-only Redis command')
-        .action(async (cmd: string, args: string[]) => {
+        .action(respond(async (cmd: string, args: string[]) => {
             const opts = program.opts<CliOptions>();
             requireConnection(opts);
             requireRedisConnection(opts);
-            await runWithRedisConnection(opts, async (client) => {
-                const result = await executeCommand(client, cmd, args);
-                console.log(JSON.stringify(result, null, 2));
-            });
-        });
+            return runWithRedisConnection(opts, async (client) =>
+                cappedRedis({ result: await executeCommand(client, cmd, args) }, opts, { units: 'result' }));
+        }));
 
     // ========================================================================
     // Connection Management Commands
     // ========================================================================
 
-    // Hidden: `connection list` is the documented spelling, but scripts and
-    // older docs use `connections`.
-    program
-        .command('connections', { hidden: true })
-        .description('List all configured connections')
-        .action(() => listConnectionsAction(program.opts().config));
-
-    // Test connection command (hidden — use `manage` instead)
-    program
-        .command('test <connectionName>', { hidden: true })
-        .description('Test a database connection')
-        .action(async (connectionName: string) => {
-            const opts = program.opts<CliOptions>();
-
-            console.log(`Testing connection: ${connectionName}...`);
-
-            const connConfig = getConnectionConfig(connectionName, opts.config, invocation.warnings);
-            if (isRedisConfig(connConfig)) {
-                await withRedisConnection(connectionName, opts.config, async (client) => {
-                    await client.send('PING', []);
-                }, invocation.warnings);
-            } else {
-                await withConnection(connectionName, opts.config, async (sql) => {
-                    await sql.unsafe('SELECT 1');
-                }, { warnings: invocation.warnings });
-            }
-            console.log(`\x1b[32m✓ Connection "${connectionName}" successful!\x1b[0m`);
-        });
-
     program
         .command('guide [topic]')
         .description('Print the guide for AI agents using sherlock (topics: transfer)')
-        .action(async (topic: string | undefined) => {
+        .option('--json', 'return the guide in the envelope, as { topic, text }')
+        .action(respond(async (topic: string | undefined, cmdOpts: { json?: boolean }) => {
             const { guideText } = await import('./guide');
-            process.stdout.write(guideText(topic, pkg.version));
-        });
+            const text = guideText(topic, pkg.version);
+            // Documentation is read, not parsed: plain text unless asked otherwise
+            if (!cmdOpts.json) {
+                printsItself = true;
+                process.stdout.write(text);
+                return null;
+            }
+            return { topic: topic ?? 'main', text };
+        }));
 
     program
         .command('doctor [connectionName]')
@@ -1115,8 +1174,9 @@ Checks, in order, stopping at the first failure:
   tls          the session is encrypted, when ssl is configured
   query        SELECT 1 succeeds in a read-only transaction (PING for Redis)
 
-Exits 1 when a check fails.`)
-        .action(async (connectionName: string | undefined) => {
+When a check fails, the error is that check's cause (such as AUTH_FAILED or
+TUNNEL_DOWN), details.check names the check, and data still holds every check.`)
+        .action(respond(async (connectionName: string | undefined) => {
             const opts = program.opts<CliOptions>();
             if (opts.url) {
                 throw usageError('doctor checks a configured connection. Give its name, not --url.', '--url');
@@ -1135,9 +1195,18 @@ Exits 1 when a check fails.`)
             invocation.connection = target;
             const { diagnoseConnection } = await import('./doctor');
             const report = await diagnoseConnection(target, configPath, invocation.warnings);
-            console.log(JSON.stringify(report, null, 2));
-            if (!report.ok) process.exitCode = 1;
-        });
+            const data = { checks: report.checks };
+            const failed = report.checks.find((check) => check.status === 'fail');
+            if (failed) {
+                // The cause of the failed check, not "doctor failed", with the whole report as data
+                throw new SherlockError(failed.code ?? 'INTERNAL', failed.detail, {
+                    fix: failed.fix,
+                    details: { check: failed.name },
+                    report: data,
+                });
+            }
+            return data;
+        }));
 
     // ========================================================================
     // Connection Setup Commands
@@ -1150,7 +1219,7 @@ Exits 1 when a check fails.`)
     connection
         .command('list')
         .description('List all configured connections')
-        .action(() => listConnectionsAction(program.opts().config));
+        .action(respond(() => ({ connections: listConnectionSummaries(program.opts<CliOptions>().config) })));
 
     connection
         .command('add <name>')
@@ -1180,7 +1249,7 @@ Exits 1 when a check fails.`)
         .option('--tunnel-idle-timeout <duration>', 'shut the tunnel down after this long unused, e.g. 30m (default 10m)')
         .option('--tunnel-ready-timeout <duration>', 'how long to wait for the tunnel to accept, e.g. 1m (default 30s)')
         .option('--force', 'replace an existing connection of the same name')
-        .action(async (name: string, cmdOpts: ConnectionAddOptions & { force?: boolean }) => {
+        .action(respond(async (name: string, cmdOpts: ConnectionAddOptions & { force?: boolean }) => {
             const { buildConnectionConfig } = await import('./config/connection-input');
             const { addConnection, connectionExists, shadowedConfigWarning } = await import('./config/write');
             const { summarizeTunnel } = await import('./config');
@@ -1236,14 +1305,14 @@ Exits 1 when a check fails.`)
                 ? `sherlock doctor ${name}`
                 : isRedisConfig(config) ? `sherlock -c ${name} info` : `sherlock -c ${name} tables`;
 
-            console.log(JSON.stringify({
+            return {
                 connection: name,
                 action: replaced ? 'replaced' : 'added',
                 config: configPath,
                 tunnel: config.tunnel ? summarizeTunnel(name, config.tunnel) : null,
                 next,
-            }, null, 2));
-        });
+            };
+        }));
 
     // ========================================================================
     // Config Transfer Commands
@@ -1265,9 +1334,9 @@ passphrase you are prompted for. The passphrase is never taken as an argument.
 
 Move the file to the other machine yourself (scp, USB) and run
 'sherlock config import <file>' there.`)
-        .action(async (name: string | undefined, cmdOpts: { output: string; force?: boolean }) => {
+        .action(respond(async (name: string | undefined, cmdOpts: { output: string; force?: boolean }) => {
             await exportConfigAction(program.opts().config, name, cmdOpts);
-        });
+        }));
 
     configCmd
         .command('import <file>')
@@ -1279,9 +1348,9 @@ the OS keychain, as 'connection add --password-stdin' does. On a machine with
 no keychain you are asked before any password is written to config.json.
 
 A connection whose name already exists is skipped unless --force is given.`)
-        .action(async (file: string, cmdOpts: { force?: boolean }) => {
+        .action(respond(async (file: string, cmdOpts: { force?: boolean }) => {
             await importConfigAction(file, cmdOpts, program.opts().config);
-        });
+        }));
 
     // ========================================================================
     // Tunnel Commands
@@ -1294,30 +1363,29 @@ A connection whose name already exists is skipped unless --force is given.`)
     tunnel
         .command('status')
         .description('Show running tunnels')
-        .action(async () => {
+        .action(respond(async () => {
             const { listTunnels } = await import('./tunnel/manager');
-            const tunnels = await listTunnels();
-            console.log(JSON.stringify({ tunnels }, null, 2));
-        });
+            return { tunnels: await listTunnels() };
+        }));
 
     tunnel
         .command('stop [connectionName]')
         .description('Stop a tunnel, or all tunnels when no name is given')
-        .action(async (connectionName: string | undefined) => {
+        .action(respond(async (connectionName: string | undefined) => {
             const { stopTunnel, stopAllTunnels } = await import('./tunnel/manager');
-            const results = connectionName
-                ? [await stopTunnel(connectionName)]
-                : await stopAllTunnels();
-
-            if (results.length === 0) {
-                console.log(JSON.stringify({ stopped: [], message: 'No tunnels running' }, null, 2));
-                return;
-            }
-            console.log(JSON.stringify({ stopped: results }, null, 2));
+            const stopped = connectionName ? [await stopTunnel(connectionName)] : await stopAllTunnels();
+            const data = { stopped };
             // A named tunnel that was not running is worth knowing about: the
             // name may be misspelt. Stopping all of none is not a failure.
-            if (connectionName && !results[0].stopped) process.exitCode = 1;
-        });
+            if (connectionName && !stopped[0].stopped) {
+                throw new SherlockError('NOT_FOUND', `No tunnel is running for "${connectionName}".`, {
+                    fix: 'See the running tunnels with: sherlock tunnel status',
+                    details: { kind: 'tunnel', name: connectionName },
+                    report: data,
+                });
+            }
+            return data;
+        }));
 
     // Hidden: this is how sherlock re-invokes itself as a tunnel supervisor.
     // Config path comes from the global --config, which commander parses even
@@ -1326,12 +1394,12 @@ A connection whose name already exists is skipped unless --force is given.`)
         .command('__supervise', { hidden: true })
         .description('Run as a tunnel supervisor process (internal)')
         .requiredOption('--name <name>', 'connection name to supervise')
-        .action(async (cmdOpts: { name: string }) => {
+        .action(respond(async (cmdOpts: { name: string }) => {
             const opts = program.opts<CliOptions>();
             const { runSupervisor } = await import('./tunnel/supervisor');
             const code = await runSupervisor(cmdOpts.name, opts.config);
             process.exit(code);
-        });
+        }));
 
     // ========================================================================
     // Config Commands
@@ -1341,26 +1409,20 @@ A connection whose name already exists is skipped unless --force is given.`)
     program
         .command('manage')
         .description('Manage connections, credentials, and config')
-        .action(async () => {
+        .action(respond(async () => {
+            interactive('manage');
             await connectionManagerMenu();
-        });
-
-    // Init command (hidden — available via `manage` menu)
-    program
-        .command('init', { hidden: true })
-        .description('Create config template (non-interactive)')
-        .action(async () => {
-            await initConfig();
-        });
+        }));
 
     // Migrate command (hidden — available via `manage` menu)
     program
         .command('migrate', { hidden: true })
         .description('Migrate legacy config.ts to new JSON format')
         .option('--from <path>', 'path to legacy config.ts', 'config.ts')
-        .action(async (cmdOpts) => {
+        .action(respond(async (cmdOpts) => {
+            printsItself = true;
             await migrateConfig(cmdOpts.from);
-        });
+        }));
 
     // ========================================================================
     // Update Command
@@ -1369,10 +1431,15 @@ A connection whose name already exists is skipped unless --force is given.`)
     program
         .command('update')
         .description('Check for updates and self-update the sherlock binary')
-        .action(async () => {
+        .option('--yes', 'install a newer version without asking')
+        .addHelpText('after', `
+In a terminal, update asks before installing. Without one it needs --yes, and
+fails at once without it rather than waiting at a prompt. Prompts and progress
+go to stderr.`)
+        .action(respond(async (cmdOpts: { yes?: boolean }) => {
             const { runUpdate } = await import('./update');
-            await runUpdate();
-        });
+            return runUpdate({ yes: cmdOpts.yes, progress: humanOutput(program.opts<CliOptions>()) });
+        }));
 
     // ========================================================================
     // Keychain Commands
@@ -1385,7 +1452,8 @@ A connection whose name already exists is skipped unless --force is given.`)
     keychain
         .command('set <account>')
         .description('Store a password in the keychain')
-        .action(async (account: string) => {
+        .action(respond(async (account: string) => {
+            interactive('keychain set');
             const password = await promptPassword(`Enter password for "${account}": `);
             if (!password) {
                 throw usageError('No password was entered.');
@@ -1394,32 +1462,32 @@ A connection whose name already exists is skipped unless --force is given.`)
             console.log(`\x1b[32m✓\x1b[0m Password stored for account "${account}"`);
             console.log(`\nUse in config.json:`);
             console.log(`  "password": { "$keychain": "${account}" }`);
-        });
+        }));
 
     keychain
         .command('get <account>')
         .description('Check whether the keychain has a password for an account')
-        .action((account: string) => {
+        .action(respond((account: string) => {
             // Reports only whether the entry exists. Printing the password
             // would put it in the terminal scrollback, and in front of any
             // agent that finds this command.
             if (!hasKeychainPassword(account)) throw keychainEntryNotFound(account);
-            console.log(`The keychain has a password for "${account}".`);
-        });
+            return { account, exists: true };
+        }));
 
     keychain
         .command('delete <account>')
         .description('Delete a password from the keychain')
-        .action((account: string) => {
+        .action(respond((account: string) => {
             if (!hasKeychainPassword(account)) throw keychainEntryNotFound(account);
             deleteKeychainPassword(account);
-            console.log(`\x1b[32m✓\x1b[0m Password deleted for account "${account}"`);
-        });
+            return { account, deleted: true };
+        }));
 
     keychain
         .command('list')
         .description('Show where each connection\'s password comes from, and whether it is there')
-        .action(async () => {
+        .action(respond(async () => {
             const opts = program.opts<CliOptions>();
             const { passwordStatus } = await import('./credentials/status');
             const config = loadConfigFile(opts.config, invocation.warnings);
@@ -1427,9 +1495,17 @@ A connection whose name already exists is skipped unless --force is given.`)
                 connection: name,
                 ...passwordStatus(name, config.connections[name]),
             }));
-            console.log(JSON.stringify({ passwords }, null, 2));
-            if (passwords.some((entry) => !entry.ok)) process.exitCode = 1;
-        });
+            const data = { passwords };
+            const missing = passwords.find((entry) => !entry.ok);
+            if (missing) {
+                throw new SherlockError('CREDENTIAL_MISSING', `The password of connection "${missing.connection}" is not there: ${missing.source}.`, {
+                    fix: `Store it again with: sherlock manage, or fix the connection's "password".`,
+                    details: { setting: 'password', source: missing.source },
+                    report: data,
+                });
+            }
+            return data;
+        }));
 
     return program;
 }
@@ -1494,35 +1570,57 @@ function printWarnings(): void {
 }
 
 /**
- * Run the command. Any error it throws, or commander's own usage errors, is
- * reported once, here, in the envelope, with the exit code that goes with it.
- * `tunnel __supervise` exits by itself with its own code and never gets here.
+ * Run the command and print what it produced, once, here: the envelope on
+ * stdout, or text for people with --format human. Any error it throws, or
+ * commander's own usage errors, is reported the same way, with the exit code
+ * that goes with it. `tunnel __supervise` exits by itself with its own code and
+ * never gets here, and commands that prompt print for people themselves.
  */
 async function main(): Promise<void> {
     const program = setupCLI();
+    let failure: unknown;
     try {
         await program.parseAsync(process.argv);
-        printWarnings();
     } catch (thrown: unknown) {
-        let error = thrown;
-        if (error instanceof CommanderError) {
-            if (COMMANDER_EXITS.has(error.code)) {
-                process.exitCode = error.exitCode;
-                return;
-            }
-            error = fromCommanderError(error);
+        if (thrown instanceof CommanderError && COMMANDER_EXITS.has(thrown.code)) {
+            process.exitCode = thrown.exitCode;
+            return;
         }
-        invocation.command ||= commandPathFromArgv(program, process.argv.slice(2));
-        if (process.env.DEBUG && error instanceof Error && error.stack) {
-            process.stderr.write(`${error.stack}\n`);
-        }
-        printWarnings();
-        const code = printEnvelope(invocation.fail(error));
-        // Exit once stdout has taken the envelope: pending work such as a
-        // tunnel keepalive timer must not keep the process alive, and exiting
-        // straight away can cut a write to a pipe short.
-        process.stdout.write('', () => process.exit(code));
+        failure = thrown instanceof CommanderError ? fromCommanderError(thrown) : thrown;
     }
+
+    // Options commander parsed before a failure, when the command never started
+    const opts: CliOptions = { ...program.opts<CliOptions>(), ...globalOptions };
+    printWarnings();
+
+    if (failure === undefined) {
+        if (printsItself) return;
+        if (humanOutput(opts)) {
+            process.stdout.write(renderHuman(commandData) + '\n');
+            return;
+        }
+        printEnvelope(invocation.succeed(commandData));
+        return;
+    }
+
+    invocation.command ||= commandPathFromArgv(program, process.argv.slice(2));
+    if (process.env.DEBUG && failure instanceof Error && failure.stack) {
+        process.stderr.write(`${failure.stack}\n`);
+    }
+    const envelope = invocation.fail(failure);
+    let code: number;
+    if (humanOutput(opts)) {
+        if (envelope.data !== undefined) process.stdout.write(renderHuman(envelope.data) + '\n');
+        const error = envelope.error!;
+        process.stderr.write(`error ${error.code}: ${error.message}\n${error.fix ? `  ${error.fix}\n` : ''}`);
+        code = exitCodeFor(error);
+    } else {
+        code = printEnvelope(envelope);
+    }
+    // Exit once stdout has taken the output: pending work such as a tunnel
+    // keepalive timer must not keep the process alive, and exiting straight
+    // away can cut a write to a pipe short.
+    process.stdout.write('', () => process.exit(code));
 }
 
 void main();

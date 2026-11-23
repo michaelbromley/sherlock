@@ -8,7 +8,7 @@
  * nothing else goes to stdout.
  */
 
-import { exitCodeFor, toErrorBody, type ErrorBody } from '../errors';
+import { exitCodeFor, isSherlockError, toErrorBody, type ErrorBody } from '../errors';
 import { WarningCollector, type SherlockWarning } from './warnings';
 import pkg from '../../package.json';
 
@@ -64,9 +64,10 @@ export class Invocation {
      * stop, keychain list) passes the report as `data`, so it is still filled.
      */
     fail<T>(error: unknown, data?: T): Envelope<T> {
+        const report = data ?? (isSherlockError(error) ? error.report as T | undefined : undefined);
         return {
             ok: false,
-            ...(data !== undefined && { data }),
+            ...(report !== undefined && { data: report }),
             error: toErrorBody(error),
             warnings: this.warnings.list,
             meta: this.meta(),

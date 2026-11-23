@@ -6,6 +6,7 @@
 import type { RedisClient } from 'bun';
 import { validateRedisCommand } from './validation';
 import { queryRefusedError } from '../query-validation';
+import { SherlockError } from '../errors';
 
 // ============================================================================
 // Types
@@ -29,6 +30,8 @@ export interface ScanKeysResult {
     pattern: string;
     count: number;
     keys: KeyInfo[];
+    /** Whether more keys match than were returned */
+    more: boolean;
 }
 
 export interface KeyValueResult {
@@ -188,8 +191,9 @@ export async function scanKeys(
         keys.push(...result[1]);
     } while (cursor !== '0' && keys.length < limit);
 
-    // Trim to limit
+    // Trim to limit. The scan stopped early, or found more than the limit, when there are more.
     const trimmedKeys = keys.slice(0, limit);
+    const more = cursor !== '0' || keys.length > limit;
 
     // Enrich with type and TTL if requested
     const enrichedKeys: KeyInfo[] = [];
@@ -209,6 +213,7 @@ export async function scanKeys(
         pattern,
         count: enrichedKeys.length,
         keys: enrichedKeys,
+        more,
     };
 }
 
@@ -223,9 +228,7 @@ export async function getKeyValue(
     const type = await client.send('TYPE', [key]) as string;
     const ttl = await client.send('TTL', [key]) as number;
 
-    if (type === 'none') {
-        return { key, type: 'none', exists: false };
-    }
+    if (type === 'none') throw keyNotFound(key);
 
     switch (type) {
         case 'string': {
@@ -234,9 +237,11 @@ export async function getKeyValue(
         }
 
         case 'hash': {
-            // Bun's RedisClient returns HGETALL as a plain object, not a flat array
-            const value = await client.send('HGETALL', [key]) as Record<string, string>;
-            return { key, type, ttl, value };
+            // Bun's RedisClient returns HGETALL as a plain object, not a flat array.
+            // Held to the limit like a list, so --limit means the same for every type.
+            const all = await client.send('HGETALL', [key]) as Record<string, string>;
+            const entries = Object.entries(all);
+            return { key, type, ttl, size: entries.length, value: Object.fromEntries(entries.slice(0, limit)) };
         }
 
         case 'list': {
@@ -278,9 +283,7 @@ export async function inspectKey(
 ): Promise<InspectKeyResult> {
     const exists = await client.send('EXISTS', [key]) as number;
 
-    if (!exists) {
-        return { key, exists: false };
-    }
+    if (!exists) throw keyNotFound(key);
 
     const [type, ttl, memoryUsage, encoding] = await Promise.all([
         client.send('TYPE', [key]) as Promise<string>,
@@ -358,4 +361,11 @@ export async function executeCommand(
     }
 
     return await client.send(cmd, args);
+}
+
+function keyNotFound(key: string): SherlockError {
+    return new SherlockError('NOT_FOUND', `The key "${key}" does not exist.`, {
+        fix: 'Find keys with: sherlock keys <pattern>',
+        details: { kind: 'key', name: key },
+    });
 }

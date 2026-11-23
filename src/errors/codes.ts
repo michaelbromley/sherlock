@@ -101,6 +101,10 @@ export const ERROR_CODES = {
         meaning: 'A table, Redis key, keychain entry or tunnel that the command names does not exist.',
         details: ['kind', 'name'],
     },
+    UPDATE_FAILED: {
+        meaning: 'sherlock update could not check for, download or install a new version.',
+        details: ['reason'],
+    },
     KEYCHAIN_UNAVAILABLE: {
         meaning: 'The OS keychain cannot be read or written.',
         details: [],

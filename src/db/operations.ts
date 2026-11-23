@@ -4,7 +4,7 @@
  */
 
 import { DB_TYPES, type DbType } from '../db-types';
-import type { SqlAdapter } from './adapter';
+import type { FetchedRows, SqlAdapter } from './adapter';
 import { SherlockError, usageError } from '../errors';
 
 /** Valid SQL identifier pattern (prevents injection via malicious names) */
@@ -53,57 +53,59 @@ export async function validateTableExists(
     }
 }
 
-/** Table description result */
-export interface TableDescription {
-    table: string;
-    columns: unknown[];
-}
-
-/** Indexes result */
-export interface IndexesResult {
-    table: string;
-    indexCount: number;
-    indexes: unknown[];  // Shape varies by DB type
-}
-
-/** Foreign key relationship (outgoing) */
-export interface FKReference {
+interface FKReference {
     column: string;
     referencesTable: string;
     referencesColumn: string;
 }
 
-/** Foreign key relationship (incoming) */
-export interface FKReferencedBy {
+interface FKReferencedBy {
     fromTable: string;
     fromColumn: string;
     toColumn: string;
 }
 
-/** Foreign keys result */
-export interface ForeignKeysResult {
-    table: string;
-    references: FKReference[];
-    referencedBy: FKReferencedBy[];
-}
-
-/** Column stats */
-export interface ColumnStats {
+interface ColumnStats {
     column: string;
     nullCount: number;
     distinctCount: number;
 }
 
-/** Table stats result */
-export interface TableStats {
-    table: string;
-    rowCount: number;
-    columns: ColumnStats[];
+/** Foreign keys of a table: what it references, and what references it */
+export interface ForeignKeys {
+    references: FetchedRows;
+    referencedBy: FetchedRows;
 }
 
-/** Schema info (for introspection) */
-export interface SchemaInfo {
-    [tableName: string]: TableDescription;
+/** Row count and per-column stats of a table */
+export interface TableStats {
+    rowCount: number;
+    columns: FetchedRows;
+}
+
+/** Every table's columns, as describe gives them */
+export type SchemaInfo = Record<string, FetchedRows>;
+
+/** The columns `describe` returns, the same on every database */
+export const DESCRIBE_COLUMNS = ['name', 'type', 'nullable', 'default', 'primaryKey'] as const;
+
+/**
+ * Rows of sherlock's own statements, which come back as objects with known
+ * keys, as a result with those keys as its columns, in that order. Fixed
+ * columns mean an empty list still says what it would hold.
+ */
+export function rowsFrom(columns: readonly string[], objects: Record<string, unknown>[]): FetchedRows {
+    return {
+        columns: columns.map((name) => ({ name })),
+        rows: objects.map((object) => columns.map((column) => object[column] ?? null)),
+        more: false,
+        rowsFetched: objects.length,
+    };
+}
+
+/** A flag column some databases give as 0 and 1, as a boolean */
+function flag(value: unknown): boolean {
+    return value === true || value === 1 || value === '1' || value === 't' || value === 'YES';
 }
 
 /**
@@ -135,50 +137,95 @@ export async function getTables(sql: SqlAdapter, dbType: DbType): Promise<string
 }
 
 /**
- * Describe a table's schema
+ * Describe a table's columns, the same way on every database: name, type,
+ * whether it takes NULL, its default, and whether it is in the primary key.
  */
 export async function describeTable(
     sql: SqlAdapter,
     dbType: DbType,
     tableName: string
-): Promise<TableDescription> {
+): Promise<FetchedRows> {
     await validateTableExists(sql, dbType, tableName);
+    return describeColumns(sql, dbType, tableName);
+}
 
+/** The columns of a table already known to exist. The name must be a safe identifier. */
+async function describeColumns(sql: SqlAdapter, dbType: DbType, tableName: string): Promise<FetchedRows> {
+    validateIdentifier(tableName, 'table');
     let query: string;
 
     if (dbType === DB_TYPES.POSTGRES) {
         query = `
             SELECT
-                column_name,
-                data_type,
-                is_nullable,
-                column_default,
-                character_maximum_length
-            FROM information_schema.columns
-            WHERE table_name = '${tableName}'
-            ORDER BY ordinal_position
+                c.column_name AS name,
+                CASE WHEN c.character_maximum_length IS NOT NULL
+                    THEN c.data_type || '(' || c.character_maximum_length || ')'
+                    ELSE c.data_type END AS type,
+                c.is_nullable = 'YES' AS nullable,
+                c.column_default AS "default",
+                EXISTS (
+                    SELECT 1 FROM information_schema.table_constraints tc
+                    JOIN information_schema.key_column_usage k
+                        ON k.constraint_name = tc.constraint_name
+                        AND k.table_schema = tc.table_schema
+                        AND k.table_name = tc.table_name
+                    WHERE tc.constraint_type = 'PRIMARY KEY'
+                        AND tc.table_schema = c.table_schema
+                        AND tc.table_name = c.table_name
+                        AND k.column_name = c.column_name
+                ) AS "primaryKey"
+            FROM information_schema.columns c
+            WHERE c.table_schema = 'public' AND c.table_name = '${tableName}'
+            ORDER BY c.ordinal_position
         `;
     } else if (dbType === DB_TYPES.SQLITE) {
-        query = `PRAGMA table_info(${quoteIdentifier(tableName, dbType)})`;
+        query = `
+            SELECT name, type, "notnull" = 0 AS nullable, dflt_value AS "default", pk > 0 AS primaryKey
+            FROM pragma_table_info('${tableName}')
+            ORDER BY cid
+        `;
     } else if (dbType === DB_TYPES.MSSQL) {
         query = `
             SELECT
-                COLUMN_NAME as column_name,
-                DATA_TYPE as data_type,
-                IS_NULLABLE as is_nullable,
-                COLUMN_DEFAULT as column_default,
-                CHARACTER_MAXIMUM_LENGTH as character_maximum_length
-            FROM INFORMATION_SCHEMA.COLUMNS
-            WHERE TABLE_NAME = '${tableName}'
-            ORDER BY ORDINAL_POSITION
+                c.COLUMN_NAME AS name,
+                CASE WHEN c.CHARACTER_MAXIMUM_LENGTH IS NOT NULL
+                    THEN c.DATA_TYPE + '(' + CASE WHEN c.CHARACTER_MAXIMUM_LENGTH = -1 THEN 'max'
+                        ELSE CAST(c.CHARACTER_MAXIMUM_LENGTH AS varchar(10)) END + ')'
+                    ELSE c.DATA_TYPE END AS type,
+                CASE WHEN c.IS_NULLABLE = 'YES' THEN 1 ELSE 0 END AS nullable,
+                c.COLUMN_DEFAULT AS [default],
+                CASE WHEN EXISTS (
+                    SELECT 1 FROM INFORMATION_SCHEMA.TABLE_CONSTRAINTS tc
+                    JOIN INFORMATION_SCHEMA.KEY_COLUMN_USAGE k ON k.CONSTRAINT_NAME = tc.CONSTRAINT_NAME
+                    WHERE tc.CONSTRAINT_TYPE = 'PRIMARY KEY'
+                        AND tc.TABLE_NAME = c.TABLE_NAME
+                        AND k.COLUMN_NAME = c.COLUMN_NAME
+                ) THEN 1 ELSE 0 END AS primaryKey
+            FROM INFORMATION_SCHEMA.COLUMNS c
+            WHERE c.TABLE_NAME = '${tableName}'
+            ORDER BY c.ORDINAL_POSITION
         `;
     } else {
         // MySQL
-        query = `DESCRIBE ${quoteIdentifier(tableName, dbType)}`;
+        query = `
+            SELECT
+                column_name AS name,
+                column_type AS type,
+                is_nullable = 'YES' AS nullable,
+                column_default AS \`default\`,
+                column_key = 'PRI' AS primaryKey
+            FROM information_schema.columns
+            WHERE table_schema = DATABASE() AND table_name = '${tableName}'
+            ORDER BY ordinal_position
+        `;
     }
 
-    const result = await sql.unsafe(query);
-    return { table: tableName, columns: result };
+    const rows = (await sql.unsafe(query)).map((row) => ({
+        ...row,
+        nullable: flag(row.nullable),
+        primaryKey: flag(row.primaryKey),
+    }));
+    return rowsFrom(DESCRIBE_COLUMNS, rows);
 }
 
 /**
@@ -214,7 +261,7 @@ export async function getIndexes(
     sql: SqlAdapter,
     dbType: DbType,
     tableName: string
-): Promise<IndexesResult> {
+): Promise<FetchedRows> {
     await validateTableExists(sql, dbType, tableName);
 
     let query: string;
@@ -248,12 +295,8 @@ export async function getIndexes(
         query = `SHOW INDEX FROM ${quoteIdentifier(tableName, dbType)}`;
     }
 
-    const result = await sql.unsafe(query);
-    return {
-        table: tableName,
-        indexCount: Array.isArray(result) ? result.length : 0,
-        indexes: result,
-    };
+    // The columns, and their order, are each database's own
+    return sql.fetch(query);
 }
 
 /**
@@ -263,7 +306,7 @@ export async function getForeignKeys(
     sql: SqlAdapter,
     dbType: DbType,
     tableName: string
-): Promise<ForeignKeysResult> {
+): Promise<ForeignKeys> {
     await validateTableExists(sql, dbType, tableName);
 
     let references: FKReference[] = [];
@@ -418,7 +461,10 @@ export async function getForeignKeys(
         throw new Error(`Foreign key lookup not supported for database type: ${dbType}`);
     }
 
-    return { table: tableName, references, referencedBy };
+    return {
+        references: rowsFrom(['column', 'referencesTable', 'referencesColumn'], references as unknown as Record<string, unknown>[]),
+        referencedBy: rowsFrom(['fromTable', 'fromColumn', 'toColumn'], referencedBy as unknown as Record<string, unknown>[]),
+    };
 }
 
 /**
@@ -432,17 +478,8 @@ export async function getTableStats(
     await validateTableExists(sql, dbType, tableName);
 
     // Get column info first
-    const tableDesc = await describeTable(sql, dbType, tableName);
-    const columnNames: string[] = [];
-
-    // PostgreSQL/MSSQL use column_name, SQLite uses name, MySQL uses Field
-    for (const col of tableDesc.columns) {
-        const c = col as Record<string, unknown>;
-        const name = c.column_name || c.name || c.Field;
-        if (typeof name === 'string') {
-            columnNames.push(name);
-        }
-    }
+    const tableDesc = await describeColumns(sql, dbType, tableName);
+    const columnNames = tableDesc.rows.map((row) => String(row[0]));
 
     // Validate all column names upfront
     for (const colName of columnNames) {
@@ -472,7 +509,7 @@ export async function getTableStats(
             })
         );
 
-        return { table: tableName, rowCount, columns: columnStats };
+        return { rowCount, columns: rowsFrom(STATS_COLUMNS, columnStats as unknown as Record<string, unknown>[]) };
     }
 
     // Build a SINGLE query that gets all stats in one table scan (non-MSSQL)
@@ -494,8 +531,10 @@ export async function getTableStats(
         distinctCount: Number(row[`${col}_distinct_count`]) || 0,
     }));
 
-    return { table: tableName, rowCount, columns: columnStats };
+    return { rowCount, columns: rowsFrom(STATS_COLUMNS, columnStats as unknown as Record<string, unknown>[]) };
 }
+
+const STATS_COLUMNS = ['column', 'nullCount', 'distinctCount'];
 
 /**
  * Introspect full schema (all tables)
@@ -508,7 +547,13 @@ export async function introspectSchema(
     const schema: SchemaInfo = {};
 
     for (const table of tables) {
-        schema[table] = await describeTable(sql, dbType, table);
+        // A listed table whose name is not a safe identifier cannot be described safely
+        try {
+            validateIdentifier(table, 'table');
+        } catch {
+            continue;
+        }
+        schema[table] = await describeColumns(sql, dbType, table);
     }
 
     return schema;
