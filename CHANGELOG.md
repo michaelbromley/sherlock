@@ -32,6 +32,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `connection add --url-env VAR` takes the whole connection URL from a variable, such as a project's `DATABASE_URL`, storing only its name. With `--directory`, the variable is read from that project's `.env` first, then the environment, so an agent can set up a local project's database with no password to type
 - `introspect` no longer fails with `INTERNAL` on a connection whose name has a hyphen, such as `corner-shop`
 - A refused connection to this machine says the database isn't running, rather than suggesting a tunnel, and says a host name doesn't resolve only when it doesn't. `doctor` no longer suggests running `doctor`
+- In a pre-release, `sherlock guide` asks agents to record any problem with sherlock using `sherlock feedback "<summary>" --details -`. Entries go to `feedback.md` in sherlock's config directory, with passwords in URLs hidden. `INTERNAL` errors are recorded there on their own, with their stack trace
+- `--config` or `SHERLOCK_CONFIG` pointing at a directory is `CONFIG_NOT_FOUND`, not `INTERNAL`
 - The guide and skill tell agents not to change data by other means, such as `psql` or credentials found in the project, unless the user asks for it that way
 - `connection add --password-prompt` asks for the password at a hidden prompt and stores it in the keychain. An agent can set up a connection from the conversation and give you one command to run: you type only the password, which it never sees
 

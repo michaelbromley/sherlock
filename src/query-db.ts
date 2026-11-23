@@ -50,6 +50,7 @@ import { SherlockError, usageError, errorMessage, exitCodeFor } from './errors';
 import { Invocation, printEnvelope } from './output/envelope';
 import { printWarning, type SherlockWarning } from './output/warnings';
 import { lookupEnv, projectEnv } from './config/env-file';
+import { isPrerelease, recordFeedback } from './feedback';
 
 // Database
 import { withConnection, withConnectionFromConfig, type ConnectionOptions, type SqlAdapter } from './db/connection';
@@ -1162,6 +1163,27 @@ Anything cut is reported. --out writes every row to a file instead.`)
     // Connection Management Commands
     // ========================================================================
 
+    // Hidden in a full release: the guide asks for feedback only in a pre-release.
+    program
+        .command('feedback <summary>', { hidden: !isPrerelease(pkg.version) })
+        .description('Record a problem met while using a pre-release of sherlock, so it can be fixed')
+        .option('--details <text>', 'what you ran, what happened and what you expected; "-" reads it from stdin')
+        .addHelpText('after', `
+Appends an entry to feedback.md in sherlock's config directory, with the
+version and the current directory. Passwords in URLs are replaced with ***.`)
+        .action(respond(async (summary: string, cmdOpts: { details?: string }) => {
+            let details = cmdOpts.details;
+            if (details === '-') {
+                if (process.stdin.isTTY) throw usageError('--details - reads stdin, and stdin is a terminal.', '--details');
+                const chunks: Buffer[] = [];
+                for await (const chunk of process.stdin) chunks.push(Buffer.from(chunk));
+                details = Buffer.concat(chunks).toString('utf-8');
+            }
+            if (!summary.trim()) throw usageError('Give a one-line summary of the problem.');
+            const file = recordFeedback({ summary, details, version: pkg.version, source: 'reported' });
+            return { recorded: true, file };
+        }));
+
     program
         .command('guide [topic]')
         .description('Print the guide for AI agents using sherlock (topics: transfer)')
@@ -1611,6 +1633,25 @@ function keychainEntryNotFound(account: string): SherlockError {
     });
 }
 
+/**
+ * In a pre-release, an INTERNAL error is a bug by definition: record it in the
+ * feedback file, with its stack, so it reaches whoever fixes sherlock.
+ */
+function recordInternalError(error: { code: string; message: string }, thrown: unknown): void {
+    if (error.code !== 'INTERNAL' || !isPrerelease(pkg.version)) return;
+    try {
+        const file = recordFeedback({
+            summary: `INTERNAL error from sherlock ${invocation.command || '(no command)'}: ${error.message}`,
+            details: thrown instanceof Error && thrown.stack ? '```\n' + thrown.stack + '\n```' : undefined,
+            version: pkg.version,
+            source: 'automatic',
+        });
+        process.stderr.write(`Recorded in ${file}\n`);
+    } catch {
+        // Recording is a convenience; never let it hide the error itself
+    }
+}
+
 /** Warnings are for people too: each one goes to stderr as well as into the envelope */
 function printWarnings(): void {
     for (const warning of invocation.warnings.list) printWarning(warning);
@@ -1655,6 +1696,7 @@ async function main(): Promise<void> {
         process.stderr.write(`${failure.stack}\n`);
     }
     const envelope = invocation.fail(failure);
+    recordInternalError(envelope.error!, failure);
     let code: number;
     if (humanOutput(opts)) {
         if (envelope.data !== undefined) process.stdout.write(renderHuman(envelope.data) + '\n');

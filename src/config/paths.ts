@@ -112,7 +112,7 @@ export function findConfig(cliConfigPath?: string): FoundConfig | null {
     // 1. CLI flag
     if (cliConfigPath) {
         const resolved = path.resolve(cliConfigPath);
-        if (fs.existsSync(resolved)) {
+        if (fs.statSync(resolved, { throwIfNoEntry: false })?.isFile()) {
             return { path: resolved, source: 'cli' };
         }
         throw new SherlockError('CONFIG_NOT_FOUND', `Config file not found: ${resolved}`, {
@@ -124,7 +124,7 @@ export function findConfig(cliConfigPath?: string): FoundConfig | null {
     // 2. Environment variable
     if (process.env.SHERLOCK_CONFIG) {
         const envPath = path.resolve(process.env.SHERLOCK_CONFIG);
-        if (fs.existsSync(envPath)) {
+        if (fs.statSync(envPath, { throwIfNoEntry: false })?.isFile()) {
             return { path: envPath, source: 'env' };
         }
         throw new SherlockError('CONFIG_NOT_FOUND', `Config file not found: ${envPath} (from SHERLOCK_CONFIG env var)`, {
