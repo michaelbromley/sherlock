@@ -33,6 +33,8 @@ export interface ConnectionAddOptions {
     passwordEnv?: string;
     /** True when the password is being read from stdin and stored in the keychain */
     passwordStdin?: boolean;
+    /** True when the password is asked for at a hidden prompt and stored in the keychain */
+    passwordPrompt?: boolean;
 
     tunnelCommand?: string;
     tunnelLocalPort?: string;
@@ -198,8 +200,13 @@ export function buildConnectionConfig(name: string, opts: ConnectionAddOptions):
             '--from-url cannot be combined with --host, --port, --username or --database.'
         );
     }
-    if (opts.passwordStdin && opts.passwordEnv) {
-        throw inputError('--password-stdin and --password-env cannot both be given.');
+    const passwordSources = [
+        opts.passwordStdin && '--password-stdin',
+        opts.passwordPrompt && '--password-prompt',
+        opts.passwordEnv !== undefined && '--password-env',
+    ].filter(Boolean);
+    if (passwordSources.length > 1) {
+        throw inputError(`${passwordSources.join(' and ')} cannot be given together. Choose one way to supply the password.`);
     }
 
     const fromUrl = opts.fromUrl ? parseConnectionUrl(opts.fromUrl) : null;
@@ -226,6 +233,7 @@ export function buildConnectionConfig(name: string, opts: ConnectionAddOptions):
             opts.username !== undefined && '--username',
             opts.ssl !== undefined && '--ssl',
             opts.passwordStdin && '--password-stdin',
+            opts.passwordPrompt && '--password-prompt',
             opts.passwordEnv !== undefined && '--password-env',
         ].filter(Boolean);
         if (ignored.length > 0) {
@@ -296,7 +304,7 @@ export function buildConnectionConfig(name: string, opts: ConnectionAddOptions):
  */
 function buildPasswordRef(name: string, opts: ConnectionAddOptions): CredentialRef | undefined {
     if (opts.passwordEnv) return { $env: opts.passwordEnv };
-    if (opts.passwordStdin) return { $keychain: name };
+    if (opts.passwordStdin || opts.passwordPrompt) return { $keychain: name };
     return undefined;
 }
 

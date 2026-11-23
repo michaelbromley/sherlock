@@ -157,6 +157,18 @@ describe('connection and setup commands', () => {
         expect(envelope.warnings.map((w) => w.code)).toEqual(['NO_PASSWORD']);
     });
 
+    it('connection add --password-prompt refuses at once without a terminal, saving nothing', () => {
+        const envelope = run(
+            ['connection', 'add', 'prompted', '--type', 'postgres', '--host', 'db', '--username', 'u', '--database', 'd', '--password-prompt'],
+            { ok: false, code: 'USAGE', command: 'connection add' }
+        );
+        expect(envelope.error?.details).toEqual({ flag: '--password-prompt' });
+        // connection add writes the user config, not --config
+        const userConfig = path.join(dir, 'xdg', 'sherlock', 'config.json');
+        const written = fs.existsSync(userConfig) ? fs.readFileSync(userConfig, 'utf-8') : '';
+        expect(written).not.toContain('prompted');
+    });
+
     it('doctor', () => {
         const { data } = run(['doctor', 'app'], { ok: true, command: 'doctor' });
         expect(data).toEqual({ checks: expect.any(Array) });

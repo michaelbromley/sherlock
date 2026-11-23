@@ -29,6 +29,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - PostgreSQL now runs on the `postgres` package, MySQL on `mysql2` and SQLite on `bun:sqlite`, instead of Bun's built-in client, which reports no column names or types
 - A SQLite file that does not exist is `NOT_FOUND`, instead of being created empty
 - **Removed:** the hidden `connections`, `test` and `init` commands. Use `connection list`, `doctor` and `manage`
+- `connection add --password-prompt` asks for the password at a hidden prompt and stores it in the keychain. An agent can set up a connection from the conversation and give you one command to run: you type only the password, which it never sees
 
 ### Added
 

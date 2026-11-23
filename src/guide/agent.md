@@ -68,7 +68,17 @@ sherlock -c <conn> command GET mykey    # Execute any read-only Redis command
 
 ## Setting Up a Connection
 
-Add a connection without the interactive wizard. The password is read from stdin and stored in the OS keychain, so it never appears in the process list or the shell history.
+Add a connection without the interactive wizard. The password is stored in the OS keychain, and never appears in the process list, the shell history, or your context.
+
+**When the user asks you to set up a connection, do everything except the password.** Work out the details from the conversation and the project: the type, host, port, database, username, SSL, a tunnel, and a short connection name. Ask only for what you cannot find. Then give the user one command to run in their own terminal, ending in `--password-prompt`:
+
+```bash
+sherlock connection add prod --type postgres --host db.example.com --database app --username dbuser --ssl require --password-prompt
+```
+
+It checks every flag first, then asks them for the password at a hidden prompt and stores it in the keychain. Give it as a single line they can paste, and tell them it will ask for the password. When they say it is done, run `sherlock doctor <name>` and report what it finds. If the command failed, they will tell you the error: it names the flag, so fix the command and give it to them again. Run the command yourself only to check it, without `--password-prompt`: it fails with `USAGE` when there is no terminal to ask in.
+
+When the password is already in an environment variable, use `--password-env VAR` and run the command yourself. To script it, pipe the password in with `--password-stdin`:
 
 ```bash
 # a Northflank addon, forwarded through the Northflank API
@@ -98,7 +108,7 @@ printf '%s' "$PASSWORD" | sherlock connection add bastion \
 - Bad flag combinations fail immediately with `USAGE`, naming the flag in `details.flag`, before anything is written.
 - Things worth knowing about the new connection, such as `NO_PASSWORD`, come back as warnings.
 
-Ask the user for the password rather than guessing it, and never pass it as a command-line argument.
+Never ask the user to tell you a password, never guess one, and never pass one as a command-line argument: `--password-prompt` lets them type it where you cannot see it.
 
 `connection add --password-stdin` stores the password in the OS keychain. Connections created in other ways may keep it elsewhere: `{ "$env": "VAR" }` (read from the environment or the sherlock `.env` file), `{ "$keychain": "name" }`, or a plaintext string in config.json. A plaintext password brings a `PLAINTEXT_PASSWORD` warning on every command that uses it.
 

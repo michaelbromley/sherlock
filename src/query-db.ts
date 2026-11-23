@@ -111,6 +111,8 @@ const FORMATS = ['json', 'human', 'markdown'] as const;
  */
 let commandData: unknown = null;
 let printsItself = false;
+/** Set by a command a person runs, such as connection add --password-prompt, unless -f is given */
+let preferHumanOutput = false;
 
 /**
  * An action that returns its data instead of printing it. One place prints
@@ -140,7 +142,7 @@ function interactive(command: string): void {
 
 /** Whether output is for people rather than the envelope */
 function humanOutput(opts: CliOptions): boolean {
-    return opts.format === 'human' || opts.format === 'markdown';
+    return preferHumanOutput || opts.format === 'human' || opts.format === 'markdown';
 }
 
 /** Things worth knowing about a connection just added, as warnings */
@@ -1234,6 +1236,7 @@ TUNNEL_DOWN), details.check names the check, and data still holds every check.`)
         .option('--logging', 'record queries for this connection')
         .option('--directory <path>', 'auto-select this connection when inside this directory (stored as an absolute path)')
         .option('--password-stdin', 'read the password from stdin and store it in the OS keychain')
+        .option('--password-prompt', 'ask for the password at a hidden prompt and store it in the OS keychain: for a command an agent gives a person to run')
         .option('--password-env <var>', 'read the password from this environment variable at query time')
         .option('--tunnel-command <cmd>', 'port-forwarding command; use {{port}} where it takes a local port')
         .option('--tunnel-northflank <project/addon>', 'a northflank CLI command tunnel (prefer --tunnel-provider northflank)')
@@ -1287,6 +1290,34 @@ TUNNEL_DOWN), details.check names the check, and data still holds every check.`)
                 const password = await readPasswordFromStdin();
                 if (password === null) {
                     throw usageError('--password-stdin was given but stdin was empty.', '--password-stdin');
+                }
+                setKeychainPassword(name, password);
+            }
+
+            // The flow for an agent: it writes the whole command, a person runs
+            // it and types the password, which the agent never sees. Every
+            // other flag has been checked by now, so a mistake fails before the
+            // person is asked anything.
+            if (cmdOpts.passwordPrompt) {
+                if (!process.stdin.isTTY) {
+                    throw usageError(
+                        '--password-prompt asks for the password in a terminal, and there is none.',
+                        '--password-prompt',
+                        'Give the user this command to run in their own terminal, or pipe the password in with --password-stdin.'
+                    );
+                }
+                // A person is running this, so the result is for them
+                if (program.getOptionValueSource('format') !== 'cli') preferHumanOutput = true;
+                const password = await p.password({ message: `Password for "${name}"`, output: process.stderr });
+                if (p.isCancel(password)) {
+                    throw usageError('Cancelled at the password prompt. Nothing was saved.', '--password-prompt');
+                }
+                if (!password) {
+                    throw usageError(
+                        'No password was entered. Nothing was saved.',
+                        '--password-prompt',
+                        'Run the command again and type the password, or leave --password-prompt out if the database needs none.'
+                    );
                 }
                 setKeychainPassword(name, password);
             }

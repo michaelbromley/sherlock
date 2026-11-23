@@ -108,10 +108,17 @@ describe('buildConnectionConfig — passwords', () => {
         expect(buildConnectionConfig('prod', BASE).password).toBeUndefined();
     });
 
-    it('refuses both password sources at once', () => {
+    it('refuses more than one password source', () => {
         expect(() =>
             buildConnectionConfig('prod', { ...BASE, passwordStdin: true, passwordEnv: 'X' })
-        ).toThrow(/cannot both be given/);
+        ).toThrow(/--password-stdin and --password-env cannot be given together/);
+        expect(() =>
+            buildConnectionConfig('prod', { ...BASE, passwordPrompt: true, passwordStdin: true })
+        ).toThrow(expect.objectContaining({ code: 'USAGE', details: { flag: '--password-stdin' } }));
+    });
+
+    it('stores a prompted password as the connection\'s keychain entry', () => {
+        expect(buildConnectionConfig('prod', { ...BASE, passwordPrompt: true }).password).toEqual({ $keychain: 'prod' });
     });
 
     it('never copies a password out of the URL into the config', () => {

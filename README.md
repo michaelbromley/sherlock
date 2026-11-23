@@ -63,7 +63,16 @@ After the details, you'll choose secure password storage (OS keychain or env fil
 
 #### Without the wizard
 
-`sherlock connection add` sets up a connection in one command, for scripting or for asking your agent to do it. The password is read from stdin and stored in the OS keychain, so it never appears in the process list or the shell history.
+`sherlock connection add` sets up a connection in one command. The password is stored in the OS keychain, so it never appears in the process list or the shell history.
+
+The easiest way is to ask your agent: "set up a connection to the staging database". It works out the details from your conversation and project, and gives you one command to run, ending in `--password-prompt`. Run it, type the password at the hidden prompt, and tell the agent it's done. The agent never sees the password.
+
+```bash
+sherlock connection add prod --type postgres --host db.example.com --database app --username dbuser \
+  --ssl require --password-prompt
+```
+
+For scripts, pipe the password in with `--password-stdin` instead:
 
 ```bash
 printf '%s' "$PASSWORD" | sherlock connection add prod \
