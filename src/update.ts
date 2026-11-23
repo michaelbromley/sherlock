@@ -69,13 +69,35 @@ function isCompiledBinary(): boolean {
 // ============================================================================
 
 /** Compare two semver strings. Returns -1 | 0 | 1 */
-function compareSemver(a: string, b: string): number {
-    const pa = a.split('.').map(Number);
-    const pb = b.split('.').map(Number);
+/**
+ * Compare two versions as semver does: the numbers first, then a version with
+ * a pre-release tag ("2.0.0-beta.1") comes before the same version without one,
+ * and pre-release tags compare part by part, numbers below words.
+ */
+export function compareSemver(a: string, b: string): number {
+    const parse = (version: string) => {
+        const [core, pre] = version.replace(/^v/, '').split('+')[0].split(/-(.*)/s);
+        return { core: core.split('.').map((n) => Number(n) || 0), pre: pre ? pre.split('.') : [] };
+    };
+    const pa = parse(a);
+    const pb = parse(b);
     for (let i = 0; i < 3; i++) {
-        const diff = (pa[i] ?? 0) - (pb[i] ?? 0);
-        if (diff < 0) return -1;
-        if (diff > 0) return 1;
+        const diff = (pa.core[i] ?? 0) - (pb.core[i] ?? 0);
+        if (diff !== 0) return diff < 0 ? -1 : 1;
+    }
+    if (pa.pre.length === 0 || pb.pre.length === 0) {
+        return pa.pre.length === pb.pre.length ? 0 : pa.pre.length === 0 ? 1 : -1;
+    }
+    for (let i = 0; i < Math.max(pa.pre.length, pb.pre.length); i++) {
+        const x = pa.pre[i];
+        const y = pb.pre[i];
+        if (x === undefined) return -1;
+        if (y === undefined) return 1;
+        const xNum = /^\d+$/.test(x);
+        const yNum = /^\d+$/.test(y);
+        if (xNum && yNum && Number(x) !== Number(y)) return Number(x) < Number(y) ? -1 : 1;
+        if (xNum !== yNum) return xNum ? -1 : 1;
+        if (x !== y) return x < y ? -1 : 1;
     }
     return 0;
 }
