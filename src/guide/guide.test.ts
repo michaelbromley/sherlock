@@ -2,6 +2,8 @@ import { describe, it, expect } from 'bun:test';
 import { spawnSync } from 'node:child_process';
 import * as path from 'path';
 import { GUIDE_TOPICS, guideText } from './index';
+import { CONTRACT_PLACEHOLDER } from './contract';
+import { ERROR_CODES, WARNING_CODES } from '../errors/codes';
 
 const CLI = path.join(import.meta.dir, '..', 'query-db.ts');
 
@@ -167,6 +169,23 @@ function inlineFlags(markdown: string): string[] {
 
 // ---------------------------------------------------------------------------
 
+describe('the contract reference', () => {
+    const main = guideText(undefined, '0.0.0');
+
+    it('replaces its placeholder in the main guide', () => {
+        expect(main).not.toContain(CONTRACT_PLACEHOLDER);
+        expect(main).toContain('## Error codes');
+    });
+
+    it('lists every error and warning code with its details keys', () => {
+        for (const [code, info] of Object.entries({ ...ERROR_CODES, ...WARNING_CODES })) {
+            const row = main.split('\n').find((line) => line.startsWith(`| \`${code}\` |`));
+            expect(row).toBeDefined();
+            for (const key of info.details) expect(row).toContain(`\`${key}\``);
+        }
+    });
+});
+
 describe('guideText', () => {
     it('prints the main guide by default, with the version and the other topics', () => {
         const text = guideText(undefined, '9.9.9');
@@ -176,7 +195,7 @@ describe('guideText', () => {
 
     it('prints a topic, pointing back to the main guide', () => {
         expect(guideText('transfer', '1.0.0')).toContain('# Moving Connections to Another Machine');
-        expect(guideText('transfer', '1.0.0')).toContain('- `sherlock guide`: querying');
+        expect(guideText('transfer', '1.0.0')).toContain('- `sherlock guide`: the output and error codes, querying');
     });
 
     it('lists the topics when one does not exist', () => {

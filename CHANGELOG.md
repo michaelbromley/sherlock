@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### 2.0: one output contract
+
+**Every command's output changes.** Scripts and prompts that parse sherlock's output need converting; agents using the skill read the new output from `sherlock guide`. There is no flag that restores the 1.x output: stay on the last 1.x release until your scripts are converted.
+
+- Every command prints one JSON object on stdout, on one line: `{ ok, data, error, warnings, meta }`. The exit code follows `ok`: 0, 1, or 2 for a usage error. Errors move from stderr to stdout. `meta.contract` is `2`
+- Every failure has a stable `error.code`, such as `AUTH_FAILED`, `TUNNEL_DOWN`, `QUERY_FAILED` or `QUERY_REFUSED`, with a `message`, a `fix` and `details`. `sherlock guide` lists every code, generated from the code itself
+- **A query the database rejects exits 1** with `QUERY_FAILED`. It used to print `{"error": ...}` on stdout and exit 0
+- Warnings that were coloured lines on stderr come back in `warnings` with a code, such as `PLAINTEXT_PASSWORD`, `CONFIG_SHADOWED` and `NO_PASSWORD`
+- Rows come back as arrays, with the column names and types once in `columns`, so duplicate and numeric column names survive and an empty result keeps its columns
+- **Results are capped by default** at 200 rows, 500 characters per cell and 32 KB, and anything cut is reported in `truncated` and a `RESULT_TRUNCATED` warning. `--max-rows`, `--max-cell`, `--max-bytes` and `--no-limit` change them for a command, and `maxRows`, `maxCellChars` and `maxBytes` for a connection. The database stops after the cap where it can, so a large table is not read just to be cut
+- `--out <file.jsonl|file.csv>` on `query`, `sample` and `introspect` writes the whole result to a file and returns the path, row count, columns and a 20-row preview
+- `describe` returns the same columns on every database: `name`, `type`, `nullable`, `default`, `primaryKey`. `stats`, `fk`, `indexes` and `introspect` return results. `introspect`'s cache information moves from `_cache` into `data.cache`, a stale cache is a `SCHEMA_CACHE_STALE` warning, and the size cap drops whole tables. A schema cached by 1.x is read again
+- `doctor`'s error is the failed check's cause, with `details.check`; `tunnel stop <name>` of a tunnel that is not running is `NOT_FOUND`, and `keychain list` with a missing password `CREDENTIAL_MISSING`. All three keep their report in `data`
+- `connection list` returns `{ connections: [summary] }`; the separate list of names goes
+- Redis results are held to the caps by their own unit. `get --limit` now limits a hash's fields too. `get` and `inspect` of a key that does not exist are `NOT_FOUND`
+- `-f human` prints readable tables and text for every command instead of the envelope. `-f markdown` is another name for it, and `-f json` is the default
+- `update` asks before installing in a terminal, takes `--yes` to install without asking, and fails at once with `USAGE` when there is no terminal and no `--yes`. It returns `{ from, to, updated }`
+- `manage`, `config export`, `config import` and `keychain set` fail at once with `USAGE` when there is no terminal, instead of waiting at a prompt
+- `guide --json` returns the guide as `{ topic, text }`
+- PostgreSQL now runs on the `postgres` package, MySQL on `mysql2` and SQLite on `bun:sqlite`, instead of Bun's built-in client, which reports no column names or types
+- A SQLite file that does not exist is `NOT_FOUND`, instead of being created empty
+- **Removed:** the hidden `connections`, `test` and `init` commands. Use `connection list`, `doctor` and `manage`
+
 ### Added
 
 - **Tunnel providers.** A `tunnel` block can name a `provider` instead of giving a `command`. The first is `northflank`, which forwards an addon through the Northflank API using a named context from the Northflank CLI config (`"context"`, `"project"`, `"addon"`). It never reads or changes the CLI's current context, needs no root, and defaults to the addon's read replica when it has one (`"endpoint": "read" | "primary"`). `"configDir"` points at a separate CLI config directory. A `tunnel` block with no `provider` behaves exactly as before
@@ -22,7 +45,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - **The agent skill is now a short pointer to `sherlock guide`.** It keeps the description that tells agents when to use sherlock, how to find the binary, and the rules that apply to every version. Everything else moved into the guide, so updating the binary updates what agents are told. Update the skill with `npx skills update sherlock -g`
-- Every PostgreSQL and MySQL/MariaDB statement now runs in a read-only transaction that is rolled back, so the database refuses writes the keyword check cannot see, such as those made by functions. The statement is sent as a prepared statement, so the server also refuses a second statement chained after it. SQLite connections refuse writes with `query_only`
+- Every PostgreSQL and MySQL/MariaDB statement now runs in a read-only transaction that is rolled back, so the database refuses writes the keyword check cannot see, such as those made by functions. On MySQL the session is read-only as well, since a DDL statement commits the transaction implicitly and would otherwise run outside it. The statement is sent through a protocol on which the server refuses a second statement chained after it. SQLite databases are opened read-only
 - The read-only check ignores string literals, quoted identifiers and comments, following the quoting rules of the database the connection resolves to. Line comments end at a carriage return as well as a line feed. `WHERE action = 'delete'` and `SELECT 'a;b'` are no longer rejected. `SELECT ... INTO` and MySQL executable comments (`/*! ... */`) are now rejected
 - The default Northflank `endpointPattern` also matches the CLI's newer `exposed locally on` wording
 
@@ -34,15 +57,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Deleting a connection removes only the keychain entry it uses, and stops its tunnel
 - "Update password" refuses an empty password, which pointed the connection at a password that was never stored, and is not offered for SQLite
 - Updating a password in the `.env` file no longer corrupts one containing `$&` or `$1`
-- `sherlock migrate` backs up an existing `.env` instead of overwriting it, and `sherlock init` leaves an existing `.env` alone. A missing legacy config no longer ends the `manage` session
+- `sherlock migrate` backs up an existing `.env` instead of overwriting it. A missing legacy config no longer ends the `manage` session
 - `sherlock keychain get` reports whether an entry exists instead of printing the password
-- `sherlock keychain list` and the keychain check in `manage` show where each password comes from (keychain, environment variable, plaintext, URL, none), not only whether a keychain entry is named after the connection. `keychain list` now prints JSON (`{"passwords": [{"connection", "ok", "source"}]}`) and exits 1 when any password cannot be found
+- `sherlock keychain list` and the keychain check in `manage` show where each password comes from (keychain, environment variable, plaintext, URL, none), not only whether a keychain entry is named after the connection
 - Messages that name sherlock's default variables, such as `SHERLOCK_PROD_DB_PASSWORD`, spell a hyphenated connection name with underscores, as sherlock reads it
 - "Test connection" in `manage` runs the same checks as `sherlock doctor`, and the connection list there shows each connection's target and tunnel
-- Every non-interactive command reports errors as `{"error": "..."}` on stderr and exits 1. Some printed a plain `Error:` line. `tunnel stop <name>` exits 1 when no such tunnel is running, and `update` exits 1 when it fails
-- The "no configuration file" error and the steps `init` and `migrate` print point at `manage`, `connection add`, `connection list` and `doctor`, rather than hidden commands. The unreachable "Initialize config template" menu item is gone
+- The "no configuration file" error and the steps `migrate` prints point at `manage`, `connection add`, `connection list` and `doctor`, rather than hidden commands. The unreachable "Initialize config template" menu item is gone
 - `query ""` says the query is empty, and the port prompt in `manage` accepts only 1 to 65535
-- The hidden `sherlock test <connection>` command no longer fails on SQL connections
 - `connection add --directory .` stored the relative path, which made the connection auto-select in every directory. Directories are now stored absolute
 - A connection that cannot reach its server says which host and port it tried, instead of "Failed to connect" or "Max reconnection attempts reached"
 - The read-only check allows the `REPLACE()` and `TRUNCATE()` functions and a column called `comment`, and suggests quoting when a keyword may be a name
@@ -50,7 +71,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Editing a connection in `sherlock manage` keeps its `statementTimeout` and `connectTimeout`
 - An unparseable connection URL is no longer quoted, password included, in the error
 - A tunnel block with a provider's settings but no `"provider"` says which provider it looks like
-- `connection add` suggests `info` rather than `tables` for Redis, and `doctor` for a tunnelled connection; notes a connection stored with no password and `--ssl verify` combined with a tunnel; and refuses `--password-stdin` from a terminal instead of waiting forever
+- `connection add` suggests `info` rather than `tables` for Redis, and `doctor` for a tunnelled connection; warns about a connection stored with no password and `--ssl verify` combined with a tunnel; and refuses `--password-stdin` from a terminal instead of waiting forever
 - Tunnels are reported in one shape everywhere (`kind`, `provider`, `target`, `details`) by `connection add`, `connection list` and `tunnel status`
 - `doctor` advises on a missing credential by its cause, and no longer suggests `echo`ing a password
 
