@@ -190,16 +190,19 @@ describe('guideText', () => {
     it('prints the main guide by default, with the version and the other topics', () => {
         const text = guideText(undefined, '9.9.9');
         expect(text.startsWith('<!-- sherlock 9.9.9 -->\n# Sherlock: agent guide')).toBe(true);
+        expect(text).toContain('- `sherlock guide setup`: setting up a connection');
         expect(text).toContain('- `sherlock guide transfer`: moving connections');
     });
 
     it('prints a topic, pointing back to the main guide', () => {
         expect(guideText('transfer', '1.0.0')).toContain('# Moving Connections to Another Machine');
         expect(guideText('transfer', '1.0.0')).toContain('- `sherlock guide`: the output and error codes, querying');
+        expect(guideText('setup', '1.0.0')).toContain('# Setting Up a Connection');
+        expect(guideText('setup', '1.0.0')).not.toContain('## Error codes');
     });
 
     it('lists the topics when one does not exist', () => {
-        expect(() => guideText('nope', '1.0.0')).toThrow(/No guide topic "nope". Topics: main .*, transfer/);
+        expect(() => guideText('nope', '1.0.0')).toThrow(/No guide topic "nope". Topics: main .*, setup .*, transfer/);
     });
 
     it('does not treat inherited object keys as topics', () => {

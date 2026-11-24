@@ -7,6 +7,8 @@
  * caching, and logging are handled by separate modules.
  */
 
+import * as fs from 'fs';
+import * as path from 'path';
 import { Command, CommanderError } from 'commander';
 import * as p from '@clack/prompts';
 
@@ -1186,7 +1188,7 @@ version and the current directory. Passwords in URLs are replaced with ***.`)
 
     program
         .command('guide [topic]')
-        .description('Print the guide for AI agents using sherlock (topics: transfer)')
+        .description('Print the guide for AI agents using sherlock (topics: setup, transfer)')
         .option('--json', 'return the guide in the envelope, as { topic, text }')
         .action(respond(async (topic: string | undefined, cmdOpts: { json?: boolean }) => {
             const { guideText } = await import('./guide');
@@ -1198,6 +1200,36 @@ version and the current directory. Passwords in URLs are replaced with ***.`)
                 return null;
             }
             return { topic: topic ?? 'main', text };
+        }));
+
+    program
+        .command('agents-md')
+        .description("Write a short section about sherlock to the project's AGENTS.md or CLAUDE.md")
+        .option('--directory <path>', 'the project directory (default: the current directory)')
+        .option('--file <name>', 'the file to write, relative to the project (default: CLAUDE.md if it does not bring in AGENTS.md, otherwise AGENTS.md)')
+        .option('--print', 'return the section without writing it')
+        .addHelpText('after', `
+The section names the connections whose directory is this project, and the
+rules an agent needs before its first sherlock command. Agents read AGENTS.md
+or CLAUDE.md in every session, so they see it without running 'sherlock guide'.
+Running it again replaces the section, and leaves the rest of the file alone.`)
+        .action(respond(async (cmdOpts: { directory?: string; file?: string; print?: boolean }) => {
+            const { projectConnections, agentsSection, chooseAgentsFile, writeAgentsSection } = await import('./agents-md');
+            const projectDir = path.resolve(cmdOpts.directory ?? process.cwd());
+            if (!fs.existsSync(projectDir) || !fs.statSync(projectDir).isDirectory()) {
+                throw usageError(`--directory ${projectDir} is not a directory.`, '--directory');
+            }
+            let connections: ReturnType<typeof projectConnections> = [];
+            try {
+                connections = projectConnections(loadConfigFile(program.opts<CliOptions>().config), projectDir);
+            } catch (error) {
+                if (!(error instanceof SherlockError && error.code === 'CONFIG_NOT_FOUND')) throw error;
+            }
+            const section = agentsSection(connections);
+            const names = connections.map((c) => c.name);
+            if (cmdOpts.print) return { connections: names, text: section };
+            const file = cmdOpts.file ? path.resolve(projectDir, cmdOpts.file) : chooseAgentsFile(projectDir);
+            return { file, action: writeAgentsSection(file, section), connections: names };
         }));
 
     program

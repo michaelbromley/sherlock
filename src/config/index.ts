@@ -6,6 +6,7 @@ import {
     findConfig,
     getConfigDir,
     getEnvFilePath,
+    realDirectory,
     type ConfigSource,
 } from './paths';
 import { getCredentialResolver } from '../credentials';
@@ -66,7 +67,7 @@ export function loadConfigFile(configPath?: string, warnings: WarningSink = stde
             `${path.join(getConfigDir(), 'config.json')} (user config), or the file named by --config ` +
             `or the SHERLOCK_CONFIG environment variable.`,
             {
-                fix: "Add a connection with 'sherlock connection add <name> ...' (see --help), or run 'sherlock manage'.",
+                fix: "Add a connection with 'sherlock connection add <name> ...': 'sherlock guide setup' shows how. Or run 'sherlock manage'.",
                 details: { searched: discoveredConfigs().map((candidate) => candidate.path) },
             }
         );
@@ -157,7 +158,7 @@ export function getConnectionConfig(
         throw new SherlockError('CONNECTION_NOT_FOUND', `Connection "${connectionName}" not found in config.`, {
             fix: available.length > 0
                 ? `Use one of: ${available.join(', ')}.`
-                : "The config has no connections. Add one with 'sherlock connection add <name> ...'.",
+                : "The config has no connections. Add one with 'sherlock connection add <name> ...': 'sherlock guide setup' shows how.",
             details: { connection: connectionName, available },
         });
     }
@@ -756,14 +757,15 @@ export function detectConnectionFromCwd(configPath?: string): string | null {
         return null;
     }
 
-    const cwd = process.cwd();
+    // Both through symlinks, so a directory saved as /tmp/x matches /private/tmp/x
+    const cwd = realDirectory(process.cwd());
     let bestMatch: string | null = null;
     let bestLength = 0;
 
     for (const [name, conn] of Object.entries(config.connections)) {
         if (!conn.directory) continue;
 
-        const resolved = path.resolve(conn.directory);
+        const resolved = realDirectory(conn.directory);
         // Check if cwd is the directory itself or a subdirectory
         if (cwd === resolved || cwd.startsWith(resolved + path.sep)) {
             if (resolved.length > bestLength) {
