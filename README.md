@@ -12,7 +12,7 @@ Sherlock comes in two parts:
 - **Single binary** - Standalone executable, no runtime dependencies
 - **Secure credentials** - Passwords in the OS keychain or environment variables. Plaintext in config is possible but warned about on every query.
 - **Read-only enforced** - SQL: a single SELECT/SHOW/DESCRIBE/EXPLAIN/WITH statement, run in a read-only transaction that is always rolled back. Redis: read-only command whitelist
-- **Explicit connections** - Name the database to query, or let a project directory select it. There is no default connection, so no accidental production queries.
+- **Explicit connections** - Every command names the database it reads. There is no default connection, so no accidental production queries.
 - **Multiple databases** - PostgreSQL, MySQL/MariaDB, SQL Server, SQLite, Redis
 - **SSL/TLS support** - Works with managed databases (Northflank, Supabase, Neon, RDS, Azure SQL) that require encrypted connections
 - **Automatic tunnels** - Databases behind a port-forward open on first use and shut down when idle: Northflank addons through the Northflank API, anything else (kubectl, ssh) through a command
@@ -111,7 +111,10 @@ Running the install command again also upgrades the binary.
 
 ### Upgrading from 1.x to 2.0
 
-2.0 changes the output of every command, so scripts that parse sherlock's output need converting; see [Output](#output). Agents with the sherlock skill read the new output from `sherlock guide` and need nothing. To keep 1.x output while you convert scripts, stay on the last 1.x release.
+Your connections, keychain passwords, tunnels and cached schemas carry over as they are. Two things need doing:
+
+- **Update the agent skill** with `npx skills update sherlock -g`. The 1.x skill describes the 1.x output and doesn't know about `sherlock guide`. The 2.0 skill sends agents to `sherlock guide`, which always matches the installed binary.
+- **Convert scripts that parse sherlock's output.** Every command's output changes; see [Output](#output). To keep the 1.x output while you convert them, stay on the last 1.x release.
 
 ### Upgrading from 1.7.0 or earlier
 
@@ -577,7 +580,7 @@ sherlock config import <file> # Add the connections from an export file
 ### Options
 
 ```bash
--c, --connection <name>    # Connection to use (required unless -u is given or a project directory selects one)
+-c, --connection <name>    # Connection to use (required unless -u is given)
 -u, --url <url>            # Connect to a database URL without saving it
 --config <path>            # Override config file location
 --no-log                   # Disable query logging (overrides config)
@@ -654,7 +657,7 @@ sherlock -u "postgres://dbuser:password@localhost:5432/chinook" query "SELECT na
 ## Security
 
 - **Read-only enforced** - SQL: INSERT, UPDATE, DELETE, DROP etc. are blocked, and the database itself refuses writes (see below). Redis: SET, DEL, FLUSHDB etc. are blocked
-- **No default connection** - A query names its connection with `-c`, or runs inside a directory configured for one
+- **No default connection** - A query names its connection with `-c`, or a URL with `-u`
 - **Secure credential storage** - Keychain or env vars. A plaintext password in config works, with a `PLAINTEXT_PASSWORD` warning on every command that uses it
 - **Config permissions** - Files created with 0600 (owner read/write only)
 - **Query validation** - SQL: one statement only, and dangerous keywords blocked even in subqueries. String literals, quoted identifiers and comments are set aside first, following each database's quoting rules, so `WHERE action = 'delete'` is allowed. MySQL executable comments (`/*! ... */`) are refused. Redis: whitelist of allowed commands with subcommand validation

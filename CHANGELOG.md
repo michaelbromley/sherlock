@@ -7,9 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.0.0] - 2026-11-24
+
 ### 2.0: one output contract
 
-**Every command's output changes.** Scripts and prompts that parse sherlock's output need converting; agents using the skill read the new output from `sherlock guide`. There is no flag that restores the 1.x output: stay on the last 1.x release until your scripts are converted.
+**Every command's output changes.** Scripts and prompts that parse sherlock's output need converting. Update the agent skill with `npx skills update sherlock -g`: the 2.0 skill has agents read the new output from `sherlock guide`. There is no flag that restores the 1.x output: stay on the last 1.x release until your scripts are converted.
 
 - Every command prints one JSON object on stdout, on one line: `{ ok, data, error, warnings, meta }`. The exit code follows `ok`: 0, 1, or 2 for a usage error. Errors move from stderr to stdout. `meta.contract` is `2`
 - Every failure has a stable `error.code`, such as `AUTH_FAILED`, `TUNNEL_DOWN`, `QUERY_FAILED` or `QUERY_REFUSED`, with a `message`, a `fix` and `details`. `sherlock guide` lists every code, generated from the code itself
@@ -29,10 +31,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - PostgreSQL now runs on the `postgres` package, MySQL on `mysql2` and SQLite on `bun:sqlite`, instead of Bun's built-in client, which reports no column names or types
 - A SQLite file that does not exist is `NOT_FOUND`, instead of being created empty
 - **Removed:** the hidden `connections`, `test` and `init` commands. Use `connection list`, `doctor` and `manage`
+- **A connection is no longer picked by the current directory.** Every command names its connection with `-c` or `-u`, as the skill always told agents to. Without one, `CONNECTION_REQUIRED`'s fix names the connections whose `directory` is the current project. `directory` stays: `--url-env` reads that project's `.env`, and `agents-md` names its connections. A relative `directory` saved by 1.x is ignored
 - `connection add --url-env VAR` takes the whole connection URL from a variable, such as a project's `DATABASE_URL`, storing only its name. With `--directory`, the variable is read from that project's `.env` first, then the environment, so an agent can set up a local project's database with no password to type
 - `introspect` no longer fails with `INTERNAL` on a connection whose name has a hyphen, such as `corner-shop`
 - A refused connection to this machine says the database isn't running, rather than suggesting a tunnel, and says a host name doesn't resolve only when it doesn't. `doctor` no longer suggests running `doctor`
-- In a pre-release, `sherlock guide` asks agents to record any problem with sherlock using `sherlock feedback "<summary>" --details -`. Entries go to `feedback.md` in sherlock's config directory, with passwords in URLs hidden. `INTERNAL` errors are recorded there on their own, with their stack trace
 - `--config` or `SHERLOCK_CONFIG` pointing at a directory is `CONFIG_NOT_FOUND`, not `INTERNAL`
 - The guide and skill tell agents not to change data by other means, such as `psql` or credentials found in the project, unless the user asks for it that way
 - `sherlock agents-md` writes a short section to the project's AGENTS.md or CLAUDE.md, naming the project's connections and the rules agents must follow. Agents read that file in every session, so they see the rules even when they don't open the skill. Running it again replaces only its own section

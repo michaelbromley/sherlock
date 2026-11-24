@@ -295,7 +295,7 @@ export function buildConnectionConfig(name: string, opts: ConnectionAddOptions):
 
     if (opts.logging) config.logging = true;
     // Stored absolute: a relative path would be resolved against wherever
-    // sherlock runs later, so "." would auto-select this connection everywhere.
+    // sherlock runs later, so "." would match every directory.
     if (opts.directory) config.directory = path.resolve(opts.directory);
     if (tunnel) config.tunnel = tunnel;
 

@@ -31,7 +31,7 @@ export interface ConnectionConfig {
     /** Alias for filename (for sqlite type) */
     path?: string;
 
-    /** Project directory - auto-selects this connection when cwd is inside this path */
+    /** The project's directory: `--url-env` reads its .env, and `agents-md` names this connection there. Never selects the connection. */
     directory?: string;
 
     /** Enable query logging for this connection (default: false) */

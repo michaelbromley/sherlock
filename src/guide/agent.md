@@ -68,7 +68,7 @@ sherlock -c <conn> command GET mykey    # Execute any read-only Redis command
 - **No writes by other means**: sherlock is read-only on purpose. When the user asks you to change data, such as fixing a row or reinstating an account, say that sherlock can't, and give them the SQL to run themselves. Don't make the change another way, with `psql`, the app's code, or credentials you found in the project, unless the user explicitly asks you to make the change that way.
 - **Refused queries**: `QUERY_REFUSED` means sherlock's own check refused the query before sending it, and `details.reason` says why. Do not try to work around it.
 - **Timeout**: a statement is cancelled after 60s unless the connection sets `statementTimeout` or the query passes `--timeout`, with `QUERY_TIMEOUT`. Rerun with a longer `--timeout` only if the query is expected to be slow.
-- **Connection required**: Always specify `-c <connection>` or `-u <url>`, unless the current directory is inside a connection's configured `directory`, which selects that connection.
+- **Connection required**: Always specify `-c <connection>` or `-u <url>`. No connection is ever picked for you. When you leave both out, `CONNECTION_REQUIRED`'s fix names any connection set up for the current directory.
 - **Type-aware**: SQL commands only work with SQL connections, Redis commands only work with Redis connections
 - **Quoting**: PostgreSQL/SQLite use `"identifier"`, MySQL uses `` `identifier` ``, SQL Server uses `[identifier]`
 

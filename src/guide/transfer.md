@@ -63,7 +63,7 @@ Compare the remote list with what you meant to export. A connection is missing w
 
 Report what arrived, what was skipped and why, and anything still missing on the remote, such as a tunnel tool that is not installed. If import stopped with "Giving up after 3 attempts", the passphrase was mistyped on the remote. Give them the same command again. Any other import error, such as "not valid JSON" or "corrupted", means the file did not arrive intact, and running the command again makes a fresh file.
 
-Two things do not carry over in a useful form. The `directory` auto-select paths are local-machine paths. A `$env` password whose variable was not set here arrives as a reference to that variable, which must then be set on the remote.
+Two things do not carry over in a useful form. A connection's `directory` is a path on this machine. A `$env` password whose variable was not set here arrives as a reference to that variable, which must then be set on the remote.
 
 ## Reference
 

@@ -536,7 +536,7 @@ async function editConnectionWizard(): Promise<void> {
     if (action === 'directory') {
         const cwd = process.cwd();
         const newDir = await p.text({
-            message: 'Project directory (auto-selects this connection when you are in this dir)',
+            message: "Project directory (its .env is read for a URL from a variable; optional)",
             placeholder: 'Leave empty to remove',
             initialValue: existingConn.directory || cwd,
         });
@@ -1540,7 +1540,7 @@ async function promptForDirectory(existingDirectory?: string): Promise<string | 
     if (existingDirectory) {
         // Editing: use a text field pre-filled with the existing value
         const directory = await p.text({
-            message: 'Project directory (auto-selects this connection when you are in this dir)',
+            message: "Project directory (its .env is read for a URL from a variable; optional)",
             placeholder: 'Leave empty to remove',
             initialValue: existingDirectory,
         });
@@ -1549,7 +1549,7 @@ async function promptForDirectory(existingDirectory?: string): Promise<string | 
     }
 
     const choice = await p.select({
-        message: 'Project directory (auto-selects this connection when you are in this dir)',
+        message: "Project directory (its .env is read for a URL from a variable; optional)",
         options: [
             { value: 'cwd', label: `Use current directory`, hint: cwd },
             { value: 'custom', label: 'Enter a custom path' },
