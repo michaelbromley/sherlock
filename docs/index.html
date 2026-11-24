@@ -1,1187 +1,910 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Sherlock — A read-only database query tool for AI assistants</title>
-<meta name="description" content="Give your AI the power to investigate your databases — without the power to destroy. PostgreSQL, MySQL, SQLite, MSSQL, and Redis. Single binary, zero dependencies.">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sherlock: read-only database access for AI agents</title>
+<meta name="description" content="Sherlock gives AI agents read-only access to PostgreSQL, MySQL/MariaDB, SQL Server, SQLite and Redis. One binary for macOS, Linux x64 and Linux arm64.">
+<meta name="theme-color" content="#1a1612">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Sherlock">
+<meta property="og:title" content="Sherlock: read-only database access for AI agents">
+<meta property="og:description" content="Sherlock gives AI agents read-only access to PostgreSQL, MySQL/MariaDB, SQL Server, SQLite and Redis.">
+<meta name="twitter:card" content="summary">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12' shape-rendering='crispEdges'%3E%3Crect x='3' y='1' width='6' height='1' fill='%23b98f55'/%3E%3Crect x='2' y='2' width='8' height='2' fill='%23b98f55'/%3E%3Crect x='1' y='4' width='10' height='1' fill='%235e4322'/%3E%3Crect x='2' y='5' width='8' height='5' fill='%23aab6bf'/%3E%3Crect x='3' y='6' width='6' height='3' fill='%23141a20'/%3E%3Crect x='3' y='7' width='2' height='1' fill='%23ffd66b'/%3E%3Crect x='7' y='7' width='2' height='1' fill='%23ffd66b'/%3E%3C/svg%3E">
 <style>
-*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-
 :root {
-  --bg: #0a0e17;
-  --surface: #111827;
-  --elevated: #1a2234;
-  --amber: #f59e0b;
-  --amber-dim: rgba(245, 158, 11, 0.15);
-  --text: #e2e8f0;
-  --text-muted: #94a3b8;
-  --text-dim: #64748b;
-  --border: #1e293b;
-  --pg: #336791;
-  --mysql: #f29111;
-  --sqlite: #44a0d6;
-  --redis: #dc382d;
-  --mssql: #cc2927;
+  --bg: #1a1612;
+  --panel: #100d0a;
+  --line: #4b4034;
+  --text: #f0e7d3;
+  --dim: #ab9f89;
+  --brass: #e0a83e;
+  --brass-dk: #9c6a22;
+  --soft: #d3c9b5;
+  --serif: "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua", Georgia, serif;
+  --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, "DejaVu Sans Mono", monospace;
 }
-
-html { scroll-behavior: smooth; }
-
+* { box-sizing: border-box; }
+html { background: var(--bg); }
 body {
-  font-family: 'Inter', system-ui, sans-serif;
+  margin: 0;
   background: var(--bg);
   color: var(--text);
-  line-height: 1.6;
+  font: 400 1rem/1.5 var(--serif);
   -webkit-font-smoothing: antialiased;
 }
+main { max-width: 1328px; margin: 0 auto; padding: 28px 16px 40px; }
 
-code, .mono { font-family: 'JetBrains Mono', monospace; }
-
-a { color: var(--amber); text-decoration: none; }
-a:hover { text-decoration: underline; }
-
-.container {
-  max-width: 1120px;
-  margin: 0 auto;
-  padding: 0 1.5rem;
+.vh {
+  position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0;
+  overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap; border: 0;
 }
 
-/* ── Hero ─────────────────────────────────────────── */
-
-.hero {
-  min-height: 100vh;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  text-align: center;
-  padding: 2rem 1.5rem;
+.top { display: grid; gap: 20px; }
+h1 { margin: 0; font-size: 3rem; line-height: 1; }
+.wordmark { display: block; width: min(100%, 276px); height: auto; }
+.lede {
+  max-width: 21em;
+  margin: 20px 0 0;
+  font-size: clamp(1.3rem, 1.05rem + 1vw, 1.7rem);
+  line-height: 1.38;
+  text-wrap: pretty;
 }
 
-.hero-eye-container {
-  position: relative;
-  width: 85vw;
-  max-width: 1000px;
-  aspect-ratio: 280 / 130;
-  margin-bottom: 2rem;
-}
+.handles { list-style: none; margin: 0; padding: 0; max-width: 31em; }
+.handles li { position: relative; margin: 0 0 10px; padding-left: 20px; color: var(--soft); font-size: 1rem; line-height: 1.4; text-wrap: pretty; }
+.handles li:last-child { margin-bottom: 0; }
+.handles li::before { content: ""; position: absolute; left: 0; top: 0.45em; width: 8px; height: 8px; background: var(--brass); box-shadow: 2px 2px 0 var(--brass-dk); }
+.handles b { color: var(--text); font-weight: 600; }
 
-@media (max-width: 768px) {
-  .hero-eye-container { width: 95vw; }
-}
-
-.hero-eye-container svg {
-  width: 100%;
-  height: 100%;
-  overflow: visible;
-}
-
-.hero-eye-container .pupil-group {
-  transition: transform 0.06s ease-out;
-}
-
-.hero-eye-container .eye-glow {
-  animation: eyeGlow 3s ease-in-out infinite;
-}
-
-@keyframes eyeGlow {
-  0%, 100% { opacity: 0.12; }
-  50% { opacity: 0.3; }
-}
-
-.eyelid-top {
-  animation: blinkTop 5s ease-in-out infinite;
-  animation-delay: 2s;
-}
-
-.eyelid-bottom {
-  animation: blinkBottom 5s ease-in-out infinite;
-  animation-delay: 2s;
-}
-
-@keyframes blinkTop {
-  0%, 92%, 100% { transform: translateY(-60px); }
-  95%, 97% { transform: translateY(0); }
-}
-
-@keyframes blinkBottom {
-  0%, 92%, 100% { transform: translateY(60px); }
-  95%, 97% { transform: translateY(0); }
-}
-
-.hero h1 {
-  font-size: clamp(3rem, 8vw, 5rem);
-  font-weight: 700;
-  letter-spacing: -0.03em;
-  line-height: 1.1;
-  margin-bottom: 0.5rem;
-  display: flex;
-  align-items: center;
-  gap: 0.4em;
-}
-
-.hero h1 .hero-mag {
-  display: inline-block;
-  width: 0.7em;
-  height: 0.7em;
-  flex-shrink: 0;
-  filter: drop-shadow(0 0 12px rgba(245, 158, 11, 0.4));
-}
-
-.hero .tagline {
-  font-size: clamp(1.1rem, 2.5vw, 1.35rem);
-  color: var(--amber);
-  font-weight: 500;
-  margin-bottom: 0.75rem;
-}
-
-.hero .subtitle {
-  font-size: clamp(1rem, 2vw, 1.15rem);
-  color: var(--text-muted);
-  max-width: 540px;
-  margin-bottom: 2.5rem;
-}
-
-.install-block {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 1rem 1.25rem;
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-  margin-bottom: 2rem;
-  max-width: 100%;
-  overflow-x: auto;
-}
-
-.install-block code {
-  font-size: clamp(0.8rem, 1.5vw, 0.95rem);
-  white-space: nowrap;
-  color: var(--text);
-}
-
-.install-block .prompt { color: var(--amber); }
-
-.copy-btn {
-  background: transparent;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  color: var(--text-muted);
-  padding: 0.4rem 0.6rem;
-  cursor: pointer;
-  flex-shrink: 0;
-  transition: all 0.2s;
-  display: flex;
-  align-items: center;
-}
-
-.copy-btn:hover { border-color: var(--amber); color: var(--amber); }
-.copy-btn.copied { border-color: #22c55e; color: #22c55e; }
-
-.hero-ctas {
-  display: flex;
-  gap: 1rem;
-  align-items: center;
-  flex-wrap: wrap;
-  justify-content: center;
-}
-
-.btn-primary {
-  background: var(--amber);
-  color: var(--bg);
-  font-weight: 600;
-  padding: 0.75rem 1.75rem;
-  border-radius: 8px;
-  font-size: 1rem;
-  transition: transform 0.15s, box-shadow 0.15s;
-}
-
-.btn-primary:hover {
-  transform: translateY(-1px);
-  box-shadow: 0 4px 20px rgba(245, 158, 11, 0.3);
-  text-decoration: none;
-}
-
-.btn-secondary {
-  color: var(--text-muted);
-  font-weight: 500;
-  padding: 0.75rem 1rem;
-  font-size: 1rem;
-  transition: color 0.15s;
-}
-
-.btn-secondary:hover { color: var(--amber); text-decoration: none; }
-
-/* ── Section shared ───────────────────────────────── */
-
-section { padding: 6rem 0; }
-
-.section-title {
-  font-size: clamp(1.75rem, 4vw, 2.25rem);
-  font-weight: 700;
-  text-align: center;
-  margin-bottom: 0.75rem;
-  letter-spacing: -0.02em;
-}
-
-.section-subtitle {
-  text-align: center;
-  color: var(--text-muted);
-  max-width: 560px;
-  margin: 0 auto 3rem;
-  font-size: 1.05rem;
-}
-
-/* ── Three Pillars ────────────────────────────────── */
-
-.pillars {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-  gap: 1.5rem;
-}
-
-.pillar {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 2rem;
-  transition: transform 0.2s, box-shadow 0.2s;
-}
-
-.pillar:hover {
-  transform: translateY(-3px);
-  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.3);
-}
-
-.pillar h3 {
-  font-size: 1.15rem;
-  font-weight: 600;
-  margin-bottom: 0.5rem;
-}
-
-.pillar p { color: var(--text-muted); font-size: 0.95rem; }
-
-.pillar-icon {
-  font-size: 1.5rem;
-  margin-bottom: 1rem;
+figure { margin: 0; }
+#scene {
   display: block;
-  width: 40px;
-  height: 40px;
-  background: var(--amber-dim);
-  border-radius: 8px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-/* ── Commands Spotlight ────────────────────────────── */
-
-.commands-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-  gap: 1.5rem;
-}
-
-.command-card {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  overflow: hidden;
-  transition: transform 0.2s, box-shadow 0.2s;
-}
-
-.command-card:hover {
-  transform: translateY(-3px);
-  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.3);
-}
-
-.command-card-header {
-  background: var(--elevated);
-  padding: 0.6rem 1rem;
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  border-bottom: 1px solid var(--border);
-}
-
-.command-card-dots {
-  display: flex;
-  gap: 0.35rem;
-}
-
-.command-card-dots span {
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  background: var(--border);
-}
-
-.command-card-title {
-  font-size: 0.75rem;
-  color: var(--text-dim);
-  margin-left: 0.5rem;
-}
-
-.command-card-body {
-  padding: 1.5rem;
-}
-
-.command-card-body .cmd {
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 1.05rem;
-  color: var(--amber);
-  margin-bottom: 1rem;
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-}
-
-.command-card-body .cmd .prompt { color: var(--text-dim); }
-
-.command-card-body h3 {
-  font-size: 1.15rem;
-  font-weight: 600;
-  margin-bottom: 0.5rem;
-}
-
-.command-card-body p {
-  color: var(--text-muted);
-  font-size: 0.95rem;
-  line-height: 1.6;
-}
-
-.command-card-body .feature-list {
-  list-style: none;
-  margin-top: 0.75rem;
-  display: flex;
-  flex-direction: column;
-  gap: 0.35rem;
-}
-
-.command-card-body .feature-list li {
-  color: var(--text-muted);
-  font-size: 0.9rem;
-}
-
-.command-card-body .feature-list li::before {
-  content: '›';
-  color: var(--amber);
-  font-weight: 700;
-  margin-right: 0.5rem;
-}
-
-/* ── Scenario Showcase ────────────────────────────── */
-
-.scenarios { background: var(--surface); padding: 6rem 0; }
-
-.tab-bar {
-  display: flex;
-  gap: 0;
-  overflow-x: auto;
-  -webkit-overflow-scrolling: touch;
-  scrollbar-width: none;
-  border-bottom: 1px solid var(--border);
-  margin-bottom: 0;
-}
-
-.tab-bar::-webkit-scrollbar { display: none; }
-
-.tab-radio { display: none; }
-
-.tab-label {
-  flex-shrink: 0;
-  padding: 0.85rem 1.5rem;
-  font-size: 0.9rem;
-  font-weight: 500;
-  color: var(--text-dim);
-  cursor: pointer;
-  transition: all 0.2s;
-  white-space: nowrap;
-  border-bottom: 2px solid transparent;
-  margin-bottom: -1px;
-}
-
-.tab-label:hover { color: var(--text); }
-
-#tab1:checked ~ .tab-bar label[for="tab1"],
-#tab2:checked ~ .tab-bar label[for="tab2"],
-#tab3:checked ~ .tab-bar label[for="tab3"],
-#tab4:checked ~ .tab-bar label[for="tab4"],
-#tab5:checked ~ .tab-bar label[for="tab5"] {
-  color: var(--amber);
-  border-bottom-color: var(--amber);
-}
-
-.tab-panels {
-  position: relative;
-  margin-top: 0;
-  background: var(--elevated);
-  border: 1px solid var(--border);
-  border-top: none;
-  border-radius: 0 0 12px 12px;
-  padding: 2rem;
-}
-
-.tab-panel {
-  display: none;
-  animation: fadeIn 0.35s ease;
-}
-
-@keyframes fadeIn {
-  from { opacity: 0; transform: translateY(8px); }
-  to { opacity: 1; transform: translateY(0); }
-}
-
-#tab1:checked ~ .tab-panels .panel-1,
-#tab2:checked ~ .tab-panels .panel-2,
-#tab3:checked ~ .tab-panels .panel-3,
-#tab4:checked ~ .tab-panels .panel-4,
-#tab5:checked ~ .tab-panels .panel-5 { display: block; }
-
-.conversation {
-  max-width: 720px;
   margin: 0 auto;
-  display: flex;
-  flex-direction: column;
-  gap: 1rem;
+  image-rendering: crisp-edges;
+  image-rendering: pixelated;
 }
 
-.msg {
-  max-width: 85%;
-  padding: 1rem 1.25rem;
-  border-radius: 12px;
-  font-size: 0.95rem;
-  line-height: 1.6;
-}
+.names { display: flex; justify-content: center; align-items: flex-start; margin-top: 6px; color: var(--dim); font: 400 0.65625rem/1.25 var(--mono); text-align: center; }
+.names[hidden] { display: none; }
+.names span { flex: none; }
 
-.msg-user {
-  align-self: flex-end;
-  background: var(--amber);
-  color: var(--bg);
-  border-bottom-right-radius: 4px;
-  font-weight: 500;
-}
-
-.msg-ai {
-  align-self: flex-start;
-  background: var(--elevated);
-  border: 1px solid var(--border);
-  border-bottom-left-radius: 4px;
-}
-
-.msg-ai .label {
-  font-size: 0.75rem;
-  font-weight: 600;
-  color: var(--text-dim);
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  margin-bottom: 0.5rem;
-}
-
-.msg-ai code {
-  display: block;
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 0.6rem 0.8rem;
-  margin: 0.5rem 0;
-  font-size: 0.85rem;
-  color: var(--amber);
-  overflow-x: auto;
-}
-
-.msg-ai p { margin-bottom: 0.4rem; }
-.msg-ai p:last-child { margin-bottom: 0; }
-
-/* ── Supported Databases ──────────────────────────── */
-
-.db-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
-  gap: 1.5rem;
-}
-
-.db-card {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 2rem;
-  border-top: 3px solid;
-  transition: transform 0.2s, box-shadow 0.2s;
-}
-
-.db-card:hover {
-  transform: translateY(-3px);
-  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.3);
-}
-
-.db-card h3 { font-size: 1.1rem; margin-bottom: 0.5rem; }
-
-.db-card p { color: var(--text-muted); font-size: 0.9rem; }
-
-/* ── Features Grid ────────────────────────────────── */
-
-.features-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-  gap: 1.5rem;
-}
-
-.feature-card {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 1.75rem;
-  transition: transform 0.2s, box-shadow 0.2s;
-}
-
-.feature-card:hover {
-  transform: translateY(-3px);
-  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.3);
-}
-
-.feature-card h3 {
-  font-size: 1rem;
-  font-weight: 600;
-  margin-bottom: 0.4rem;
-}
-
-.feature-card p { color: var(--text-muted); font-size: 0.9rem; }
-
-.feature-icon {
-  width: 36px;
-  height: 36px;
-  background: var(--amber-dim);
-  border-radius: 8px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  margin-bottom: 1rem;
-  color: var(--amber);
-}
-
-/* ── Quick Start ──────────────────────────────────── */
-
-.steps {
-  display: flex;
-  flex-direction: column;
-  gap: 1.5rem;
-  max-width: 640px;
-  margin: 0 auto;
-}
-
+.install { display: grid; gap: 22px; margin-top: 28px; }
 .step {
-  display: flex;
-  align-items: flex-start;
-  gap: 1.25rem;
-  padding: 1.5rem;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 12px;
-}
-
-.step-number {
-  width: 40px;
-  height: 40px;
-  background: var(--amber);
-  color: var(--bg);
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-weight: 700;
-  font-size: 1.1rem;
-  flex-shrink: 0;
-}
-
-.step-content { min-width: 0; }
-
-.step h3 {
-  font-size: 1.05rem;
-  margin-bottom: 0.35rem;
-}
-
-.step p {
-  color: var(--text-muted);
-  font-size: 0.9rem;
-  margin-bottom: 0.5rem;
-}
-
-.step-code-block {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 0.5rem 0.75rem;
-}
-
-.step-code-block code {
-  font-size: clamp(0.65rem, 1.2vw, 0.8rem);
-  color: var(--amber);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas: "label copy" "code code";
+  gap: 8px 12px;
+  align-items: end;
   min-width: 0;
-  flex: 1;
 }
-
-.step-code-block .copy-btn {
-  padding: 0.25rem 0.4rem;
-  flex-shrink: 0;
+.step p { grid-area: label; margin: 0; color: var(--dim); font-size: 1rem; line-height: 1.35; }
+.step p b { color: var(--text); font-weight: 600; }
+.code {
+  grid-area: code;
+  min-width: 0;
+  background: var(--panel);
+  border: 2px solid var(--line);
+  box-shadow: 4px 4px 0 #0c0a08;
 }
-
-/* ── Footer ───────────────────────────────────────── */
-
-footer {
-  border-top: 1px solid var(--border);
-  padding: 2.5rem 0;
-  text-align: center;
-  color: var(--text-dim);
-  font-size: 0.9rem;
+.code pre {
+  margin: 0;
+  padding: 12px 14px;
+  font: 400 0.78125rem/1.6 var(--mono);
+  white-space: pre;
+  overflow-x: auto;
+  scrollbar-width: none;
 }
+.code pre::-webkit-scrollbar { display: none; }
+.code pre::before { content: "$ "; color: var(--brass); }
+/* the third step is a prompt to type to the agent, not a shell command */
+.ask .code pre { font: 400 1rem/1.4 var(--serif); white-space: normal; padding: 10px 14px; }
+.ask .code pre::before { content: "\201C"; color: inherit; }
+.ask .code pre::after { content: "\201D"; }
+/* a command that runs past the box fades out at the edge it continues from */
+.code[data-more] pre {
+  -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 36px), transparent);
+  mask-image: linear-gradient(to right, #000 calc(100% - 36px), transparent);
+}
+.step button {
+  grid-area: copy;
+  width: 64px;
+  height: 32px;
+  padding: 0;
+  font: 700 0.75rem/1 var(--mono);
+  color: var(--panel);
+  background: var(--brass);
+  border: 0;
+  border-radius: 0;
+  box-shadow: 3px 3px 0 #0c0a08;
+  cursor: pointer;
+}
+.step button:hover { background: #f2c462; }
+.step button:active { background: var(--brass-dk); }
+.step button[data-done] { background: var(--text); }
+:focus-visible { outline: 3px solid var(--text); outline-offset: 3px; }
+.code pre:focus-visible { outline-offset: -5px; }
 
-footer a { color: var(--text-muted); }
-footer a:hover { color: var(--amber); }
+.foot { color: var(--dim); text-wrap: balance; }
+.foot a { color: var(--text); text-decoration-color: var(--brass); text-decoration-thickness: 2px; text-underline-offset: 4px; }
+.foot a:hover { color: var(--brass); }
 
-footer .footer-links {
+/* the sections under the install commands; a dashed rule, like the cables, parts them */
+.block {
+  margin-top: 64px;
+  padding-top: 44px;
+  background: repeating-linear-gradient(90deg, var(--line) 0 8px, transparent 8px 16px) 0 0 / 100% 2px no-repeat;
+}
+h2 { margin: 0; font: 400 clamp(1.75rem, 1.4rem + 1.4vw, 2.4rem)/1.15 var(--serif); }
+code { font: 0.86em var(--mono); color: var(--text); white-space: nowrap; }
+
+.tabs {
   display: flex;
-  gap: 1.5rem;
-  justify-content: center;
-  flex-wrap: wrap;
+  gap: 0 22px;
+  margin-top: 26px;
+  border-bottom: 2px solid var(--line);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.tabs[hidden] { display: none; }
+.tabs::-webkit-scrollbar { display: none; }
+.tabs button {
+  flex: none;
+  margin: 0 0 -2px;
+  padding: 8px 1px 10px;
+  font: 400 1rem/1.2 var(--serif);
+  color: var(--dim);
+  background: none;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  cursor: pointer;
+}
+.tabs button:hover { color: var(--text); }
+.tabs button[aria-selected="true"] { color: var(--text); border-bottom-color: var(--brass); }
+.tabs button:focus-visible { outline-offset: -3px; }
+@media (max-width: 699px) {
+  .tabs { gap: 0 12px; }
+  .tabs button { font-size: 0.9rem; }
 }
 
-/* ── Responsive ───────────────────────────────────── */
+.sessions { margin-top: 28px; }
+.session { display: grid; gap: 16px; }
+.session[hidden] { display: none; }
+.session + .session { margin-top: 48px; }
+.js .session + .session { margin-top: 0; }
+.session h3 { margin: 0; font: 600 1.2rem/1.2 var(--serif); }
+.js .session h3 { position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.session:focus-visible { outline-offset: 8px; }
+.said { margin: 0; font-size: clamp(1.3rem, 1.1rem + 0.8vw, 1.6rem); line-height: 1.32; text-wrap: balance; }
+.found { display: flex; gap: 0.55em; margin: 0; color: var(--soft); font-size: 1.1rem; line-height: 1.45; max-width: 32em; }
+.found span { flex: none; color: var(--brass); }
+.term {
+  padding: 12px 14px;
+  background: var(--panel);
+  border: 2px solid var(--line);
+  box-shadow: 4px 4px 0 #0c0a08;
+  font: 400 0.78125rem/1.6 var(--mono);
+}
+.term div { padding-left: 2ch; text-indent: -2ch; white-space: pre-wrap; overflow-wrap: anywhere; }
+.term .cmd::before { content: "$ "; color: var(--brass); }
 
-@media (max-width: 768px) {
-  section { padding: 4rem 0; }
+.guards { list-style: none; margin: 30px 0 0; padding: 0; display: grid; gap: 24px; }
+.guards li { padding-top: 16px; color: var(--soft); font-size: 1.02rem; line-height: 1.45; background: linear-gradient(var(--brass), var(--brass)) 0 0 / 8px 8px no-repeat; }
+.guards b { display: block; margin-bottom: 4px; color: var(--text); font-weight: 600; }
 
-  .pillars,
-  .db-grid,
-  .features-grid { grid-template-columns: 1fr; }
+@media (min-width: 900px) {
+  /* question and answer on the left, the commands the agent ran on the right */
+  .session { grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); grid-template-areas: "ask run" "ans run"; grid-template-rows: auto 1fr; gap: 14px 56px; align-items: start; }
+  .session h3 { grid-column: 1 / -1; }
+  .said { grid-area: ask; }
+  .term { grid-area: run; }
+  .found { grid-area: ans; }
+}
 
-  .steps { gap: 1rem; }
-
-  .msg { max-width: 92%; }
-
-  .install-block { flex-direction: column; align-items: stretch; gap: 0.5rem; }
-  .install-block code { font-size: 0.8rem; }
-  .copy-btn { align-self: flex-end; }
+@media (min-width: 700px) {
+  main { padding: 36px 24px 48px; }
+  .wordmark { width: 420px; }
+  .guards { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0 40px; }
+  .step { grid-template-areas: "label label" "code copy"; column-gap: 0; align-items: stretch; }
+  .step button { width: 66px; height: auto; border: 2px solid var(--line); border-left: 0; box-shadow: 4px 4px 0 #0c0a08; }
+}
+@media (min-width: 1180px) {
+  main { padding: 32px 32px 40px; }
+  .top { grid-template-columns: minmax(0, 1fr) auto; grid-template-rows: 1fr 1fr; grid-template-areas: "head scene" "list scene"; gap: 26px 40px; }
+  .top header { grid-area: head; align-self: end; }
+  .top figure { grid-area: scene; align-self: center; }
+  .handles { grid-area: list; align-self: start; }
+  .wordmark { width: min(100%, 490px); }
+  .install { margin-top: 20px; }
+}
+@media (min-width: 1340px) {
+  .install { grid-template-columns: minmax(0, 1.86fr) minmax(0, 1fr); gap: 16px 24px; align-items: end; }
+  .install .ask { grid-column: 1 / -1; }
 }
 </style>
 </head>
 <body>
+<main>
+  <div class="top">
+    <header>
+      <h1><span class="vh">Sherlock</span><svg class="wordmark" viewBox="0 0 70 13" width="420" height="78" shape-rendering="crispEdges" aria-hidden="true" focusable="false"><path fill="#9c6a22" d="M3 1h5v1h-5zM9 1h1v1h-1zM11 1h3v1h-3zM39 1h3v1h-3zM61 1h3v1h-3zM2 2h2v1h-2zM7 2h3v1h-3zM12 2h2v1h-2zM40 2h2v1h-2zM62 2h2v1h-2zM1 3h2v1h-2zM8 3h2v1h-2zM12 3h2v1h-2zM40 3h2v1h-2zM62 3h2v1h-2zM1 4h2v1h-2zM9 4h1v1h-1zM12 4h2v1h-2zM40 4h2v1h-2zM62 4h2v1h-2zM1 5h3v1h-3zM12 5h2v1h-2zM15 5h3v1h-3zM23 5h4v1h-4zM30 5h3v1h-3zM34 5h3v1h-3zM40 5h2v1h-2zM46 5h4v1h-4zM55 5h4v1h-4zM62 5h2v1h-2zM66 5h4v1h-4zM2 6h5v1h-5zM12 6h3v1h-3zM17 6h2v1h-2zM22 6h2v1h-2zM26 6h2v1h-2zM31 6h3v1h-3zM36 6h2v1h-2zM40 6h2v1h-2zM45 6h2v1h-2zM49 6h2v1h-2zM54 6h2v1h-2zM58 6h2v1h-2zM62 6h2v1h-2zM67 6h2v1h-2zM4 7h5v1h-5zM12 7h2v1h-2zM17 7h2v1h-2zM21 7h2v1h-2zM27 7h2v1h-2zM31 7h2v1h-2zM37 7h1v1h-1zM40 7h2v1h-2zM44 7h2v1h-2zM50 7h2v1h-2zM53 7h2v1h-2zM59 7h1v1h-1zM62 7h2v1h-2zM66 7h2v1h-2zM7 8h3v1h-3zM12 8h2v1h-2zM17 8h2v1h-2zM21 8h8v1h-8zM31 8h2v1h-2zM40 8h2v1h-2zM44 8h2v1h-2zM50 8h2v1h-2zM53 8h2v1h-2zM62 8h4v1h-4zM1 9h1v1h-1zM8 9h2v1h-2zM12 9h2v1h-2zM17 9h2v1h-2zM21 9h2v1h-2zM31 9h2v1h-2zM40 9h2v1h-2zM44 9h2v1h-2zM50 9h2v1h-2zM53 9h2v1h-2zM62 9h5v1h-5zM1 10h2v1h-2zM8 10h2v1h-2zM12 10h2v1h-2zM17 10h2v1h-2zM21 10h2v1h-2zM28 10h1v1h-1zM31 10h2v1h-2zM40 10h2v1h-2zM44 10h2v1h-2zM50 10h2v1h-2zM53 10h2v1h-2zM59 10h1v1h-1zM62 10h2v1h-2zM65 10h3v1h-3zM1 11h3v1h-3zM7 11h2v1h-2zM12 11h2v1h-2zM17 11h2v1h-2zM22 11h2v1h-2zM27 11h2v1h-2zM31 11h2v1h-2zM40 11h2v1h-2zM45 11h2v1h-2zM49 11h2v1h-2zM54 11h2v1h-2zM58 11h2v1h-2zM62 11h2v1h-2zM66 11h3v1h-3zM1 12h1v1h-1zM3 12h5v1h-5zM11 12h4v1h-4zM16 12h4v1h-4zM23 12h5v1h-5zM30 12h4v1h-4zM39 12h4v1h-4zM46 12h4v1h-4zM55 12h4v1h-4zM61 12h4v1h-4zM66 12h4v1h-4z"/><path fill="#f0e7d3" d="M2 0h5v1h-5zM8 0h1v1h-1zM10 0h3v1h-3zM38 0h3v1h-3zM60 0h3v1h-3zM1 1h2v1h-2zM6 1h3v1h-3zM11 1h2v1h-2zM39 1h2v1h-2zM61 1h2v1h-2zM0 2h2v1h-2zM7 2h2v1h-2zM11 2h2v1h-2zM39 2h2v1h-2zM61 2h2v1h-2zM0 3h2v1h-2zM8 3h1v1h-1zM11 3h2v1h-2zM39 3h2v1h-2zM61 3h2v1h-2zM0 4h3v1h-3zM11 4h2v1h-2zM14 4h3v1h-3zM22 4h4v1h-4zM29 4h3v1h-3zM33 4h3v1h-3zM39 4h2v1h-2zM45 4h4v1h-4zM54 4h4v1h-4zM61 4h2v1h-2zM65 4h4v1h-4zM1 5h5v1h-5zM11 5h3v1h-3zM16 5h2v1h-2zM21 5h2v1h-2zM25 5h2v1h-2zM30 5h3v1h-3zM35 5h2v1h-2zM39 5h2v1h-2zM44 5h2v1h-2zM48 5h2v1h-2zM53 5h2v1h-2zM57 5h2v1h-2zM61 5h2v1h-2zM66 5h2v1h-2zM3 6h5v1h-5zM11 6h2v1h-2zM16 6h2v1h-2zM20 6h2v1h-2zM26 6h2v1h-2zM30 6h2v1h-2zM36 6h1v1h-1zM39 6h2v1h-2zM43 6h2v1h-2zM49 6h2v1h-2zM52 6h2v1h-2zM58 6h1v1h-1zM61 6h2v1h-2zM65 6h2v1h-2zM6 7h3v1h-3zM11 7h2v1h-2zM16 7h2v1h-2zM20 7h8v1h-8zM30 7h2v1h-2zM39 7h2v1h-2zM43 7h2v1h-2zM49 7h2v1h-2zM52 7h2v1h-2zM61 7h4v1h-4zM0 8h1v1h-1zM7 8h2v1h-2zM11 8h2v1h-2zM16 8h2v1h-2zM20 8h2v1h-2zM30 8h2v1h-2zM39 8h2v1h-2zM43 8h2v1h-2zM49 8h2v1h-2zM52 8h2v1h-2zM61 8h5v1h-5zM0 9h2v1h-2zM7 9h2v1h-2zM11 9h2v1h-2zM16 9h2v1h-2zM20 9h2v1h-2zM27 9h1v1h-1zM30 9h2v1h-2zM39 9h2v1h-2zM43 9h2v1h-2zM49 9h2v1h-2zM52 9h2v1h-2zM58 9h1v1h-1zM61 9h2v1h-2zM64 9h3v1h-3zM0 10h3v1h-3zM6 10h2v1h-2zM11 10h2v1h-2zM16 10h2v1h-2zM21 10h2v1h-2zM26 10h2v1h-2zM30 10h2v1h-2zM39 10h2v1h-2zM44 10h2v1h-2zM48 10h2v1h-2zM53 10h2v1h-2zM57 10h2v1h-2zM61 10h2v1h-2zM65 10h3v1h-3zM0 11h1v1h-1zM2 11h5v1h-5zM10 11h4v1h-4zM15 11h4v1h-4zM22 11h5v1h-5zM29 11h4v1h-4zM38 11h4v1h-4zM45 11h4v1h-4zM54 11h4v1h-4zM60 11h4v1h-4zM65 11h4v1h-4z"/></svg></h1>
+      <p class="lede">Read&#8209;only database access for AI agents.</p>
+    </header>
 
-<!-- ════════════════════ Hero ════════════════════ -->
-<section class="hero">
-  <div class="hero-eye-container" id="heroEye">
-    <svg viewBox="0 0 280 130" fill="none" xmlns="http://www.w3.org/2000/svg">
-      <defs>
-        <radialGradient id="irisGlow" cx="50%" cy="50%" r="50%">
-          <stop offset="0%" stop-color="#f59e0b" stop-opacity="0.5"/>
-          <stop offset="100%" stop-color="#f59e0b" stop-opacity="0"/>
-        </radialGradient>
-        <clipPath id="eyeClip">
-          <path d="M 5 65 Q 70 5, 140 5 Q 210 5, 275 65 Q 210 125, 140 125 Q 70 125, 5 65 Z"/>
-        </clipPath>
-      </defs>
+    <figure>
+      <canvas id="scene" role="img" aria-label="Pixel-art robot dressed as Sherlock Holmes, in a checked deerstalker and an Inverness cape, holding a magnifying glass up to a printout. Five cables rise from five database cylinders (PostgreSQL, MySQL, SQL Server, SQLite and Redis), each into its own socket on the robot, carrying data in that database's colour. The data prints out of the robot's chest, and the glass shows it enlarged.">
+        A pixel-art robot dressed as Sherlock Holmes draws data up cables from five databases and reads it through a magnifying glass.
+      </canvas>
+      <div id="names" class="names" aria-hidden="true" hidden><span>PostgreSQL</span><span>MySQL</span><span>SQL Server</span><span>SQLite</span><span>Redis</span></div>
+    </figure>
 
-      <!-- Ambient glow -->
-      <ellipse class="eye-glow" cx="140" cy="65" rx="145" ry="68" fill="url(#irisGlow)" opacity="0.15"/>
-
-      <!-- Eye shape -->
-      <path d="M 5 65 Q 70 5, 140 5 Q 210 5, 275 65 Q 210 125, 140 125 Q 70 125, 5 65 Z" fill="#141c2b" stroke="#334155" stroke-width="1.5"/>
-
-      <!-- Clipped contents -->
-      <g clip-path="url(#eyeClip)">
-        <g class="pupil-group" id="pupilGroup">
-          <!-- Iris - flat concentric rings -->
-          <circle cx="140" cy="65" r="52" fill="#92400e"/>
-          <circle cx="140" cy="65" r="48" fill="#b45309"/>
-          <circle cx="140" cy="65" r="42" fill="#d97706"/>
-          <circle cx="140" cy="65" r="36" fill="#f59e0b"/>
-
-          <!-- Pupil -->
-          <circle cx="140" cy="65" r="22" fill="#0a0e17"/>
-          <circle cx="140" cy="65" r="20" fill="#050810"/>
-
-          <!-- Catchlight -->
-          <circle cx="130" cy="55" r="5" fill="white" opacity="0.55"/>
-          <circle cx="128" cy="53" r="2.5" fill="white" opacity="0.8"/>
-        </g>
-      </g>
-
-      <!-- Eyelid lines -->
-      <path d="M 5 65 Q 70 5, 140 5 Q 210 5, 275 65" stroke="#475569" stroke-width="2" fill="none"/>
-      <path d="M 5 65 Q 70 125, 140 125 Q 210 125, 275 65" stroke="#334155" stroke-width="1.5" fill="none"/>
-      <!-- Corner points -->
-      <circle cx="5" cy="65" r="1.5" fill="#475569"/>
-      <circle cx="275" cy="65" r="1.5" fill="#475569"/>
-
-      <!-- Eyelids for blink animation -->
-      <g clip-path="url(#eyeClip)">
-        <rect class="eyelid-top" x="0" y="0" width="280" height="65" fill="#0a0e17"/>
-        <rect class="eyelid-bottom" x="0" y="65" width="280" height="65" fill="#0a0e17"/>
-      </g>
-    </svg>
+    <!-- handles:start -->
+    <ul class="handles">
+      <li><b>Read-only.</b> Writes are blocked, by sherlock and by the database.</li>
+      <li><b>No runaway queries.</b> Slow queries time out, and huge tables aren’t pulled in full.</li>
+      <li><b>Small results.</b> Compact output that won’t fill your agent’s context.</li>
+      <li><b>Connections and tunnels.</b> Saved connections, passwords in your keychain, and tunnels opened for you.</li>
+      <li><b>Clear errors.</b> Every error says what went wrong and how to fix it.</li>
+    </ul>
+    <!-- handles:end -->
   </div>
-  <h1>
-    <svg class="hero-mag" viewBox="0 0 80 80" fill="none" xmlns="http://www.w3.org/2000/svg">
-      <circle cx="34" cy="34" r="22" stroke="#f59e0b" stroke-width="4" fill="none"/>
-      <line x1="50" y1="50" x2="70" y2="70" stroke="#f59e0b" stroke-width="5" stroke-linecap="round"/>
-      <circle cx="34" cy="34" r="12" stroke="#f59e0b" stroke-width="1.5" opacity="0.3" fill="none"/>
-    </svg>
-    Sherlock
-  </h1>
-  <p class="tagline">A read-only database query tool for AI assistants</p>
-  <p class="subtitle">Give your AI the power to investigate &mdash; without the power to destroy.</p>
-  <div class="install-block">
-    <code><span class="prompt">$</span> curl -fsSL https://raw.githubusercontent.com/michaelbromley/sherlock/main/install.sh | bash</code>
-    <button class="copy-btn" data-copy="curl -fsSL https://raw.githubusercontent.com/michaelbromley/sherlock/main/install.sh | bash" aria-label="Copy install command">
-      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
-    </button>
-  </div>
-  <div class="hero-ctas">
-    <a href="https://github.com/michaelbromley/sherlock" class="btn-primary">View on GitHub</a>
-    <a href="#quick-start" class="btn-secondary">Quick Start &darr;</a>
-  </div>
-</section>
 
-<!-- ════════════════════ Three Pillars ════════════════════ -->
-<section>
-  <div class="container">
-    <div class="pillars">
-      <div class="pillar">
-        <div class="pillar-icon">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" stroke-width="2" stroke-linecap="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
-        </div>
-        <h3>Ask, don't write SQL</h3>
-        <p>Ask your AI a question about your data. Sherlock translates it into safe, read-only queries.</p>
-      </div>
-      <div class="pillar">
-        <div class="pillar-icon">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" stroke-width="2" stroke-linecap="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/><path d="M3 12c0 1.66 4 3 9 3s9-1.34 9-3"/></svg>
-        </div>
-        <h3>Five databases, one tool</h3>
-        <p>PostgreSQL, MySQL, SQLite, MSSQL, and Redis. One binary, one command.</p>
-      </div>
-      <div class="pillar">
-        <div class="pillar-icon">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" stroke-width="2" stroke-linecap="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
-        </div>
-        <h3>Security by default</h3>
-        <p>Read-only enforced, OS keychain credentials, SQL injection prevention built in.</p>
-      </div>
+  <section class="install" aria-labelledby="install">
+    <h2 id="install" class="vh">Install</h2>
+    <div class="step">
+      <p id="l1"><b>Install the binary</b> for macOS on Apple silicon, Linux x64 or Linux arm64</p>
+      <div class="code"><pre id="c1" aria-labelledby="l1">curl -fsSL https://raw.githubusercontent.com/michaelbromley/sherlock/main/install.sh | bash</pre></div>
+      <button type="button" data-copy="c1" aria-label="Copy the binary install command">Copy</button>
     </div>
-  </div>
-</section>
-
-<!-- ════════════════════ Commands Spotlight ════════════════════ -->
-<section class="scenarios">
-  <div class="container">
-    <h2 class="section-title">Two Commands, That's It</h2>
-    <p class="section-subtitle">After installing, these are the only two commands you need to know.</p>
-    <div class="commands-grid">
-      <div class="command-card">
-        <div class="command-card-header">
-          <div class="command-card-dots"><span></span><span></span><span></span></div>
-          <span class="command-card-title">Terminal</span>
-        </div>
-        <div class="command-card-body">
-          <div class="cmd"><span class="prompt">$</span> sherlock manage</div>
-          <h3>Manage your connections</h3>
-          <p>Interactive wizard that handles everything &mdash; add databases, update passwords, store credentials securely in your OS keychain.</p>
-          <ul class="feature-list">
-            <li>Add, edit, and delete connections</li>
-            <li>Store passwords in OS keychain</li>
-            <li>Set project directories for auto-detection</li>
-            <li>Test saved connections</li>
-          </ul>
-        </div>
-      </div>
-      <div class="command-card">
-        <div class="command-card-header">
-          <div class="command-card-dots"><span></span><span></span><span></span></div>
-          <span class="command-card-title">Terminal</span>
-        </div>
-        <div class="command-card-body">
-          <div class="cmd"><span class="prompt">$</span> sherlock update</div>
-          <h3>Always up to date</h3>
-          <p>One command to check for new releases and update in-place. No package manager needed, no manual downloads.</p>
-          <ul class="feature-list">
-            <li>Checks GitHub for the latest release</li>
-            <li>Downloads the right binary for your platform</li>
-            <li>Replaces the old version automatically</li>
-            <li>Shows you what changed</li>
-          </ul>
-        </div>
-      </div>
+    <div class="step">
+      <p id="l2"><b>Install the agent skill</b></p>
+      <div class="code"><pre id="c2" aria-labelledby="l2">npx skills add michaelbromley/sherlock -g</pre></div>
+      <button type="button" data-copy="c2" aria-label="Copy the agent skill install command">Copy</button>
     </div>
-  </div>
-</section>
-
-<!-- ════════════════════ Scenario Showcase ════════════════════ -->
-<section class="scenarios">
-  <div class="container">
-    <h2 class="section-title">See It in Action</h2>
-    <p class="section-subtitle">Real-world scenarios showing how your AI assistant uses Sherlock to investigate databases.</p>
-
-    <input type="radio" name="tabs" id="tab1" class="tab-radio" checked>
-    <input type="radio" name="tabs" id="tab2" class="tab-radio">
-    <input type="radio" name="tabs" id="tab3" class="tab-radio">
-    <input type="radio" name="tabs" id="tab4" class="tab-radio">
-    <input type="radio" name="tabs" id="tab5" class="tab-radio">
-
-    <div class="tab-bar">
-      <label for="tab1" class="tab-label">Performance Detective</label>
-      <label for="tab2" class="tab-label">Report Builder</label>
-      <label for="tab3" class="tab-label">Account Inspector</label>
-      <label for="tab4" class="tab-label">Schema Mapper</label>
-      <label for="tab5" class="tab-label">Cache Inspector</label>
+    <div class="step ask">
+      <p id="l3"><b>Ask your agent</b></p>
+      <div class="code"><pre id="c3" aria-labelledby="l3">Set up a sherlock connection to my staging Postgres database and show me the tables.</pre></div>
+      <button type="button" data-copy="c3" aria-label="Copy the example prompt">Copy</button>
     </div>
+  </section>
 
-    <div class="tab-panels">
-      <!-- Panel 1: Performance Detective -->
-      <div class="tab-panel panel-1">
-        <div class="conversation">
-          <div class="msg msg-user">Why is checkout so slow on prod-db?</div>
-          <div class="msg msg-ai">
-            <div class="label">AI Assistant</div>
-            <p>Let me investigate the checkout performance. I'll start by checking the indexes on order-related tables and looking at table statistics.</p>
-            <code>sherlock -c prod-db indexes orders</code>
-            <code>sherlock -c prod-db stats orders</code>
-            <p>The <strong>orders</strong> table has 2.3M rows but no index on <strong>customer_id</strong> &mdash; which is used in every checkout lookup. Sequential scans are taking ~1,200ms. Let me verify with the query plan:</p>
-            <code>sherlock -c prod-db query "EXPLAIN SELECT * FROM orders WHERE customer_id = 42"</code>
-            <p>Confirmed &mdash; it's a sequential scan. Adding an index on <strong>orders.customer_id</strong> should bring that down to under 5ms.</p>
-          </div>
-        </div>
-      </div>
-
-      <!-- Panel 2: Report Builder -->
-      <div class="tab-panel panel-2">
-        <div class="conversation">
-          <div class="msg msg-user">Generate a monthly sales comparison for Q4.</div>
-          <div class="msg msg-ai">
-            <div class="label">AI Assistant</div>
-            <p>I'll map out the schema first to understand the relationship between orders and line items, then build the report.</p>
-            <code>sherlock -c prod-db introspect</code>
-            <code>sherlock -c prod-db fk order_items</code>
-            <p>Got it &mdash; <strong>order_items</strong> joins to <strong>orders</strong> via <strong>order_id</strong>, and <strong>products</strong> via <strong>product_id</strong>. Now I can aggregate:</p>
-            <code>sherlock -c prod-db query "SELECT DATE_TRUNC('month', o.created_at) AS month, SUM(oi.quantity * oi.unit_price) AS revenue, COUNT(DISTINCT o.id) AS order_count FROM orders o JOIN order_items oi ON o.id = oi.order_id WHERE o.created_at >= '2025-10-01' AND o.created_at < '2026-01-01' GROUP BY month ORDER BY month"</code>
-            <p>Here's your Q4 breakdown: October did &pound;142k across 1,847 orders, November &pound;218k (Black Friday bump), and December &pound;195k. November was up 53% month-over-month.</p>
-          </div>
-        </div>
-      </div>
-
-      <!-- Panel 3: Account Inspector -->
-      <div class="tab-panel panel-3">
-        <div class="conversation">
-          <div class="msg msg-user">User jane@example.com says she can't complete checkout. What's wrong?</div>
-          <div class="msg msg-ai">
-            <div class="label">AI Assistant</div>
-            <p>Let me look up her account and check for anything that might block checkout.</p>
-            <code>sherlock -c prod-db query "SELECT id, email, status, suspended_at, suspension_reason FROM users WHERE email = 'jane@example.com'"</code>
-            <p>Found it &mdash; her account was <strong>suspended</strong> on 2026-02-14 with reason: "payment_dispute". Let me check the audit trail:</p>
-            <code>sherlock -c prod-db query "SELECT action, details, created_at, performed_by FROM audit_log WHERE user_id = 4872 ORDER BY created_at DESC LIMIT 5"</code>
-            <p>The suspension was triggered automatically by the payment dispute system. Her PayPal dispute from order #8891 was resolved in her favour 3 days ago, but the account was never reinstated. This looks like a bug in the auto-reinstatement flow.</p>
-          </div>
-        </div>
-      </div>
-
-      <!-- Panel 4: Schema Mapper -->
-      <div class="tab-panel panel-4">
-        <div class="conversation">
-          <div class="msg msg-user">I'm new on this project. Can you explain the database structure?</div>
-          <div class="msg msg-ai">
-            <div class="label">AI Assistant</div>
-            <p>Welcome aboard! Let me map out the entire schema and the relationships between tables.</p>
-            <code>sherlock -c prod-db introspect</code>
-            <code>sherlock -c prod-db fk orders</code>
-            <p>Here's the lay of the land. You've got <strong>23 tables</strong> organised into four domains:</p>
-            <p><strong>Users &amp; Auth:</strong> users, sessions, password_resets, roles, user_roles</p>
-            <p><strong>Products:</strong> products, categories, product_categories, inventory</p>
-            <p><strong>Orders:</strong> orders, order_items, payments, refunds, shipping</p>
-            <p><strong>System:</strong> audit_log, settings, migrations, jobs, notifications</p>
-            <p>The core flow is: <strong>users</strong> &rarr; <strong>orders</strong> &rarr; <strong>order_items</strong> &rarr; <strong>products</strong>. Payments link back to orders with a one-to-many (supporting split payments).</p>
-          </div>
-        </div>
-      </div>
-
-      <!-- Panel 5: Cache Inspector -->
-      <div class="tab-panel panel-5">
-        <div class="conversation">
-          <div class="msg msg-user">Is our Redis cache actually helping? It feels like the app is still slow.</div>
-          <div class="msg msg-ai">
-            <div class="label">AI Assistant</div>
-            <p>Let me check the Redis server stats and see what's going on in the cache.</p>
-            <code>sherlock -c redis-prod info</code>
-            <code>sherlock -c redis-prod keys "sess:*"</code>
-            <p>Hit rate is only <strong>60%</strong> &mdash; that's low. You've got 12,400 session keys with a 30-minute TTL, but product caches are expiring every 60 seconds. Let me check for slow operations:</p>
-            <code>sherlock -c redis-prod slowlog</code>
-            <code>sherlock -c redis-prod inspect "product:catalog:all"</code>
-            <p>Found it. The slow log shows <strong>KEYS *</strong> being called every 10 seconds &mdash; that's a full keyspace scan in production with 48k keys. It's coming from the health check endpoint. The product catalog key is 4.2MB of serialised JSON being re-fetched every minute. Two fixes needed: replace KEYS with SCAN in the health check, and bump the product cache TTL to at least 5 minutes.</p>
-          </div>
-        </div>
-      </div>
+<!-- more:start -->
+  <section class="block" aria-labelledby="action">
+    <h2 id="action">See it in action</h2>
+    <div class="tabs" role="tablist" aria-labelledby="action" hidden>
+      <button type="button" role="tab" id="t-slow" aria-controls="s-slow" aria-selected="true">Slow query</button>
+      <button type="button" role="tab" id="t-report" aria-controls="s-report" aria-selected="false" tabindex="-1">Report</button>
+      <button type="button" role="tab" id="t-account" aria-controls="s-account" aria-selected="false" tabindex="-1">Account</button>
+      <button type="button" role="tab" id="t-redis" aria-controls="s-redis" aria-selected="false" tabindex="-1">Redis</button>
     </div>
-  </div>
-</section>
-
-<!-- ════════════════════ Supported Databases ════════════════════ -->
-<section>
-  <div class="container">
-    <h2 class="section-title">Supported Databases</h2>
-    <p class="section-subtitle">One binary to investigate them all.</p>
-    <div class="db-grid">
-      <div class="db-card" style="border-top-color: var(--pg)">
-        <h3>PostgreSQL</h3>
-        <p>Tables, schemas, queries, indexes, foreign keys, and data profiling.</p>
+    <div class="sessions">
+    <article class="session" id="s-slow" aria-labelledby="t-slow">
+      <h3>Slow query</h3>
+      <p class="said">“Why is checkout slow?”</p>
+      <div class="term">
+        <div class="cmd">sherlock -c prod-db indexes orders</div>
+        <div class="cmd">sherlock -c prod-db query "EXPLAIN ANALYZE SELECT * FROM orders WHERE customer_id = 42"</div>
       </div>
-      <div class="db-card" style="border-top-color: var(--mysql)">
-        <h3>MySQL / MariaDB</h3>
-        <p>Full introspection, stats, and read-only queries.</p>
+      <p class="found"><span aria-hidden="true">→</span> No index on orders.customer_id, so every checkout scans 2.3M rows. Add one.</p>
+    </article>
+    <article class="session" id="s-report" aria-labelledby="t-report">
+      <h3>Report</h3>
+      <p class="said">“Compare Q4 sales by month.”</p>
+      <div class="term">
+        <div class="cmd">sherlock -c prod-db query "SELECT date_trunc('month', created_at) AS month, sum(total) FROM orders WHERE created_at &gt;= '2025-10-01' GROUP BY 1"</div>
       </div>
-      <div class="db-card" style="border-top-color: var(--mssql)">
-        <h3>MSSQL / SQL Server</h3>
-        <p>Full introspection, schemas, queries, and stats for SQL Server.</p>
+      <p class="found"><span aria-hidden="true">→</span> October £142k, November £219k, December £195k. November was up 54%.</p>
+    </article>
+    <article class="session" id="s-account" aria-labelledby="t-account">
+      <h3>Account</h3>
+      <p class="said">“Why can’t jane@example.com check out?”</p>
+      <div class="term">
+        <div class="cmd">sherlock -c prod-db query "SELECT status, suspension_reason FROM users WHERE email = 'jane@example.com'"</div>
       </div>
-      <div class="db-card" style="border-top-color: var(--sqlite)">
-        <h3>SQLite</h3>
-        <p>Local file-based databases, great for development and testing.</p>
+      <p class="found"><span aria-hidden="true">→</span> Her account was suspended over a payment dispute that was resolved three days ago, and never reinstated.</p>
+    </article>
+    <article class="session" id="s-redis" aria-labelledby="t-redis">
+      <h3>Redis</h3>
+      <p class="said">“Is our cache actually helping?”</p>
+      <div class="term">
+        <div class="cmd">sherlock -c redis-prod info --section stats</div>
+        <div class="cmd">sherlock -c redis-prod slowlog</div>
       </div>
-      <div class="db-card" style="border-top-color: var(--redis)">
-        <h3>Redis</h3>
-        <p>Server info, key scanning, value inspection, and slow log analysis.</p>
-      </div>
+      <p class="found"><span aria-hidden="true">→</span> The hit rate is 60%, and a health check runs KEYS * every 10 seconds. Switch it to SCAN.</p>
+    </article>
     </div>
-  </div>
-</section>
+  </section>
 
-<!-- ════════════════════ Features ════════════════════ -->
-<section class="scenarios">
-  <div class="container">
-    <h2 class="section-title">Built Paranoid</h2>
-    <p class="section-subtitle">Security isn't an afterthought &mdash; it's the entire point.</p>
-    <div class="features-grid">
-      <div class="feature-card">
-        <div class="feature-icon">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
-        </div>
-        <h3>Read-only enforced</h3>
-        <p>SQL validation blocks any mutation. Redis uses a command whitelist. No write ever gets through.</p>
-      </div>
-      <div class="feature-card">
-        <div class="feature-icon">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/><circle cx="12" cy="16" r="1"/></svg>
-        </div>
-        <h3>OS keychain storage</h3>
-        <p>Passwords stored in the macOS Keychain or the Linux Secret Service, not in a config file.</p>
-      </div>
-      <div class="feature-card">
-        <div class="feature-icon">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
-        </div>
-        <h3>No server</h3>
-        <p>Sherlock runs nothing in the background except the tunnels you configure. It connects out to your databases, and to GitHub only when you run <code>sherlock update</code>.</p>
-      </div>
-      <div class="feature-card">
-        <div class="feature-icon">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="2" y="3" width="20" height="18" rx="2"/><polyline points="8 10 8 16"/><polyline points="12 8 12 16"/><polyline points="16 12 16 16"/></svg>
-        </div>
-        <h3>Single binary</h3>
-        <p>Standalone executable for macOS (Apple silicon), Linux x64 and Linux arm64. Zero runtime dependencies.</p>
-      </div>
-      <div class="feature-card">
-        <div class="feature-icon">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 9v4"/><path d="M10.363 3.591l-8.106 13.534a1.914 1.914 0 0 0 1.636 2.871h16.214a1.914 1.914 0 0 0 1.636-2.87L13.637 3.59a1.914 1.914 0 0 0-3.274 0z"/><path d="M12 17h.01"/></svg>
-        </div>
-        <h3>SQL injection prevention</h3>
-        <p>Keyword blocking in subqueries. Nested mutations can't sneak through SELECT wrappers.</p>
-      </div>
-      <div class="feature-card">
-        <div class="feature-icon">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
-        </div>
-        <h3>Query logging opt-in</h3>
-        <p>All logging disabled by default. Opt in when you need an audit trail.</p>
-      </div>
-    </div>
-  </div>
-</section>
+  <section class="block" aria-labelledby="paranoid">
+    <h2 id="paranoid">Built paranoid</h2>
+    <ul class="guards">
+      <li><b>Read-only at two levels.</b> Sherlock blocks writes, and PostgreSQL and MySQL refuse them too.</li>
+      <li><b>Passwords stay hidden.</b> Kept in your OS keychain, never shown to your agent.</li>
+      <li><b>Nothing in the background.</b> No server, no telemetry.</li>
+      <li><b>Safe with any repo.</b> A cloned project’s config can’t make sherlock run commands.</li>
+    </ul>
+  </section>
 
-<!-- ════════════════════ Quick Start ════════════════════ -->
-<section id="quick-start">
-  <div class="container">
-    <h2 class="section-title">Get Started in 60 Seconds</h2>
-    <p class="section-subtitle">Four steps from zero to database investigation.</p>
-    <div class="steps">
-      <div class="step">
-        <div class="step-number">1</div>
-        <div class="step-content">
-          <h3>Install the CLI</h3>
-          <p>One command. Installs <code>sherlock</code> to <code>~/.local/bin</code> on macOS (Apple silicon), Linux x64 and Linux arm64.</p>
-          <div class="step-code-block">
-            <code>curl -fsSL https://raw.githubusercontent.com/michaelbromley/sherlock/main/install.sh | bash</code>
-            <button class="copy-btn" data-copy="curl -fsSL https://raw.githubusercontent.com/michaelbromley/sherlock/main/install.sh | bash" aria-label="Copy install command">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
-            </button>
-          </div>
-        </div>
-      </div>
-      <div class="step">
-        <div class="step-number">2</div>
-        <div class="step-content">
-          <h3>Add the skill to your agent</h3>
-          <p>Teaches Claude Code, Codex, Cursor, Gemini CLI or any skills-capable agent to use sherlock. The installer offers to do this for you.</p>
-          <div class="step-code-block">
-            <code>npx skills add michaelbromley/sherlock -g</code>
-            <button class="copy-btn" data-copy="npx skills add michaelbromley/sherlock -g" aria-label="Copy command">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
-            </button>
-          </div>
-        </div>
-      </div>
-      <div class="step">
-        <div class="step-number">3</div>
-        <div class="step-content">
-          <h3>Configure</h3>
-          <p>Interactive wizard sets up your connection and stores credentials securely.</p>
-          <div class="step-code-block">
-            <code>sherlock manage</code>
-            <button class="copy-btn" data-copy="sherlock manage" aria-label="Copy command">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
-            </button>
-          </div>
-        </div>
-      </div>
-      <div class="step">
-        <div class="step-number">4</div>
-        <div class="step-content">
-          <h3>Investigate</h3>
-          <p>Ask your agent questions about your data.</p>
-          <div class="step-code-block">
-            <code>"Show me the top customers by order value from prod-db"</code>
-          </div>
-        </div>
-      </div>
-    </div>
-  </div>
-</section>
-
-<!-- ════════════════════ Footer ════════════════════ -->
-<footer>
-  <div class="container">
-    <div class="footer-links">
-      <span>Sherlock by Michael Bromley</span>
-      <span>&middot;</span>
-      <span>MIT License</span>
-      <span>&middot;</span>
-      <a href="https://github.com/michaelbromley/sherlock">GitHub</a>
-      <span>&middot;</span>
-      <span>Built with Bun + TypeScript</span>
-    </div>
-  </div>
-</footer>
+  <footer class="foot block">Sherlock is open source under the MIT licence. <a href="https://github.com/michaelbromley/sherlock">Source and docs on GitHub</a>.</footer>
+  <!-- more:end -->
+  <p id="status" class="vh" role="status"></p>
+</main>
 
 <script>
-document.querySelectorAll('.copy-btn').forEach(btn => {
-  btn.addEventListener('click', () => {
-    navigator.clipboard.writeText(btn.dataset.copy).then(() => {
-      btn.classList.add('copied');
-      btn.querySelector('svg').style.display = 'none';
-      btn.textContent = '✓';
-      setTimeout(() => {
-        btn.textContent = '';
-        btn.classList.remove('copied');
-        const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-        svg.setAttribute('width', '18'); svg.setAttribute('height', '18');
-        svg.setAttribute('viewBox', '0 0 24 24'); svg.setAttribute('fill', 'none');
-        svg.setAttribute('stroke', 'currentColor'); svg.setAttribute('stroke-width', '2');
-        svg.setAttribute('stroke-linecap', 'round');
-        svg.innerHTML = '<rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>';
-        btn.appendChild(svg);
-      }, 2000);
+document.documentElement.className += ' js';
+
+/* Session tabs: one session shown at a time, arrow keys move between them */
+(function () {
+  var list = document.querySelector('.tabs');
+  var tabs = [].slice.call(list.querySelectorAll('[role=tab]'));
+  function show(n, focus) {
+    tabs.forEach(function (t, i) {
+      var on = i === n, panel = document.getElementById(t.getAttribute('aria-controls'));
+      t.setAttribute('aria-selected', on ? 'true' : 'false');
+      t.tabIndex = on ? 0 : -1;
+      panel.hidden = !on;
+    });
+    if (focus) { tabs[n].focus(); if (tabs[n].scrollIntoView) tabs[n].scrollIntoView({ block: 'nearest', inline: 'nearest' }); }
+  }
+  tabs.forEach(function (t, i) {
+    var panel = document.getElementById(t.getAttribute('aria-controls'));
+    panel.setAttribute('role', 'tabpanel'); panel.tabIndex = 0;
+    t.addEventListener('click', function () { show(i, false); });
+    t.addEventListener('keydown', function (e) {
+      var n = e.key === 'ArrowRight' ? (i + 1) % tabs.length : e.key === 'ArrowLeft' ? (i + tabs.length - 1) % tabs.length :
+        e.key === 'Home' ? 0 : e.key === 'End' ? tabs.length - 1 : -1;
+      if (n < 0) return;
+      e.preventDefault(); show(n, true);
     });
   });
-});
+  list.hidden = false;
+  show(0, false);
 
-// ── Hero Eye Mouse Tracking ──
-(function() {
-  const container = document.getElementById('heroEye');
-  const pupilGroup = document.getElementById('pupilGroup');
-  if (!container || !pupilGroup) return;
-
-  const maxPupilMove = 14;
-
-  function updateEye(clientX, clientY) {
-    const rect = container.getBoundingClientRect();
-    const centerX = rect.left + rect.width / 2;
-    const centerY = rect.top + rect.height / 2;
-
-    const dx = clientX - centerX;
-    const dy = clientY - centerY;
-    const dist = Math.sqrt(dx * dx + dy * dy);
-    const maxDist = Math.max(window.innerWidth, window.innerHeight);
-
-    const factor = Math.min(dist / (maxDist * 0.4), 1);
-    const angle = Math.atan2(dy, dx);
-
-    const pupilX = Math.cos(angle) * maxPupilMove * factor;
-    const pupilY = Math.sin(angle) * maxPupilMove * factor;
-
-    pupilGroup.setAttribute('transform', `translate(${pupilX}, ${pupilY})`);
+  /* The sessions differ in height. Hold the tallest one's height so that switching tabs does
+     not move the rest of the page. */
+  var box = document.querySelector('.sessions');
+  function fit() {
+    var max = 0;
+    box.style.minHeight = '';
+    tabs.forEach(function (t) {
+      var p = document.getElementById(t.getAttribute('aria-controls')), was = p.hidden;
+      p.hidden = false; max = Math.max(max, p.offsetHeight); p.hidden = was;
+    });
+    box.style.minHeight = max + 'px';
   }
-
-  document.addEventListener('mousemove', function(e) {
-    requestAnimationFrame(() => updateEye(e.clientX, e.clientY));
-  });
-
-  document.addEventListener('touchmove', function(e) {
-    if (e.touches.length > 0) {
-      requestAnimationFrame(() => updateEye(e.touches[0].clientX, e.touches[0].clientY));
-    }
-  }, { passive: true });
-
-  // Gentle idle animation
-  let idleTimer;
-  let idleAngle = 0;
-  function startIdle() {
-    idleTimer = setInterval(() => {
-      idleAngle += 0.02;
-      const ix = Math.sin(idleAngle) * 4;
-      const iy = Math.cos(idleAngle * 0.7) * 2.5;
-      pupilGroup.setAttribute('transform', `translate(${ix}, ${iy})`);
-    }, 50);
-  }
-
-  function resetIdle() {
-    clearInterval(idleTimer);
-    idleTimer = null;
-    idleAngle = 0;
-  }
-
-  let moveTimeout;
-  document.addEventListener('mousemove', function() {
-    resetIdle();
-    clearTimeout(moveTimeout);
-    moveTimeout = setTimeout(startIdle, 3000);
-  });
-
-  startIdle();
+  fit();
+  window.addEventListener('resize', fit);
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(fit);
 })();
 
-document.querySelectorAll('a[href^="#"]').forEach(a => {
-  a.addEventListener('click', e => {
-    const target = document.querySelector(a.getAttribute('href'));
-    if (target) { e.preventDefault(); target.scrollIntoView({ behavior: 'smooth' }); }
+/* Copy buttons */
+(function () {
+  var status = document.getElementById('status');
+  function fallback(text) {
+    var ta = document.createElement('textarea');
+    ta.value = text; ta.setAttribute('readonly', ''); ta.style.position = 'fixed'; ta.style.opacity = '0';
+    document.body.appendChild(ta); ta.select();
+    try { document.execCommand('copy'); } catch (e) {}
+    document.body.removeChild(ta);
+  }
+  document.querySelectorAll('button[data-copy]').forEach(function (b) {
+    b.addEventListener('click', function () {
+      var text = document.getElementById(b.dataset.copy).textContent.trim();
+      if (navigator.clipboard && window.isSecureContext) {
+        navigator.clipboard.writeText(text).catch(function () { fallback(text); b.focus(); });
+      } else { fallback(text); b.focus(); }
+      b.textContent = 'Copied'; b.setAttribute('data-done', '');
+      status.textContent = 'Copied to clipboard';
+      clearTimeout(b._t);
+      b._t = setTimeout(function () { b.textContent = 'Copy'; b.removeAttribute('data-done'); status.textContent = ''; }, 1600);
+    });
   });
-});
-</script>
+  /* A command wider than its box scrolls sideways. It fades at the right edge while there is
+     more to scroll to, and takes keyboard focus so the arrow keys can scroll it. */
+  var pres = document.querySelectorAll('.code pre');
+  function more() {
+    pres.forEach(function (p) {
+      var over = p.scrollWidth - p.clientWidth > 2;
+      if (over) { p.tabIndex = 0; p.setAttribute('role', 'group'); } else { p.removeAttribute('tabindex'); p.removeAttribute('role'); }
+      if (over && p.scrollWidth - p.clientWidth - p.scrollLeft > 2) p.parentNode.setAttribute('data-more', '');
+      else p.parentNode.removeAttribute('data-more');
+    });
+  }
+  pres.forEach(function (p) { p.addEventListener('scroll', more, { passive: true }); });
+  window.addEventListener('resize', more);
+  more();
+})();
 
+/* Pixel scene. Everything is drawn into a low-resolution pixel buffer, which the canvas then
+   scales up by a whole number. Every frame is a pure function of the time t. */
+(function () {
+  var canvas = document.getElementById('scene'), names = document.getElementById('names');
+  var ctx = canvas.getContext('2d');
+  var reduce = window.matchMedia('(prefers-reduced-motion: reduce)');
+
+  var C = {
+    ink: '#0b0907', spot: '#221c16', shadow: '#120f0c', label: '#ab9f89',
+    steelH: '#e2e8ec', steel: '#aab6bf', steelS: '#7f8c97', steelD: '#56616d', steelK: '#343c46',
+    face: '#12181e', eye: '#ffd66b', eyeH: '#fff6cf', eyeD: '#8a6a2a',
+    hatH: '#d2aa6e', hatA: '#b98f55', hatB: '#946f3c', hatD: '#5e4322',
+    capeH: '#8e9d82', capeA: '#6f7f66', capeB: '#57664f', capeD: '#38453a',
+    coatH: '#5a6753', coat: '#465241', coatD: '#343e32', coatK: '#262e26', hatK: '#3d2a14',
+    brassH: '#f8d98a', brass: '#e0a83e', brassD: '#9c6a22',
+    woodH: '#a8683a', wood: '#7a4a2a', woodD: '#4f2e18',
+    paper: '#f0e7d3', paperD: '#c9bda2',
+    glass: '#1c3036', glassH: '#d6f3ee',
+    lampH: '#ffc2a8', lamp: '#e5573f', lampOff: '#6a2c24',
+    cream: '#fff6dc'
+  };
+  /* per database: body, shade, light, wire channel */
+  var DBS = [
+    { n: 'POSTGRES', c: ['#4f86c6', '#32598c', '#a6c8f2', '#1b2c45'] },
+    { n: 'MYSQL', c: ['#3fa79f', '#28736f', '#9be5dc', '#143634'] },
+    { n: 'SQL SERVER', c: ['#9a6bd0', '#69459a', '#cfb2f5', '#2f2047'] },
+    { n: 'SQLITE', c: ['#9aa7bd', '#69758c', '#dbe3f2', '#2b3244'] },
+    { n: 'REDIS', c: ['#e0603c', '#a03e24', '#ffb08c', '#47190d'] }
+  ];
+
+  var cache = {};
+  function col(h) {
+    if (cache[h]) return cache[h];
+    var n = parseInt(h.slice(1), 16);
+    return (cache[h] = ((255 << 24) | ((n & 255) << 16) | (((n >> 8) & 255) << 8) | ((n >> 16) & 255)) >>> 0);
+  }
+
+  function Grid(w, h) { this.w = w; this.h = h; this.px = new Uint32Array(w * h); }
+  Grid.prototype.set = function (x, y, c) {
+    if (x < 0 || y < 0 || x >= this.w || y >= this.h) return;
+    this.px[y * this.w + x] = c ? col(c) : 0;
+  };
+  Grid.prototype.rect = function (x, y, w, h, c) {
+    for (var j = 0; j < h; j++) for (var i = 0; i < w; i++) this.set(x + i, y + j, c);
+  };
+  Grid.prototype.blit = function (src, ox, oy) {
+    for (var y = 0; y < src.h; y++) for (var x = 0; x < src.w; x++) {
+      var v = src.px[y * src.w + x];
+      if (!v) continue;
+      var X = x + ox, Y = y + oy;
+      if (X < 0 || Y < 0 || X >= this.w || Y >= this.h) continue;
+      this.px[Y * this.w + X] = v;
+    }
+  };
+  Grid.prototype.outline = function (c) {
+    var k = col(c), w = this.w, h = this.h, src = this.px, out = new Uint32Array(src);
+    for (var y = 0; y < h; y++) for (var x = 0; x < w; x++) {
+      if (src[y * w + x]) continue;
+      if ((x > 0 && src[y * w + x - 1]) || (x < w - 1 && src[y * w + x + 1]) ||
+          (y > 0 && src[(y - 1) * w + x]) || (y < h - 1 && src[(y + 1) * w + x])) out[y * w + x] = k;
+    }
+    this.px = out;
+  };
+
+  /* 3x5 pixel font for the labels */
+  var FONT = {
+    P: '###|#.#|###|#..|#..', O: '###|#.#|#.#|#.#|###', S: '###|#..|###|..#|###', T: '###|.#.|.#.|.#.|.#.',
+    G: '###|#..|#.#|#.#|###', R: '##.|#.#|##.|#.#|#.#', E: '###|#..|##.|#..|###', M: '#...#|##.##|#.#.#|#...#|#...#',
+    Y: '#.#|#.#|.#.|.#.|.#.', Q: '###.|#.#.|#.#.|###.|...#', L: '#..|#..|#..|#..|###', I: '###|.#.|.#.|.#.|###',
+    D: '##.|#.#|#.#|#.#|##.', V: '#.#|#.#|#.#|#.#|.#.', ' ': '.|.|.|.|.'
+  };
+  function label(g, text, x, y, c) {
+    for (var i = 0; i < text.length; i++) {
+      var rows = FONT[text[i]].split('|');
+      for (var r = 0; r < 5; r++) for (var k = 0; k < rows[r].length; k++) if (rows[r][k] === '#') g.set(x + k, y + r, c);
+      x += rows[0].length + 1;
+    }
+  }
+  function labelWidth(text) {
+    for (var i = 0, w = -1; i < text.length; i++) w += FONT[text[i]].split('|')[0].length + 1;
+    return w;
+  }
+
+  /* Database cylinder, 20 x 24, lit from the top left */
+  function drawDb(g, x, y, pal, led) {
+    var b = new Grid(22, 26), body = pal[0], dark = pal[1], hi = pal[2];
+    var i, yy, hw;
+    function span(row, half, c) { b.rect(1 + 10 - half, 1 + row, half * 2, 1, c); }
+    for (yy = 3; yy <= 23; yy++) {
+      hw = yy === 23 ? 4 : yy === 22 ? 7 : yy === 21 ? 9 : 10;
+      for (i = 10 - hw; i < 10 + hw; i++) {
+        b.set(1 + i, 1 + yy, i >= 15 ? dark : (i === 2 || i === 3) ? hi : body);
+      }
+    }
+    /* curved seams between the discs */
+    [10, 16].forEach(function (s) {
+      for (i = 0; i < 20; i++) {
+        var d = Math.abs(i - 9.5), cv = d > 9 ? 0 : d > 7 ? 1 : d > 4 ? 2 : 3;
+        b.set(1 + i, 1 + s + cv, dark);
+      }
+    });
+    /* lid */
+    [4, 7, 9, 10, 9, 7, 4].forEach(function (half, row) { span(row, half, hi); });
+    [3, 6, 7, 6, 3].forEach(function (half, row) { span(row + 1, half, body); });
+    /* status light */
+    b.rect(1 + 11, 1 + 9, 2, 2, led ? C.cream : dark);
+    /* brass cap where the cable leaves */
+    b.rect(1 + 7, 1, 6, 2, C.brass); b.rect(1 + 7, 1, 6, 1, C.brassH); b.rect(1 + 12, 2, 1, 1, C.brassD);
+    b.outline(C.ink);
+    g.blit(b, x - 1, y - 1);
+  }
+
+  /* Robot. Local coordinates: the figure is symmetric about the line between x = -1 and x = 0,
+     and y = 0 is the top of the antenna lamp. */
+  function drawRobot(g, ox, oy, s) {
+    function R(x, y, w, h, c) { g.rect(ox + x, oy + y, w, h, c); }
+    function P(x, y, c) { g.set(ox + x, oy + y, c); }
+    function M(x, y, w, h, c) { R(x, y, w, h, c); R(-x - w, y, w, h, c); }
+    var x, y, i, hw, c, hy = s.bob;
+
+    /* legs and boots */
+    M(4, 101, 7, 3, C.steelK);
+    M(3, 104, 11, 4, C.steelD); M(3, 104, 11, 1, C.steelS); M(3, 107, 11, 1, C.steelK);
+    R(-14, 104, 2, 1, C.steel); R(3, 104, 2, 1, C.steel);
+
+    /* long coat */
+    for (y = 66; y <= 100; y++) for (x = -19; x < 19; x++) {
+      var cc = (((x + 64) >> 1) + (y >> 1)) & 1;
+      P(x, y, y >= 99 ? C.coatK : x >= 14 ? (cc ? C.coatD : C.coatK) : x === -19 ? C.coatH : (cc ? C.coat : C.coatD));
+    }
+    M(5, 95, 2, 2, C.brassD);
+    M(10, 91, 6, 1, C.coatK);
+
+    /* sockets: one on each side of the coat, one at each corner of the hem */
+    c = function (n) { return s.flash[n] ? C.cream : C.brass; };
+    R(-21, 92, 2, 4, c(0)); R(19, 92, 2, 4, c(4));
+    R(-19, 101, 4, 2, c(1)); R(15, 101, 4, 2, c(3));
+    R(-21, 95, 2, 1, C.brassD); R(19, 95, 2, 1, C.brassD);
+
+    /* left arm, hanging at the side */
+    R(-25, 62, 5, 13, C.coat); R(-25, 62, 1, 13, C.coatH); R(-21, 62, 1, 13, C.coatD);
+    R(-26, 75, 7, 2, C.brass); R(-26, 75, 7, 1, C.brassH);
+    R(-27, 77, 8, 6, C.steel); R(-27, 77, 8, 1, C.steelH); R(-20, 78, 1, 5, C.steelS); R(-27, 82, 8, 1, C.steelS);
+    R(-25, 79, 1, 4, C.steelD); R(-23, 79, 1, 4, C.steelD); R(-27, 79, 1, 2, C.steelK);
+
+    /* Inverness cape: tweed check, scalloped hem */
+    var prev = 0;
+    for (y = 49; y <= 68; y++) {
+      hw = y === 49 ? 9 : y === 50 ? 14 : y === 51 ? 18 : y === 52 ? 21 : y === 53 ? 23 : y <= 57 ? 24 : y <= 62 ? 25 : 26;
+      for (x = -hw; x < hw; x++) {
+        var chk = (((x + 64) >> 1) + (y >> 1)) & 1;
+        if (y === 68) c = C.capeD;
+        else if (x >= hw - 4) c = chk ? C.capeB : C.capeD;
+        else if (x === -hw || x < -prev) c = C.capeH;
+        else c = chk ? C.capeA : C.capeB;
+        P(x, y, c);
+      }
+      prev = hw;
+    }
+    for (x = -26; x < 26; x++) if (((x + 26) & 3) < 2) P(x, 69, C.capeD);
+    M(11, 58, 1, 10, C.capeD);
+    /* collar */
+    for (i = 0; i < 6; i++) {
+      var k = (i * 2 / 3) | 0;
+      R(-9 + k, 50 + i, 9 - 2 * k, 1, C.capeD); R(k, 50 + i, 9 - 2 * k, 1, C.capeD);
+    }
+    for (i = 0; i < 6; i++) {
+      k = (i * 2 / 3) | 0;
+      R(-9 + k, 49 + i, 9 - 2 * k, 1, i ? C.capeA : C.capeH); R(k, 49 + i, 9 - 2 * k, 1, i ? C.capeA : C.capeH);
+    }
+    /* the cape parts at the front over the coat */
+    for (y = 55; y <= 68; y++) {
+      var gw = 1 + (((y - 55) / 5) | 0);
+      for (x = -gw; x < gw; x++) P(x, y, ((((x + 64) >> 1) + (y >> 1)) & 1) ? C.coat : C.coatD);
+      P(-gw - 1, y, C.capeH); P(gw, y, C.capeD);
+    }
+    R(-1, 58, 2, 2, C.brass); R(-1, 64, 2, 2, C.brass);
+    P(-1, 58, C.brassH); P(-1, 64, C.brassH);
+
+    /* chest unit: one light per database, a gear, and a slot on top that prints the data */
+    R(-9, 74, 18, 15, C.brass); R(-9, 74, 18, 1, C.brassH); R(-9, 88, 18, 1, C.brassD); R(8, 75, 1, 14, C.brassD);
+    R(-7, 76, 14, 11, C.face);
+    for (i = 0; i < 5; i++) R(-7 + i * 3, 77, 2, 2, s.led[i] ? DBS[i].c[2] : DBS[i].c[1]);
+    R(-5, 82, 3, 3, C.brass); P(-4, 83, C.face);
+    if (s.gear) { P(-4, 81, C.brass); P(-4, 85, C.brass); P(-6, 83, C.brass); P(-2, 83, C.brass); }
+    else { P(-6, 81, C.brass); P(-2, 81, C.brass); P(-6, 85, C.brass); P(-2, 85, C.brass); }
+    R(1, 81, 5, 1, C.steelD); R(1, 83, 5, 1, C.steelD); R(1, 85, 3, 1, C.steelD);
+    R(-3, 89, 6, 2, s.flash[2] ? C.cream : C.brass);
+
+    /* neck */
+    R(-5, 46, 10, 4, C.steelK); R(-5, 47, 10, 1, C.steelD);
+
+    /* head, turned a little towards the glass: side panel on the left, face on the right */
+    R(15, 31 + hy, 2, 6, C.steelS); R(15, 31 + hy, 2, 1, C.steel);
+    R(-15, 22 + hy, 30, 25, C.steel);
+    R(-15, 22 + hy, 7, 25, C.steelS); R(-15, 22 + hy, 1, 25, C.steelD);
+    R(-8, 22 + hy, 1, 25, C.steelH);
+    R(12, 22 + hy, 3, 25, C.steelS);
+    R(-8, 45 + hy, 23, 2, C.steelS); R(-15, 45 + hy, 7, 2, C.steelD);
+    R(-8, 24 + hy, 23, 1, C.steelS); R(-15, 24 + hy, 7, 1, C.steelD);
+    P(-15, 46 + hy, 0); P(14, 46 + hy, 0);
+    /* ear bolt on the side panel */
+    R(-14, 30 + hy, 5, 7, C.steelD); R(-13, 31 + hy, 3, 5, C.steel); R(-12, 32 + hy, 1, 3, C.brass);
+    P(-14, 30 + hy, C.steelS); P(-10, 30 + hy, C.steelS); P(-14, 36 + hy, C.steelS); P(-10, 36 + hy, C.steelS);
+    /* rivets */
+    P(-7, 43 + hy, C.steelK); P(11, 43 + hy, C.steelK);
+    /* face plate */
+    R(-6, 26 + hy, 20, 15, C.steelK);
+    R(-5, 27 + hy, 18, 13, C.face);
+    P(-5, 27 + hy, C.steelK); P(12, 27 + hy, C.steelK); P(-5, 39 + hy, C.steelK); P(12, 39 + hy, C.steelK);
+    /* eyes: the near one a pixel wider than the far one; they look down at the glass */
+    [[-3, 6], [6, 5]].forEach(function (e) {
+      var ex = e[0], w = e[1], ey = 30 + hy;
+      if (s.blink) { R(ex, ey + 3, w, 1, C.eyeD); return; }
+      R(ex, ey, w, 6, C.eye);
+      P(ex, ey, C.face); P(ex + w - 1, ey, C.face); P(ex, ey + 5, C.face); P(ex + w - 1, ey + 5, C.face);
+      R(ex + w - 4, ey + (s.look ? 3 : 2), 2, 2, C.face);
+      P(ex + 1, ey + 1, C.eyeH);
+    });
+    /* mouth grille */
+    for (i = 0; i < 5; i++) R(1 + i * 2, 42 + hy, 1, 3, C.steelK);
+
+    /* deerstalker: tweed crown, a peak at the front and at the back, ear flap tied up with a bow */
+    var crown = [5, 8, 10, 12, 13, 14, 14, 15, 15, 15, 15, 15, 15];
+    for (i = 0; i < crown.length; i++) {
+      y = 9 + i; hw = crown[i];
+      for (x = -hw; x < hw; x++) {
+        var ck = (((x + 64) >> 1) + (y >> 1)) & 1;
+        if (x >= hw - 3) c = ck ? C.hatB : C.hatD;
+        else if (i < 5 && x < -hw + 4) c = ck ? C.hatH : C.hatA;
+        else c = ck ? C.hatA : C.hatB;
+        P(x, y + hy, c);
+      }
+    }
+    for (y = 13; y <= 20; y++) for (x = -8; x <= 2; x++) {
+      P(x, y + hy, ((((x + 65) >> 1) + (y >> 1)) & 1) ? C.hatH : C.hatA);
+    }
+    R(-9, 13 + hy, 1, 8, C.hatK); R(3, 13 + hy, 1, 8, C.hatK); R(-8, 12 + hy, 11, 1, C.hatK);
+    P(-8, 13 + hy, C.hatK); P(2, 13 + hy, C.hatK);
+    R(-3, 9 + hy, 1, 3, C.hatK);
+    R(-15, 21 + hy, 30, 1, C.hatD);
+    /* the two peaks slope down and out past the head: the front one longer, towards the glass */
+    for (x = 11; x <= 25; x++) {
+      y = 18 + (((x - 11) * 6 / 14) | 0) + hy;
+      P(x, y, C.hatA); P(x, y + 1, (x >> 1) & 1 ? C.hatA : C.hatB); P(x, y + 2, C.hatB); P(x, y + 3, C.hatD);
+    }
+    for (x = 11; x <= 22; x++) {
+      y = 18 + (((x - 11) * 5 / 11) | 0) + hy;
+      P(-1 - x, y, C.hatH); P(-1 - x, y + 1, (x >> 1) & 1 ? C.hatH : C.hatA); P(-1 - x, y + 2, C.hatA); P(-1 - x, y + 3, C.hatD);
+    }
+
+    /* antenna */
+    R(-1, 4 + hy, 2, 4, C.steelD); R(-1, 4 + hy, 1, 4, C.steelS);
+    c = s.lamp ? C.lamp : C.lampOff;
+    R(-1, hy, 2, 4, c); R(-2, 1 + hy, 4, 2, c);
+    if (s.lamp) P(-1, 1 + hy, C.lampH);
+    /* the bow that ties the flaps */
+    M(1, 5 + hy, 5, 4, C.hatK); M(2, 6 + hy, 3, 2, C.hatB); R(-1, 6 + hy, 2, 3, C.hatK);
+  }
+
+  /* The printout. It feeds up out of the chest unit: cells 3 tall, 1 apart, one colour per
+     database. PX, PW and PTOP place the strip; LX, LY are the centre of the glass. */
+  var SEQ = [0, 3, 1, -1, 4, 2, 0, -1, 1, 4, 3, 2, -1, 0, 2, 4, 1, -1, 3, 0, 4, 1, 2, -1, 3];
+  var PX = 3, PW = 7, PTOP = 50, LX = 6, LY = 56;
+  function tapeAt(y, shift) {
+    var u = -y - shift, k = Math.floor(u / 4), m = ((u % 4) + 4) % 4;
+    return { cell: m === 3 ? -1 : SEQ[((k % SEQ.length) + SEQ.length) % SEQ.length], m: m, k: k };
+  }
+  function drawPaper(g, cx, ty, shift) {
+    var b = new Grid(PW + 2, 26), y, a;
+    for (y = PTOP; y <= 73; y++) {
+      b.rect(1, 1 + y - PTOP, PW, 1, C.paper); b.set(PW, 1 + y - PTOP, C.paperD);
+      a = tapeAt(y, shift);
+      if (a.cell >= 0) b.rect(2, 1 + y - PTOP, PW - 2, 1, DBS[a.cell].c[0]);
+    }
+    b.outline(C.ink);
+    g.blit(b, cx + PX - 1, ty + PTOP - 1);
+  }
+  /* The glass, held up over the printout, which shows through it at twice the size */
+  function drawLens(g, cx, ty, shift, glint) {
+    var b = new Grid(40, 40), ox = 13, oy = 13, dx, dy, d2, c, a, sx, sy, i, lc, sub, bit;
+    function P(x, y, c) { b.set(ox + x, oy + y, c); }
+    for (i = 0; i < 9; i++) {
+      b.rect(ox + 7 + i, oy + 7 + i, 2, 2, i < 4 ? C.brassD : C.wood);
+      P(7 + i, 8 + i, i < 4 ? C.brassD : C.woodD);
+    }
+    for (dy = -12; dy <= 12; dy++) for (dx = -12; dx <= 12; dx++) {
+      d2 = dx * dx + dy * dy;
+      if (d2 > 132) continue;
+      if (d2 > 90) { P(dx, dy, (dx + dy > 5) ? C.brassD : (dx + dy < -11) ? C.brassH : C.brass); continue; }
+      c = C.glass;
+      sx = LX + Math.floor(dx / 2); sy = LY + Math.floor(dy / 2);
+      if (sx >= PX && sx < PX + PW && sy >= PTOP) {
+        c = sx === PX + PW - 1 ? C.paperD : C.paper;
+        a = tapeAt(sy, shift);
+        if (a.cell >= 0 && sx > PX && sx < PX + PW - 1) {
+          sub = ((dy % 2) + 2) % 2;
+          lc = dx - 2 * (PX + 1 - LX);
+          bit = a.m !== 1 ? 0 : (lc === 2 || lc === 3) ? (a.k & 1) : (lc === 6 || lc === 7) ? (a.k & 2) : (lc === 4 || lc === 5) ? !(a.k & 3) : 0;
+          c = DBS[a.cell].c[bit || (a.m === 0 && sub === 1) ? 1 : (a.m === 2 && sub === 0) ? 2 : 0];
+        }
+      }
+      P(dx, dy, c);
+    }
+    P(-6, -6, C.glassH); P(-5, -7, C.glassH); P(-4, -8, C.glassH); P(-7, -5, C.glassH);
+    if (glint) { P(-5, -6, C.cream); P(-6, -7, C.cream); P(-3, -8, C.glassH); P(6, 7, C.glassH); P(7, 6, C.glassH); }
+    b.outline(C.ink);
+    g.blit(b, cx + LX - ox, ty + LY - oy);
+  }
+  /* The raised forearm and the fist that grips the handle, in front of the cape */
+  function drawHand(g, cx, ty) {
+    var b = new Grid(16, 22), i;
+    function R(x, y, w, h, c) { b.rect(1 + x - 20, 1 + y - 68, w, h, c); }
+    /* the forearm leans out to an elbow at the side */
+    for (i = 0; i < 8; i++) {
+      R(21 + (i >> 1), 78 + i, 6, 1, C.coat); R(21 + (i >> 1), 78 + i, 1, 1, C.coatH); R(26 + (i >> 1), 78 + i, 1, 1, C.coatK);
+    }
+    R(24, 85, 6, 1, C.coatK);
+    R(20, 76, 8, 2, C.brass); R(20, 76, 8, 1, C.brassH);
+    R(20, 68, 8, 8, C.steel); R(20, 68, 8, 1, C.steelH); R(20, 68, 1, 8, C.steelH);
+    R(27, 69, 1, 7, C.steelS); R(20, 75, 8, 1, C.steelS);
+    R(23, 70, 5, 1, C.steelD); R(23, 72, 5, 1, C.steelD); R(23, 74, 4, 1, C.steelD);
+    R(20, 71, 2, 3, C.steelS); R(21, 72, 1, 1, C.steelK);
+    b.outline(C.ink);
+    g.blit(b, cx + 20 - 1, ty + 68 - 1);
+  }
+
+  /* Wires. Each is a list of pixel steps from its database to its socket, drawn as a dark
+     channel two pixels thick with dashes of data moving along it. */
+  function makePattern(seed) {
+    var a = [], r = seed, i;
+    function rnd() { r = (r * 1103515245 + 12345) & 0x7fffffff; return r / 0x7fffffff; }
+    while (a.length < 64) {
+      var L = [5, 6, 8, 10][(rnd() * 4) | 0], gap = [3, 4, 4, 6][(rnd() * 4) | 0];
+      for (i = 0; i < L; i++) a.push(i === L - 1 ? 4 : i >= L - 2 ? 3 : i >= 2 ? 2 : 1);
+      for (i = 0; i < gap; i++) a.push(0);
+    }
+    return a;
+  }
+  function trace(way) {
+    var pts = [[way[0][0], way[0][1]]], i, x, y;
+    for (i = 1; i < way.length; i++) {
+      x = pts[pts.length - 1][0]; y = pts[pts.length - 1][1];
+      while (x !== way[i][0] || y !== way[i][1]) {
+        x += Math.sign(way[i][0] - x); y += Math.sign(way[i][1] - y);
+        pts.push([x, y]);
+      }
+    }
+    return pts;
+  }
+
+  var L, scene, scale = 1, raf = 0, t0 = 0, lastTick = -1;
+
+  function build(wide) {
+    var W = wide ? 180 : 118, sp = wide ? 36 : 23, cx = W / 2, ty = 4, dy = ty + 118;
+    var dbs = DBS.map(function (d, k) {
+      var x = cx - 10 + (k - 2) * sp, wx = x + 9, way;
+      if (k === 0) way = [[wx, dy - 2], [wx, ty + 93], [cx - 23, ty + 93]];
+      if (k === 4) way = [[wx, dy - 2], [wx, ty + 93], [cx + 21, ty + 93]];
+      if (k === 1) way = [[wx, dy - 2], [wx, ty + 110], [cx - 18, ty + 110], [cx - 18, ty + 103]];
+      if (k === 3) way = [[wx, dy - 2], [wx, ty + 110], [cx + 16, ty + 110], [cx + 16, ty + 103]];
+      if (k === 2) way = [[wx, dy - 2], [wx, ty + 91]];
+      return { d: d, x: x, y: dy, pts: trace(way), pat: makePattern(977 + k * 131), speed: 30 + ((k * 7) % 5) * 2, off: k * 11 };
+    });
+    /* pixel labels when there is room for them; the narrow layout uses the text row below */
+    dbs.forEach(function (b) {
+      b.lx = Math.round(b.x + 10 - labelWidth(b.d.n) / 2);
+      b.ly = dy + 28;
+    });
+    return { W: W, H: dy + (wide ? 36 : 27), cx: cx, ty: ty, dbs: dbs, wide: wide };
+  }
+
+  function setup() {
+    var vw = document.documentElement.clientWidth, vh = window.innerHeight;
+    /* breakpoints follow the CSS media queries, which count the scrollbar; the space left does not */
+    var mq = window.innerWidth, wide = mq >= 700, two = mq >= 1180, availW, availH;
+    L = build(wide);
+    if (two) { availW = Math.min(vw, 1328) - 64 - 40 - (mq >= 1340 ? 420 : 380); availH = vh - (mq >= 1340 ? 240 : 330); }
+    else { availW = Math.min(vw, 1328) - (wide ? 48 : 32); availH = wide ? vh - 60 : 9999; }
+    /* as large as the width allows; the height may shrink it, but not below 3 */
+    scale = Math.max(2, Math.min(wide ? 6 : 4, Math.floor(availW / L.W), Math.max(3, Math.floor(availH / L.H))));
+    canvas.width = L.W; canvas.height = L.H;
+    canvas.style.width = L.W * scale + 'px';
+    canvas.style.height = L.H * scale + 'px';
+    scene = new Grid(L.W, L.H);
+    /* on the narrow layout the names sit under the cylinders as one row of text */
+    names.hidden = wide;
+    names.style.fontSize = scale >= 4 ? '12px' : scale === 3 ? '10.5px' : '8.5px';
+    for (var i = 0; i < 5; i++) names.children[i].style.width = 23 * scale + 'px';
+    names.children[0].textContent = scale >= 3 ? 'PostgreSQL' : 'Postgres';
+  }
+
+  function wireValue(b, s, t) {
+    var n = b.pat.length, shift = Math.floor(t * b.speed) + b.off;
+    return b.pat[(((s - shift) % n) + n) % n];
+  }
+
+  function render(t) {
+    var g = scene, cx = L.cx, ty = L.ty, x, y, i, d2;
+
+    g.px.fill(0);
+
+    /* a dithered pool of light behind the figure */
+    var r1 = L.wide ? 60 : 52, sy = ty + 60;
+    for (y = sy - r1 - 6; y <= sy + r1 + 6; y++) for (x = cx - r1 - 6; x < cx + r1 + 6; x++) {
+      d2 = (x - cx + 0.5) * (x - cx + 0.5) + (y - sy) * (y - sy);
+      if (d2 < r1 * r1 || (d2 < (r1 + 3) * (r1 + 3) && ((x + y) & 1)) || (d2 < (r1 + 6) * (r1 + 6) && !(x & 1) && !(y & 1) )) g.set(x, y, C.spot);
+    }
+    g.rect(cx - 18, ty + 108, 36, 1, C.shadow); g.rect(cx - 15, ty + 109, 30, 1, C.shadow);
+
+    /* wires */
+    var flash = [], led = [];
+    L.dbs.forEach(function (b) { b.pts.forEach(function (p) { g.rect(p[0] - 1, p[1] - 1, 4, 4, C.ink); }); });
+    L.dbs.forEach(function (b, k) {
+      var n = b.pts.length, pal = b.d.c, s, v, p;
+      for (s = 0; s < n; s++) {
+        p = b.pts[s]; v = wireValue(b, s, t);
+        g.rect(p[0], p[1], 2, 2, v === 4 ? C.cream : v === 3 ? pal[2] : v === 2 ? pal[0] : v === 1 ? pal[1] : pal[3]);
+      }
+      flash[k] = wireValue(b, n - 1, t) >= 3 || wireValue(b, n - 2, t) === 4;
+      led[k] = false;
+      for (s = n; s < n + 9; s++) if (wireValue(b, s, t) === 4) led[k] = true;
+      b.lit = wireValue(b, 0, t) >= 2;
+    });
+
+    /* databases and their labels */
+    L.dbs.forEach(function (b) {
+      g.rect(b.x + 2, b.y + 24, 16, 1, C.shadow);
+      drawDb(g, b.x, b.y, b.d.c, b.lit);
+      if (L.wide) label(g, b.d.n, b.lx, b.ly, C.label);
+    });
+
+    /* robot */
+    var state = {
+      bob: (t % 2.6) < 1.3 ? 0 : 1,
+      blink: (t % 4.3) > 4.16,
+      look: (t % 9.5) < 8.1,
+      lamp: (t % 1.2) < 0.6,
+      gear: Math.floor(t * 5) & 1,
+      flash: flash, led: led
+    };
+    var rb = new Grid(86, 114), ox = 42, oy = 2;
+    drawRobot(rb, ox, oy, state);
+    rb.outline(C.ink);
+    g.blit(rb, cx - ox, ty - oy);
+
+    /* the middle cable runs in front of the coat */
+    var mid = L.dbs[2];
+    mid.pts.forEach(function (p) { if (p[1] <= ty + 109) g.rect(p[0] - 1, p[1], 4, 2, C.ink); });
+    mid.pts.forEach(function (p, s) {
+      if (p[1] > ty + 109) return;
+      var v = wireValue(mid, s, t), pal = mid.d.c;
+      g.rect(p[0], p[1], 2, 2, v === 4 ? C.cream : v === 3 ? pal[2] : v === 2 ? pal[0] : v === 1 ? pal[1] : pal[3]);
+    });
+
+    /* the printout, the glass over it, and the hand that holds the glass */
+    var shift = Math.floor(t * 7);
+    drawPaper(g, cx, ty, shift);
+    drawLens(g, cx, ty, shift, (t % 3.7) < 0.25);
+    drawHand(g, cx, ty);
+
+    ctx.putImageData(new ImageData(new Uint8ClampedArray(g.px.buffer.slice(0)), L.W, L.H), 0, 0);
+  }
+
+  function frame(now) {
+    if (!t0) t0 = now;
+    var t = (now - t0) / 1000, tick = Math.floor(t * 30);
+    if (tick !== lastTick) { lastTick = tick; render(1.4 + t); }
+    raf = requestAnimationFrame(frame);
+  }
+  function start() {
+    cancelAnimationFrame(raf);
+    t0 = 0; lastTick = -1;
+    /* with reduced motion, hold one frame: data on every wire, a full cell under the glass */
+    if (reduce.matches) render(2.75); else raf = requestAnimationFrame(frame);
+  }
+
+  var lastW = 0, lastH = 0;
+  window.addEventListener('resize', function () {
+    var w = document.documentElement.clientWidth, h = window.innerHeight;
+    if (w === lastW && (w < 700 || h === lastH)) return;
+    lastW = w; lastH = h;
+    setup(); start();
+  });
+  if (reduce.addEventListener) reduce.addEventListener('change', start);
+  lastW = document.documentElement.clientWidth; lastH = window.innerHeight;
+  setup(); start();
+})();
+</script>
 </body>
 </html>
