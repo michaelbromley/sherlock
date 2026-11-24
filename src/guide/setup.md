@@ -9,7 +9,7 @@ sherlock connection add shop --url-env DATABASE_URL --directory /path/to/project
 sherlock doctor shop
 ```
 
-Run both yourself, and tell the user the result in a line or two. The project's `.env` is read before the environment, so a `DATABASE_URL` exported for another project cannot win. `--directory` also makes sherlock pick this connection inside the project. Never copy the URL or its password into a command.
+Run both yourself, and tell the user the result in a line or two. The project's `.env` is read before the environment, so a `DATABASE_URL` exported for another project cannot win. Queries still name it with `-c`. Never copy the URL or its password into a command.
 
 **Otherwise, do everything except the password.** Work out the details from the conversation and the project: the type, host, port, database, username, SSL, a tunnel, and a short connection name. Ask only for what you cannot find. Then give the user one command to run in their own terminal, ending in `--password-prompt`:
 
@@ -55,13 +55,13 @@ Never ask the user to tell you a password, never guess one, and never pass one a
 
 ## Tell Later Sessions About It
 
-When the connection is for a project, run this in the project's directory once `doctor` passes:
+When the connection is for a project, set it up with `--directory <project>`. Then run this in the project's directory once `doctor` passes:
 
 ```bash
 sherlock agents-md
 ```
 
-It writes a short section to the project's AGENTS.md or CLAUDE.md, naming the connection and sherlock's rules, so later sessions see them without reading this guide first. It replaces its own section when run again, and leaves the rest of the file alone. Tell the user which file it changed: `data.file` names it.
+It writes a short section to the project's AGENTS.md or CLAUDE.md, naming the connections whose `directory` is the project and sherlock's rules, so later sessions see them without reading this guide first. It replaces its own section when run again, and leaves the rest of the file alone. Tell the user which file it changed: `data.file` names it.
 
 ## Tunnelled Connections
 

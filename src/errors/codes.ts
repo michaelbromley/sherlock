@@ -22,8 +22,8 @@ export const ERROR_CODES = {
         details: ['flag'],
     },
     CONNECTION_REQUIRED: {
-        meaning: 'No -c, -u or connection matching the current directory.',
-        details: [],
+        meaning: 'No -c or -u. The fix names any connection set up for the current directory.',
+        details: ['candidates'],
     },
     CONNECTION_NOT_FOUND: {
         meaning: '-c names a connection that is not configured.',

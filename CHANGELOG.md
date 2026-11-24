@@ -31,6 +31,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - PostgreSQL now runs on the `postgres` package, MySQL on `mysql2` and SQLite on `bun:sqlite`, instead of Bun's built-in client, which reports no column names or types
 - A SQLite file that does not exist is `NOT_FOUND`, instead of being created empty
 - **Removed:** the hidden `connections`, `test` and `init` commands. Use `connection list`, `doctor` and `manage`
+- **A connection is no longer picked by the current directory.** Every command names its connection with `-c` or `-u`, as the skill always told agents to. Without one, `CONNECTION_REQUIRED`'s fix names the connections whose `directory` is the current project. `directory` stays: `--url-env` reads that project's `.env`, and `agents-md` names its connections. A relative `directory` saved by 1.x is ignored
 - `connection add --url-env VAR` takes the whole connection URL from a variable, such as a project's `DATABASE_URL`, storing only its name. With `--directory`, the variable is read from that project's `.env` first, then the environment, so an agent can set up a local project's database with no password to type
 - `introspect` no longer fails with `INTERNAL` on a connection whose name has a hyphen, such as `corner-shop`
 - A refused connection to this machine says the database isn't running, rather than suggesting a tunnel, and says a host name doesn't resolve only when it doesn't. `doctor` no longer suggests running `doctor`

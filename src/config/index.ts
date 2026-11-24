@@ -744,38 +744,43 @@ async function buildResolvedConnection(
 }
 
 /**
- * Auto-detect a connection based on the current working directory.
- * If cwd is inside a connection's configured `directory`, returns that connection name.
- * If multiple connections match, picks the most specific (longest path).
- * Returns null if no match found.
+ * The connections set up for a project directory: those whose `directory` is
+ * it, contains it, or is inside it (one app of a monorepo), sorted by name.
+ * Paths are compared through symlinks. A relative `directory`, which 1.x could
+ * store, has no fixed place and is skipped.
  */
-export function detectConnectionFromCwd(configPath?: string): string | null {
-    let config: SherlockConfig;
+export function connectionsForDirectory(config: SherlockConfig, projectDir: string): string[] {
+    const project = realDirectory(projectDir);
+    const within = (inner: string, outer: string) => inner === outer || inner.startsWith(outer + path.sep);
+    return sortConnectionNames(
+        Object.entries(config.connections)
+            .filter(([, conn]) => {
+                if (typeof conn.directory !== 'string' || !path.isAbsolute(conn.directory)) return false;
+                const dir = realDirectory(conn.directory);
+                return within(project, dir) || within(dir, project);
+            })
+            .map(([name]) => name)
+    );
+}
+
+/**
+ * CONNECTION_REQUIRED, naming the connections set up for the current
+ * directory when there are any. A connection is never picked for the caller:
+ * a command always names the database it reads.
+ */
+export function connectionRequiredError(message: string, configPath?: string, action = 'Pass -c <name>'): SherlockError {
+    let candidates: string[] = [];
     try {
-        config = loadConfigFile(configPath);
+        candidates = connectionsForDirectory(loadConfigFile(configPath), process.cwd());
     } catch {
-        return null;
+        // No readable config: nothing to suggest
     }
-
-    // Both through symlinks, so a directory saved as /tmp/x matches /private/tmp/x
-    const cwd = realDirectory(process.cwd());
-    let bestMatch: string | null = null;
-    let bestLength = 0;
-
-    for (const [name, conn] of Object.entries(config.connections)) {
-        if (!conn.directory) continue;
-
-        const resolved = realDirectory(conn.directory);
-        // Check if cwd is the directory itself or a subdirectory
-        if (cwd === resolved || cwd.startsWith(resolved + path.sep)) {
-            if (resolved.length > bestLength) {
-                bestMatch = name;
-                bestLength = resolved.length;
-            }
-        }
-    }
-
-    return bestMatch;
+    const fix = candidates.length === 1
+        ? `${action.replace('<name>', candidates[0])}: "${candidates[0]}" is set up for this directory.`
+        : candidates.length > 1
+            ? `${action}. Set up for this directory: ${candidates.join(', ')}.`
+            : `${action} (see: sherlock connection list)${action.startsWith('Pass') ? ' or -u <url>' : ''}.`;
+    return new SherlockError('CONNECTION_REQUIRED', message, { fix, details: { candidates } });
 }
 
 /**

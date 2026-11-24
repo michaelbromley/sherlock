@@ -12,8 +12,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { DB_TYPES, type DbType } from './db-types';
 import type { SherlockConfig } from './config/types';
-import { summarizeConnection } from './config/index';
-import { realDirectory } from './config/paths';
+import { connectionsForDirectory, summarizeConnection } from './config/index';
 
 export const SECTION_START = '<!-- sherlock:start -->';
 export const SECTION_END = '<!-- sherlock:end -->';
@@ -31,21 +30,10 @@ export interface ProjectConnection {
     type: DbType;
 }
 
-/**
- * The connections that belong to a project: those whose `directory` is the
- * project, contains it, or is inside it (one app of a monorepo).
- */
+/** The connections set up for a project, with their types */
 export function projectConnections(config: SherlockConfig, projectDir: string): ProjectConnection[] {
-    const project = realDirectory(projectDir);
-    const within = (inner: string, outer: string) => inner === outer || inner.startsWith(outer + path.sep);
-    return Object.entries(config.connections)
-        .filter(([, conn]) => {
-            if (!conn.directory) return false;
-            const dir = realDirectory(conn.directory);
-            return within(project, dir) || within(dir, project);
-        })
-        .map(([name, conn]) => ({ name, type: summarizeConnection(name, conn).type }))
-        .sort((a, b) => a.name.localeCompare(b.name));
+    return connectionsForDirectory(config, projectDir)
+        .map((name) => ({ name, type: summarizeConnection(name, config.connections[name]).type }));
 }
 
 /** The section's text, markers included */

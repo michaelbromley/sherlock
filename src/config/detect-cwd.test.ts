@@ -1,61 +1,91 @@
 import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
+import { spawnSync } from 'node:child_process';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { clearConfigCache, detectConnectionFromCwd } from './index';
+import { connectionsForDirectory } from './index';
 import { realDirectory } from './paths';
+import type { SherlockConfig } from './types';
 
 /**
- * Picking a connection by its `directory` when the same place has two names,
- * as /tmp and /private/tmp do on macOS.
+ * The connections set up for a project directory. They are suggested in
+ * CONNECTION_REQUIRED's fix, never picked: every command names its connection.
  */
+
+const CLI = path.join(import.meta.dir, '..', 'query-db.ts');
 
 let dir: string;
 let linked: string;
-const originalCwd = process.cwd();
+let project: string;
 
 beforeEach(() => {
     dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'sherlock-cwd-')));
-    fs.mkdirSync(path.join(dir, 'real', 'project', 'src'), { recursive: true });
+    project = path.join(dir, 'real', 'project');
+    fs.mkdirSync(path.join(project, 'src'), { recursive: true });
     linked = path.join(dir, 'linked');
     fs.symlinkSync(path.join(dir, 'real'), linked);
-    clearConfigCache();
 });
 
 afterEach(() => {
-    process.chdir(originalCwd);
     fs.rmSync(dir, { recursive: true, force: true });
-    clearConfigCache();
 });
 
-function writeConfig(directory: string): string {
-    const file = path.join(dir, 'config.json');
-    fs.writeFileSync(file, JSON.stringify({ connections: { shop: { url: 'sqlite:///tmp/x.db', directory } } }));
-    return file;
+function config(connections: Record<string, object>): SherlockConfig {
+    return { connections } as unknown as SherlockConfig;
 }
 
-describe('detectConnectionFromCwd', () => {
-    it('matches a directory saved through a symlink, from inside the real path', () => {
-        const config = writeConfig(path.join(linked, 'project'));
-        process.chdir(path.join(dir, 'real', 'project', 'src'));
-        expect(detectConnectionFromCwd(config)).toBe('shop');
+describe('connectionsForDirectory', () => {
+    it('finds the project, a parent of it, or an app inside it, and not a sibling', () => {
+        const found = connectionsForDirectory(config({
+            shop: { url: 'sqlite:///x.db', directory: project },
+            parent: { url: 'sqlite:///x.db', directory: path.join(dir, 'real') },
+            app: { url: 'sqlite:///x.db', directory: path.join(project, 'apps', 'api') },
+            sibling: { url: 'sqlite:///x.db', directory: path.join(dir, 'real', 'proj') },
+            none: { url: 'sqlite:///x.db' },
+        }), project);
+        expect(found).toEqual(['app', 'parent', 'shop']);
     });
 
-    it('matches a directory saved as the real path, from inside the symlink', () => {
-        const config = writeConfig(path.join(dir, 'real', 'project'));
-        process.chdir(path.join(linked, 'project'));
-        expect(detectConnectionFromCwd(config)).toBe('shop');
+    it('matches through a symlink, in either direction', () => {
+        expect(connectionsForDirectory(config({ shop: { directory: path.join(linked, 'project') } }), path.join(project, 'src'))).toEqual(['shop']);
+        expect(connectionsForDirectory(config({ shop: { directory: project } }), path.join(linked, 'project'))).toEqual(['shop']);
     });
 
-    it('does not match a sibling directory', () => {
-        const config = writeConfig(path.join(dir, 'real', 'proj'));
-        process.chdir(path.join(dir, 'real', 'project'));
-        expect(detectConnectionFromCwd(config)).toBeNull();
+    it('skips a relative directory, which 1.x could store and would match everywhere', () => {
+        expect(connectionsForDirectory(config({ old: { directory: '.' }, rel: { directory: 'project' } }), project)).toEqual([]);
     });
 });
 
 describe('realDirectory', () => {
     it("keeps a missing directory under its parent's real path", () => {
         expect(realDirectory(path.join(linked, 'gone', 'deeper'))).toBe(path.join(dir, 'real', 'gone', 'deeper'));
+    });
+});
+
+describe('a command with no connection', () => {
+    function run(args: string[], connections: Record<string, object>) {
+        const file = path.join(dir, 'config.json');
+        fs.writeFileSync(file, JSON.stringify({ connections }));
+        const result = spawnSync('bun', [CLI, '--config', file, ...args], { encoding: 'utf-8', cwd: path.join(project, 'src') });
+        return { status: result.status, error: JSON.parse(result.stdout).error };
+    }
+
+    it("is never given the project's connection, but its fix names it", () => {
+        const { status, error } = run(['tables'], { shop: { url: 'sqlite:///nope.db', directory: project } });
+        expect(status).toBe(1);
+        expect(error).toMatchObject({ code: 'CONNECTION_REQUIRED', details: { candidates: ['shop'] } });
+        expect(error.fix).toBe('Pass -c shop: "shop" is set up for this directory.');
+    });
+
+    it('lists several, or points to connection list when there are none', () => {
+        const several = run(['tables'], { a: { directory: project }, b: { directory: project } }).error;
+        expect(several.fix).toBe('Pass -c <name>. Set up for this directory: a, b.');
+        const none = run(['tables'], { a: { url: 'sqlite:///x.db' } }).error;
+        expect(none).toMatchObject({ details: { candidates: [] }, fix: 'Pass -c <name> (see: sherlock connection list) or -u <url>.' });
+    });
+
+    it('doctor names it the same way', () => {
+        const { error } = run(['doctor'], { shop: { url: 'sqlite:///nope.db', directory: project } });
+        expect(error.fix).toBe('Run sherlock doctor shop: "shop" is set up for this directory.');
     });
 });

@@ -17,7 +17,7 @@ import {
     listConnections,
     listConnectionSummaries,
     getConnectionConfig,
-    detectConnectionFromCwd,
+    connectionRequiredError,
     loadConfigFile,
     tlsVerifyThroughTunnelWarning,
 } from './config';
@@ -265,16 +265,7 @@ function requireConnection(opts: CliOptions): asserts opts is ConnectedOptions {
     }
 
     if (!opts.connection) {
-        const detected = detectConnectionFromCwd(opts.config);
-        if (detected) {
-            opts.connection = detected;
-            invocation.connection = detected;
-            console.error(`Using connection "${detected}" (matched directory ${process.cwd()})`);
-            return;
-        }
-        throw new SherlockError('CONNECTION_REQUIRED', 'No connection given, and none is set up for this directory.', {
-            fix: 'Pass -c <name> (see: sherlock connection list) or -u <url>.',
-        });
+        throw connectionRequiredError('No connection given.', opts.config);
     }
     invocation.connection = opts.connection;
 }
@@ -1257,12 +1248,10 @@ TUNNEL_DOWN), details.check names the check, and data still holds every check.`)
                 throw usageError('Give the connection either as an argument or with -c, not both.', '--connection');
             }
             const configPath: string | undefined = opts.config;
-            const target = name ?? detectConnectionFromCwd(configPath);
-            if (!target) {
-                throw new SherlockError('CONNECTION_REQUIRED', 'No connection given to check, and none is set up for this directory.', {
-                    fix: 'Give its name: sherlock doctor <name>. See them with: sherlock connection list',
-                });
+            if (!name) {
+                throw connectionRequiredError('No connection given to check.', configPath, 'Run sherlock doctor <name>');
             }
+            const target = name;
             invocation.connection = target;
             const { diagnoseConnection } = await import('./doctor');
             const report = await diagnoseConnection(target, configPath, invocation.warnings);
@@ -1303,7 +1292,7 @@ TUNNEL_DOWN), details.check names the check, and data still holds every check.`)
         .option('--database <name>', 'database name, or file path for sqlite')
         .option('--ssl <mode>', 'off, require, or verify')
         .option('--logging', 'record queries for this connection')
-        .option('--directory <path>', 'auto-select this connection when inside this directory (stored as an absolute path)')
+        .option('--directory <path>', "the project's directory, whose .env --url-env reads, and which agents-md names the connection for (stored as an absolute path)")
         .option('--password-stdin', 'read the password from stdin and store it in the OS keychain')
         .option('--password-prompt', 'ask for the password at a hidden prompt and store it in the OS keychain: for a command an agent gives a person to run')
         .option('--password-env <var>', 'read the password from this environment variable at query time')
