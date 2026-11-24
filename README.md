@@ -111,7 +111,10 @@ Running the install command again also upgrades the binary.
 
 ### Upgrading from 1.x to 2.0
 
-2.0 changes the output of every command, so scripts that parse sherlock's output need converting; see [Output](#output). Agents with the sherlock skill read the new output from `sherlock guide` and need nothing. To keep 1.x output while you convert scripts, stay on the last 1.x release.
+Your connections, keychain passwords, tunnels and cached schemas carry over as they are. Two things need doing:
+
+- **Update the agent skill** with `npx skills update sherlock -g`. The 1.x skill describes the 1.x output and doesn't know about `sherlock guide`. The 2.0 skill sends agents to `sherlock guide`, which always matches the installed binary.
+- **Convert scripts that parse sherlock's output.** Every command's output changes; see [Output](#output). To keep the 1.x output while you convert them, stay on the last 1.x release.
 
 ### Upgrading from 1.7.0 or earlier
 

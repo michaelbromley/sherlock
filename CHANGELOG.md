@@ -11,7 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### 2.0: one output contract
 
-**Every command's output changes.** Scripts and prompts that parse sherlock's output need converting; agents using the skill read the new output from `sherlock guide`. There is no flag that restores the 1.x output: stay on the last 1.x release until your scripts are converted.
+**Every command's output changes.** Scripts and prompts that parse sherlock's output need converting. Update the agent skill with `npx skills update sherlock -g`: the 2.0 skill has agents read the new output from `sherlock guide`. There is no flag that restores the 1.x output: stay on the last 1.x release until your scripts are converted.
 
 - Every command prints one JSON object on stdout, on one line: `{ ok, data, error, warnings, meta }`. The exit code follows `ok`: 0, 1, or 2 for a usage error. Errors move from stderr to stdout. `meta.contract` is `2`
 - Every failure has a stable `error.code`, such as `AUTH_FAILED`, `TUNNEL_DOWN`, `QUERY_FAILED` or `QUERY_REFUSED`, with a `message`, a `fix` and `details`. `sherlock guide` lists every code, generated from the code itself
