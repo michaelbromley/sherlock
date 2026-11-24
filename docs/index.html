@@ -7,6 +7,7 @@
 <meta name="description" content="Sherlock gives AI agents read-only access to PostgreSQL, MySQL/MariaDB, SQL Server, SQLite and Redis. One binary for macOS, Linux x64 and Linux arm64.">
 <meta name="theme-color" content="#1a1612">
 <meta property="og:type" content="website">
+<meta property="og:url" content="https://sherlock.michlbrmly.dev/">
 <meta property="og:site_name" content="Sherlock">
 <meta property="og:title" content="Sherlock: read-only database access for AI agents">
 <meta property="og:description" content="Sherlock gives AI agents read-only access to PostgreSQL, MySQL/MariaDB, SQL Server, SQLite and Redis.">
@@ -242,7 +243,7 @@ code { font: 0.86em var(--mono); color: var(--text); white-space: nowrap; }
 
     <!-- handles:start -->
     <ul class="handles">
-      <li><b>Read-only.</b> Writes are blocked, by sherlock and by the database.</li>
+      <li><b>Read-only.</b> Every query is checked, and writes are blocked.</li>
       <li><b>No runaway queries.</b> Slow queries time out, and huge tables aren’t pulled in full.</li>
       <li><b>Small results.</b> Compact output that won’t fill your agent’s context.</li>
       <li><b>Connections and tunnels.</b> Saved connections, passwords in your keychain, and tunnels opened for you.</li>
@@ -320,7 +321,7 @@ code { font: 0.86em var(--mono); color: var(--text); white-space: nowrap; }
   <section class="block" aria-labelledby="paranoid">
     <h2 id="paranoid">Built paranoid</h2>
     <ul class="guards">
-      <li><b>Read-only at two levels.</b> Sherlock blocks writes, and PostgreSQL and MySQL refuse them too.</li>
+      <li><b>Read-only at two levels.</b> Sherlock blocks writes, and PostgreSQL, MySQL and SQLite refuse them too.</li>
       <li><b>Passwords stay hidden.</b> Kept in your OS keychain, never shown to your agent.</li>
       <li><b>Nothing in the background.</b> No server, no telemetry.</li>
       <li><b>Safe with any repo.</b> A cloned project’s config can’t make sherlock run commands.</li>
