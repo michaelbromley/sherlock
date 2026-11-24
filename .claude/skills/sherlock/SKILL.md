@@ -18,7 +18,7 @@ Before the first sherlock command in a session, run:
 sherlock guide
 ```
 
-It prints how to use the installed version: querying, setting up connections, tunnels, `doctor`, and the read-only rules. It is built into the binary, so it always matches the commands that binary has. Follow it over anything you remember about sherlock. `sherlock guide transfer` covers moving connections to another machine. For every flag of a command, run `sherlock <command> --help`.
+It prints how to use the installed version: the output, the error codes, querying, and the read-only rules. It is built into the binary, so it always matches the commands that binary has. Follow it over anything you remember about sherlock. `sherlock guide setup` covers setting up a connection, tunnels and `doctor`, and `sherlock guide transfer` moving connections to another machine. For every flag of a command, run `sherlock <command> --help`.
 
 If `sherlock guide` fails with "unknown command 'guide'", the binary predates the guide. Tell the user once that `sherlock update` brings it up to date, and meanwhile work from `sherlock --help` and `sherlock <command> --help`.
 

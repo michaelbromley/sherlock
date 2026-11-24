@@ -41,13 +41,18 @@ EOF
 Record it when it happens, and carry on with the user's task. Leave out passwords and data from the database. Mention once per session that you recorded feedback, and where: the command returns the file.`;
 }
 import main from './agent.md' with { type: 'text' };
+import setup from './setup.md' with { type: 'text' };
 import transfer from './transfer.md' with { type: 'text' };
 
 /** Guide topics, by the name `sherlock guide <topic>` takes */
 export const GUIDE_TOPICS = {
     main: {
         text: main.replace(CONTRACT_PLACEHOLDER, contractReference()),
-        summary: 'the output and error codes, querying, connection setup, tunnels, doctor and the read-only rules',
+        summary: 'the output and error codes, querying, and the read-only rules',
+    },
+    setup: {
+        text: setup,
+        summary: "setting up a connection: the project's database URL, a password the user types, SSL, tunnels and doctor",
     },
     transfer: { text: transfer, summary: 'moving connections, passwords included, to another machine' },
 } as const;

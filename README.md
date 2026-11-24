@@ -564,7 +564,8 @@ sherlock -c <conn> command GET mykey   # Any read-only Redis command
 sherlock manage               # Connection manager (add, edit, delete, test, keychain, tunnel)
 sherlock connection list      # List connections and their targets
 sherlock doctor <conn>        # Check a connection step by step
-sherlock guide [topic]        # Instructions for AI agents (topics: transfer)
+sherlock guide [topic]        # Instructions for AI agents (topics: setup, transfer)
+sherlock agents-md            # Add a section about sherlock to the project's AGENTS.md or CLAUDE.md
 sherlock connection add <n>   # Add a connection non-interactively (see --help)
 sherlock update               # Update the binary to the latest release (--yes outside a terminal)
 sherlock tunnel status        # Show running tunnels
@@ -624,7 +625,17 @@ npx skills add michaelbromley/sherlock -g          # choose agents interactively
 npx skills add michaelbromley/sherlock -g -a codex # or name them
 ```
 
-The skill expects `sherlock` on your PATH and says so in its `compatibility` field. It is deliberately short: it tells the agent when to use sherlock, and to start by running `sherlock guide`, which prints the full instructions for agents. The guide is built into the binary, so it always describes the commands the installed version has, even when the skill and the binary were installed or updated at different times. `sherlock guide transfer` covers moving connections between machines. The guide's text lives in [src/guide](src/guide).
+The skill expects `sherlock` on your PATH and says so in its `compatibility` field. It is deliberately short: it tells the agent when to use sherlock, and to start by running `sherlock guide`, which prints the full instructions for agents. The guide is built into the binary, so it always describes the commands the installed version has, even when the skill and the binary were installed or updated at different times. `sherlock guide setup` covers setting up a connection, and `sherlock guide transfer` moving connections between machines. The guide's text lives in [src/guide](src/guide).
+
+### In a project
+
+An agent reads the project's AGENTS.md or CLAUDE.md in every session, but reads the skill only when it decides to. Run this in a project to add a short section about sherlock to one of them:
+
+```bash
+sherlock agents-md
+```
+
+It names the connections whose `--directory` is the project, and the rules: read the guide first, sherlock is read-only and no writes by other means, and never handle a password. It writes CLAUDE.md when the project has one that doesn't bring in AGENTS.md, and AGENTS.md otherwise; `--file` picks another. Running it again replaces only its own section. The guide has agents run it after setting up a project's connection.
 
 ## Demo Database
 

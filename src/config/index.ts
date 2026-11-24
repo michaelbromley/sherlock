@@ -66,7 +66,7 @@ export function loadConfigFile(configPath?: string, warnings: WarningSink = stde
             `${path.join(getConfigDir(), 'config.json')} (user config), or the file named by --config ` +
             `or the SHERLOCK_CONFIG environment variable.`,
             {
-                fix: "Add a connection with 'sherlock connection add <name> ...' (see --help), or run 'sherlock manage'.",
+                fix: "Add a connection with 'sherlock connection add <name> ...': 'sherlock guide setup' shows how. Or run 'sherlock manage'.",
                 details: { searched: discoveredConfigs().map((candidate) => candidate.path) },
             }
         );
@@ -157,7 +157,7 @@ export function getConnectionConfig(
         throw new SherlockError('CONNECTION_NOT_FOUND', `Connection "${connectionName}" not found in config.`, {
             fix: available.length > 0
                 ? `Use one of: ${available.join(', ')}.`
-                : "The config has no connections. Add one with 'sherlock connection add <name> ...'.",
+                : "The config has no connections. Add one with 'sherlock connection add <name> ...': 'sherlock guide setup' shows how.",
             details: { connection: connectionName, available },
         });
     }

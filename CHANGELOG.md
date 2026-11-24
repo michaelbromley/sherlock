@@ -35,6 +35,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - In a pre-release, `sherlock guide` asks agents to record any problem with sherlock using `sherlock feedback "<summary>" --details -`. Entries go to `feedback.md` in sherlock's config directory, with passwords in URLs hidden. `INTERNAL` errors are recorded there on their own, with their stack trace
 - `--config` or `SHERLOCK_CONFIG` pointing at a directory is `CONFIG_NOT_FOUND`, not `INTERNAL`
 - The guide and skill tell agents not to change data by other means, such as `psql` or credentials found in the project, unless the user asks for it that way
+- `sherlock agents-md` writes a short section to the project's AGENTS.md or CLAUDE.md, naming the project's connections and the rules agents must follow. Agents read that file in every session, so they see the rules even when they don't open the skill. Running it again replaces only its own section
+- `sherlock guide` is about a third smaller. Setting up a connection, tunnels and `doctor` moved to `sherlock guide setup`, which an agent reads only when it sets one up
 - `connection add --password-prompt` asks for the password at a hidden prompt and stores it in the keychain. An agent can set up a connection from the conversation and give you one command to run: you type only the password, which it never sees
 
 ### Added
