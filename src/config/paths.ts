@@ -219,3 +219,18 @@ export function ensureTunnelsDir(): void {
         fs.mkdirSync(tunnelsDir, { recursive: true, mode: 0o700 });
     }
 }
+
+/**
+ * A directory's real path, through symlinks, so that /tmp and /private/tmp on
+ * macOS compare as the same place. A directory that does not exist keeps its
+ * nearest existing parent's real path.
+ */
+export function realDirectory(dir: string): string {
+    const resolved = path.resolve(dir);
+    try {
+        return fs.realpathSync(resolved);
+    } catch {
+        const parent = path.dirname(resolved);
+        return parent === resolved ? resolved : path.join(realDirectory(parent), path.basename(resolved));
+    }
+}

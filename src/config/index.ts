@@ -6,6 +6,7 @@ import {
     findConfig,
     getConfigDir,
     getEnvFilePath,
+    realDirectory,
     type ConfigSource,
 } from './paths';
 import { getCredentialResolver } from '../credentials';
@@ -756,14 +757,15 @@ export function detectConnectionFromCwd(configPath?: string): string | null {
         return null;
     }
 
-    const cwd = process.cwd();
+    // Both through symlinks, so a directory saved as /tmp/x matches /private/tmp/x
+    const cwd = realDirectory(process.cwd());
     let bestMatch: string | null = null;
     let bestLength = 0;
 
     for (const [name, conn] of Object.entries(config.connections)) {
         if (!conn.directory) continue;
 
-        const resolved = path.resolve(conn.directory);
+        const resolved = realDirectory(conn.directory);
         // Check if cwd is the directory itself or a subdirectory
         if (cwd === resolved || cwd.startsWith(resolved + path.sep)) {
             if (resolved.length > bestLength) {

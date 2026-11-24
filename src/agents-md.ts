@@ -13,6 +13,7 @@ import * as path from 'path';
 import { DB_TYPES, type DbType } from './db-types';
 import type { SherlockConfig } from './config/types';
 import { summarizeConnection } from './config/index';
+import { realDirectory } from './config/paths';
 
 export const SECTION_START = '<!-- sherlock:start -->';
 export const SECTION_END = '<!-- sherlock:end -->';
@@ -35,23 +36,12 @@ export interface ProjectConnection {
  * project, contains it, or is inside it (one app of a monorepo).
  */
 export function projectConnections(config: SherlockConfig, projectDir: string): ProjectConnection[] {
-    // Through symlinks, so /tmp and /private/tmp on macOS are the same place.
-    // A directory that no longer exists keeps its real parent.
-    const real = (dir: string): string => {
-        const resolved = path.resolve(dir);
-        try {
-            return fs.realpathSync(resolved);
-        } catch {
-            const parent = path.dirname(resolved);
-            return parent === resolved ? resolved : path.join(real(parent), path.basename(resolved));
-        }
-    };
-    const project = real(projectDir);
+    const project = realDirectory(projectDir);
     const within = (inner: string, outer: string) => inner === outer || inner.startsWith(outer + path.sep);
     return Object.entries(config.connections)
         .filter(([, conn]) => {
             if (!conn.directory) return false;
-            const dir = real(conn.directory);
+            const dir = realDirectory(conn.directory);
             return within(project, dir) || within(dir, project);
         })
         .map(([name, conn]) => ({ name, type: summarizeConnection(name, conn).type }))
